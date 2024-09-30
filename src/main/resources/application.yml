@@ -1,0 +1,128 @@
+# server
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+
+
+spring:
+  datasource:
+    url: jdbc:mysql://${DB_URL:mariadb:3306}/skyscape?useUnicode=true&characterEncoding=UTF-8
+    username: ${DB_USER:skyscape}
+    password: ${DB_PASS:skyscape!!}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: blogHikariCP
+      connection-timeout: 30000
+      minimum-idle: 10
+      maximum-pool-size: 20
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      auto-commit: true
+      leak-detection-threshold: 5000
+  jmx:
+    default-domain: blog
+  jpa:
+    properties:
+      hibernate:
+        show_sql: true
+        use_sql_comments: true
+        format_sql: true
+        type: trace
+        release_mode: AFTER_TRANSACTION
+    hibernate:
+      ddl-auto: validate
+      naming.physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+  servlet:
+    multipart:
+      max-file-size: 1GB
+      max-request-size: 1GB
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: false
+    serialization:
+      indent-output: true
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      timeout: 3600
+
+#Configure Mybatis
+mybatis:
+  type-aliases-package: kr.hvy.blog.module
+  mapper-locations: classpath:mybatis-mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    call-setters-on-nulls: true
+    jdbc-type-for-null: NULL
+
+# log
+logging:
+  level:
+    org:
+      springframework.web: ERROR
+      hibernate.SQL: TRACE
+      hibernate.type: TRACE
+      mybatis: DEBUG
+    com:
+      zaxxer.hikari: ERROR
+      zaxxer.hikari.HikariConfig: DEBUG
+    kr.hvy.blog:
+      service: TRACE
+      controller: TRACE
+      security: ERROR
+      repository: TRACE
+      mapper: TRACE
+    io.github.motolies: DEBUG
+  logback:
+    rollingpolicy:
+      max-history: 7
+      max-size: 10MB
+
+# jwt
+jwt:
+  header:
+    name: Authorization
+    prefix: Bearer
+  secret: ${JWT_SECRET:jwt_secret_key!!@@longlongKey1234}
+  expiration: 31449600
+  refresh:
+    expiration: 31449600
+
+# file
+path.upload: ${FILE_PATH:${user.home}/skyscape/file}
+
+# springdoc
+springdoc:
+  default-consumes-media-type: application/json
+  default-produces-media-type: application/json
+  swagger-ui:
+    path: /swagger-ui
+
+# slack
+slack:
+  token: ${SLACK_BOT_TOKEN:xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx}
+
+
+# scheduler
+scheduler:
+  public-ip:
+    lock-name: PUBLIC-IP-TEST
+    cron-expression: "*/10 * * * * ?"
+  ppomppu:
+    lock-name: PPOMPPU-TEST
+    cron-expression: "*/10 * * * * ?"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+# scheduler
+scheduler:
+  public-ip:
+    lock-name: PUBLIC-IP-PROD
+    cron-expression: "0 * * * * ?"
+  ppomppu:
+    lock-name: PPOMPPU-PROD
+    cron-expression: "* */10 * * * ?"

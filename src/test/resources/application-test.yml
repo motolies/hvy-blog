@@ -1,0 +1,21 @@
+# H2 Database 설정
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: create-drop  # 테스트 후 데이터베이스 초기화
+  data:
+    redis: # Redis 설정
+      host: localhost
+      port: 6379
+      database: 0
+  sql:
+    init:
+      platform: h2

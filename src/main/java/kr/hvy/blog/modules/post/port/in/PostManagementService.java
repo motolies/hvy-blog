@@ -2,26 +2,23 @@ package kr.hvy.blog.modules.post.port.in;
 
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;
+import kr.hvy.blog.modules.post.domain.mapper.PostMapper;
 import kr.hvy.blog.modules.post.domain.model.Post;
-import kr.hvy.blog.modules.post.mapper.PostMapper;
+import kr.hvy.blog.modules.post.port.out.PostManagementPort;
 import kr.hvy.blog.modules.post.usecase.PostManagementUseCase;
-import org.springframework.stereotype.Service;
+import kr.hvy.common.layer.UseCase;
+import lombok.RequiredArgsConstructor;
 
-@Service
+@UseCase
+@RequiredArgsConstructor
 public class PostManagementService implements PostManagementUseCase {
 
-  // TODO : port out 필요
-
+  private final PostManagementPort postManagementPort;
 
   @Override
   public PostResponse create(PostCreate createDto) {
-
     Post post = PostMapper.toDomain(createDto);
-    // TODO : output port로 저장 시도
-
-
-    // TODO : 저장 후 dto 변환
-
-    return PostMapper.toResponse(post);
+    Post savedPost = postManagementPort.create(post);
+    return PostMapper.toResponse(savedPost);
   }
 }

@@ -15,7 +15,7 @@ public class Post {
    * id, status를 유니크로 사용할 예정
    */
 
-  int id;
+  Long id;
   PostStatus status;
   String subject;
   String body;

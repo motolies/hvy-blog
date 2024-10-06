@@ -9,7 +9,7 @@ import lombok.Data;
 @Builder
 public class PostResponse {
 
-  int id;
+  Long id;
   PostStatus status;
   String subject;
   String body;

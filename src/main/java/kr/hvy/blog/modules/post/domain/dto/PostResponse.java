@@ -1,0 +1,21 @@
+package kr.hvy.blog.modules.post.domain.dto;
+
+import kr.hvy.blog.modules.post.domain.code.PostStatus;
+import kr.hvy.common.domain.vo.CreateUpdateDate;
+import lombok.Builder;
+import lombok.Data;
+
+@Data
+@Builder
+public class PostResponse {
+
+  int id;
+  PostStatus status;
+  String subject;
+  String body;
+  String categoryId;
+  boolean isPublic;
+  boolean isMain;
+  int viewCount;
+  CreateUpdateDate createUpdateDate;
+}

@@ -3,13 +3,12 @@ server:
   port: ${PORT:8080}
   forward-headers-strategy: framework
 
-
 spring:
   datasource:
-    url: jdbc:mysql://${DB_URL:mariadb:3306}/skyscape?useUnicode=true&characterEncoding=UTF-8
-    username: ${DB_USER:skyscape}
-    password: ${DB_PASS:skyscape!!}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:h2:file:~/h2db;AUTO_SERVER=true
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: test
     hikari:
       pool-name: blogHikariCP
       connection-timeout: 30000
@@ -19,6 +18,10 @@ spring:
       max-lifetime: 1800000
       auto-commit: true
       leak-detection-threshold: 5000
+  h2:
+    console:
+      enabled: true  # H2 콘솔 활성화
+      path: /h2-console
   jmx:
     default-domain: blog
   jpa:
@@ -30,8 +33,9 @@ spring:
         type: trace
         release_mode: AFTER_TRANSACTION
     hibernate:
-      ddl-auto: validate
-      naming.physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+      ddl-auto: create-drop
+      naming:
+        physical-strategy: kr.hvy.blog.infra.config.HvyPhysicalNamingStrategy
   servlet:
     multipart:
       max-file-size: 1GB

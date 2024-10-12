@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.post.application.port.out;
 
-import kr.hvy.blog.modules.post.domain.model.Post;
+import kr.hvy.blog.modules.post.domain.Post;
 
 public interface PostManagementPort {
 

@@ -2,8 +2,8 @@ package kr.hvy.blog.modules.post.adapter.out;
 
 import kr.hvy.blog.modules.post.adapter.out.persistence.JpaPostRepository;
 import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
-import kr.hvy.blog.modules.post.domain.mapper.PostMapper;
-import kr.hvy.blog.modules.post.domain.model.Post;
+import kr.hvy.blog.modules.post.domain.PostMapper;
+import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
 import kr.hvy.common.layer.OutputAdapter;
 import lombok.RequiredArgsConstructor;

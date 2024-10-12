@@ -4,8 +4,8 @@ import kr.hvy.blog.modules.post.application.port.in.PostManagementUseCase;
 import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;
-import kr.hvy.blog.modules.post.domain.mapper.PostMapper;
-import kr.hvy.blog.modules.post.domain.model.Post;
+import kr.hvy.blog.modules.post.domain.PostMapper;
+import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.common.layer.UseCase;
 import lombok.RequiredArgsConstructor;
 

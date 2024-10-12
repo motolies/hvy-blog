@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.post.domain.model;
+package kr.hvy.blog.modules.post.domain;
 
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import kr.hvy.common.domain.vo.CreateUpdateDate;

@@ -5,7 +5,7 @@ import org.hibernate.boot.model.naming.PhysicalNamingStrategy;
 import org.hibernate.engine.jdbc.env.spi.JdbcEnvironment;
 import org.springframework.stereotype.Component;
 
-@Component
+//@Component
 public class HvyPhysicalNamingStrategy implements PhysicalNamingStrategy {
 
   private static final String TABLE_PREFIX = "tb_";

@@ -19,7 +19,7 @@ import lombok.NoArgsConstructor;
 import lombok.With;
 
 @Entity
-@Table(name = "posts", uniqueConstraints = {
+@Table(name = "post", uniqueConstraints = {
     @UniqueConstraint(columnNames = {"id", "status"})
 })
 @Data

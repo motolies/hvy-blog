@@ -12,13 +12,13 @@ import lombok.RequiredArgsConstructor;
 @UseCase
 @RequiredArgsConstructor
 public class PostManagementService implements PostManagementUseCase {
-
+  private final PostMapper postMapper;
   private final PostManagementPort postManagementPort;
 
   @Override
   public PostResponse create(PostCreate createDto) {
-    Post post = PostMapper.toDomain(createDto);
+    Post post = postMapper.toDomain(createDto);
     Post savedPost = postManagementPort.create(post);
-    return PostMapper.toResponse(savedPost);
+    return postMapper.toResponse(savedPost);
   }
 }

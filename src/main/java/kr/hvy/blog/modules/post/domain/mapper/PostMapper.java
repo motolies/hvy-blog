@@ -1,58 +1,29 @@
 package kr.hvy.blog.modules.post.domain.mapper;
 
+import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;
-import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
 import kr.hvy.blog.modules.post.domain.model.Post;
-import kr.hvy.common.domain.mapper.CreateUpdateDateMapper;
+import org.mapstruct.Mapper;
+import org.mapstruct.ObjectFactory;
+import org.mapstruct.factory.Mappers;
 
-public class PostMapper {
+@Mapper(componentModel = "spring")
+public interface PostMapper {
 
-  public static Post toDomain(PostCreate postCreate) {
-    return Post.builder()
-        .status(postCreate.getStatus())
-        .subject(postCreate.getSubject())
-        .body(postCreate.getBody())
-        .categoryId(postCreate.getCategoryId())
-        .build();
-  }
+  PostMapper INSTANCE = Mappers.getMapper(PostMapper.class);
 
-  public static Post toDomain(PostEntity postEntity) {
-    return Post.builder()
-        .id(postEntity.getId())
-        .status(postEntity.getStatus())
-        .subject(postEntity.getSubject())
-        .body(postEntity.getBody())
-        .categoryId(postEntity.getCategoryId())
-        .isPublic(postEntity.isPublic())
-        .isMain(postEntity.isMain())
-        .createUpdateDate(CreateUpdateDateMapper.toDomain(postEntity.getCreateUpdateDate()))
-        .build();
-  }
+  // 매핑 메서드 정의
+  Post toDomain(PostCreate postCreate);
 
-  public static PostEntity toEntity(Post post) {
-    return PostEntity.builder()
-        .id(post.getId())
-        .status(post.getStatus())
-        .subject(post.getSubject())
-        .body(post.getBody())
-        .categoryId(post.getCategoryId())
-        .isPublic(post.isPublic())
-        .isMain(post.isMain())
-        .viewCount(post.getViewCount())
-        .createUpdateDate(CreateUpdateDateMapper.toEntity(post.getCreateUpdateDate()))
-        .build();
-  }
+  Post toDomain(PostEntity postEntity);
 
-  public static PostResponse toResponse(Post post) {
-    return PostResponse.builder()
-        .id(post.getId())
-        .status(post.getStatus())
-        .body(post.getBody())
-        .subject(post.getSubject())
-        .categoryId(post.getCategoryId())
-        .isMain(post.isMain())
-        .createUpdateDate(post.getCreateUpdateDate())
-        .build();
+  PostEntity toEntity(Post post);
+
+  PostResponse toResponse(Post post);
+
+  @ObjectFactory
+  default Post.PostBuilder createPostBuilder() {
+    return Post.builder();
   }
 }

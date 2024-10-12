@@ -12,11 +12,12 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PostManagementAdapter implements PostManagementPort {
 
+  private final PostMapper postMapper;
   private final JpaPostRepository jpaPostRepository;
 
   @Override
   public Post create(Post post) {
-    PostEntity postEntity = jpaPostRepository.save(PostMapper.toEntity(post));
-    return PostMapper.toDomain(postEntity);
+    PostEntity postEntity = jpaPostRepository.save(postMapper.toEntity(post));
+    return postMapper.toDomain(postEntity);
   }
 }

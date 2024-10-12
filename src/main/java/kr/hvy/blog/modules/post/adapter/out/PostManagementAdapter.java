@@ -1,10 +1,10 @@
 package kr.hvy.blog.modules.post.adapter.out;
 
-import kr.hvy.blog.modules.post.adapter.out.persistence.PostRepository;
-import kr.hvy.blog.modules.post.domain.entity.PostEntity;
+import kr.hvy.blog.modules.post.adapter.out.persistence.JpaPostRepository;
+import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
 import kr.hvy.blog.modules.post.domain.mapper.PostMapper;
 import kr.hvy.blog.modules.post.domain.model.Post;
-import kr.hvy.blog.modules.post.port.out.PostManagementPort;
+import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
 import kr.hvy.common.layer.OutputAdapter;
 import lombok.RequiredArgsConstructor;
 
@@ -12,11 +12,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PostManagementAdapter implements PostManagementPort {
 
-  private final PostRepository postRepository;
+  private final JpaPostRepository jpaPostRepository;
 
   @Override
   public Post create(Post post) {
-    PostEntity postEntity = postRepository.save(PostMapper.toEntity(post));
+    PostEntity postEntity = jpaPostRepository.save(PostMapper.toEntity(post));
     return PostMapper.toDomain(postEntity);
   }
 }

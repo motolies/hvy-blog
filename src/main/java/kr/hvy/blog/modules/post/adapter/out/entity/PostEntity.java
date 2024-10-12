@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.post.domain.entity;
+package kr.hvy.blog.modules.post.adapter.out.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
@@ -12,7 +12,6 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import kr.hvy.common.domain.embeddable.CreateUpdateDateEntity;
-import kr.hvy.common.domain.vo.CreateUpdateDate;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

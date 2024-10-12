@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.post.adapter.in;
 
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
-import kr.hvy.blog.modules.post.usecase.PostManagementUseCase;
+import kr.hvy.blog.modules.post.application.port.in.PostManagementUseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;

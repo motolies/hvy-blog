@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.post.usecase;
+package kr.hvy.blog.modules.post.application.port.in;
 
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;

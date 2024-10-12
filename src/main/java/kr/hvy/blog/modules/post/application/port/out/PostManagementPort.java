@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.post.port.out;
+package kr.hvy.blog.modules.post.application.port.out;
 
 import kr.hvy.blog.modules.post.domain.model.Post;
 

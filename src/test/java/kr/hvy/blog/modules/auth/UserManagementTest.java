@@ -2,6 +2,8 @@ package kr.hvy.blog.modules.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Set;
 import kr.hvy.blog.modules.auth.application.port.in.UserManagementUseCase;
@@ -12,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest
@@ -22,7 +25,7 @@ public class UserManagementTest {
   private UserManagementUseCase userManagementUseCase;
 
   @Test
-  @DisplayName("사용자 추가")
+  @DisplayName("사용자 추가 - 성공")
   void createUser() {
     // Given
     UserCreate userCreate = UserCreate.builder()
@@ -42,4 +45,37 @@ public class UserManagementTest {
     assertEquals(true, userResponse.getIsEnabled(), "사용자 상태는 사용가능이어야 합니다.");
   }
 
+  @Test
+  @DisplayName("사용자 추가 - 중복된 사용자 이름으로 실패")
+  void createUserDuplicateUsername() {
+    // Given
+    UserCreate userCreate = UserCreate.builder()
+        .name("name1")
+        .username("duplicateUser")
+        .password("password123")
+        .authorities(Set.of(AuthorityName.ROLE_USER))
+        .build();
+
+    userManagementUseCase.create(userCreate);
+
+    // When & Then
+    UserCreate duplicateUserCreate = UserCreate.builder()
+        .name("name2")
+        .username("duplicateUser")
+        .password("password456")
+        .authorities(Set.of(AuthorityName.ROLE_ADMIN))
+        .build();
+
+    Exception exception = assertThrows(DataIntegrityViolationException.class, () -> {
+      userManagementUseCase.create(duplicateUserCreate);
+    });
+
+    assertEquals(DataIntegrityViolationException.class, exception.getClass(), "중복된 아이디 체크가 예상치 못한 오류에서 생성되었습니다.");
+
+//    DataIntegrityViolationException으로 체크하지 않고 Exception 으로 체크한다면 메시지로도 가능?
+//    Exception ex = assertThrows(Exception.class, () -> {
+//      userManagementUseCase.create(duplicateUserCreate);
+//    });
+//    assertTrue(ex.getMessage().contains("insert") && ex.getMessage().contains("duplicateUser"), "예외 메시지가 중복된 사용자 이름을 포함해야 합니다.");
+  }
 }

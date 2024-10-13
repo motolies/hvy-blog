@@ -19,3 +19,6 @@ spring:
   sql:
     init:
       platform: h2
+
+# jwt
+jwt.secret: ${JWT_SECRET:jwt_secret_key!!@@longlongKey1234}

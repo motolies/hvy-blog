@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.auth.adapter.out;
 
+import jakarta.transaction.Transactional;
 import kr.hvy.blog.modules.auth.adapter.out.entity.AuthorityEntity;
 import kr.hvy.blog.modules.auth.adapter.out.entity.UserEntity;
 import kr.hvy.blog.modules.auth.adapter.out.persistence.JpaAuthorityRepository;
@@ -27,6 +28,7 @@ public class UserManagementAdapter implements UserManagementPort {
   }
 
   @Override
+  @Transactional
   public User create(User user) {
     UserEntity userEntity = userMapper.toEntity(user);
     userEntity.getAuthorities().forEach(tempAuth -> {

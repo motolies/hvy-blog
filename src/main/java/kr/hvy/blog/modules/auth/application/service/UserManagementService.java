@@ -8,7 +8,8 @@ import kr.hvy.blog.modules.auth.domain.UserMapper;
 import kr.hvy.blog.modules.auth.domain.dto.LoginRequest;
 import kr.hvy.blog.modules.auth.domain.dto.UserCreate;
 import kr.hvy.blog.modules.auth.domain.dto.UserResponse;
-import kr.hvy.blog.modules.auth.domain.specification.UserEnableSpecification;
+import kr.hvy.blog.modules.auth.domain.specification.UserCreateSpecification;
+import kr.hvy.blog.modules.auth.domain.specification.UserLoginSpecification;
 import kr.hvy.common.layer.UseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -32,8 +33,8 @@ public class UserManagementService implements UserManagementUseCase, UserDetails
       throw new IllegalArgumentException("Password does not match.");
     }
 
-    UserEnableSpecification userEnableSpecification = new UserEnableSpecification();
-    if(userEnableSpecification.not().isSatisfiedBy(user)){
+    UserLoginSpecification userLoginSpecification = new UserLoginSpecification();
+    if(userLoginSpecification.not().isSatisfiedBy(user)){
       throw new IllegalStateException("사용할 수 없는 사용자 입니다.");
     }
     return userMapper.toResponse(user);
@@ -49,6 +50,10 @@ public class UserManagementService implements UserManagementUseCase, UserDetails
   public UserResponse create(UserCreate createDto) {
     createDto.setPassword(passwordEncoder.encode(createDto.getPassword()));
     User user = userMapper.toDomain(createDto);
+    UserCreateSpecification userCreateSpecification = new UserCreateSpecification();
+    if(userCreateSpecification.not().isSatisfiedBy(user)){
+      throw new IllegalArgumentException("잘못된 파라미터를 사용하여 사용자를 생성할 수 없습니다.");
+    }
     User savedUser = userManagementPort.create(user);
     return userMapper.toResponse(savedUser);
   }

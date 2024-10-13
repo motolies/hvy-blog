@@ -78,4 +78,25 @@ public class UserManagementTest {
 //    });
 //    assertTrue(ex.getMessage().contains("insert") && ex.getMessage().contains("duplicateUser"), "예외 메시지가 중복된 사용자 이름을 포함해야 합니다.");
   }
+
+  // 필수 필드 누락 테스트
+  @Test
+  @DisplayName("사용자 추가 - 필수 필드 누락으로 실패")
+  void createUserMissingFields() {
+    // Given
+    UserCreate userCreate = UserCreate.builder()
+        .name(null)
+        .username("userWithoutName")
+        .password("password123")
+        .authorities(Set.of(AuthorityName.ROLE_USER))
+        .build();
+
+    // When & Then
+    Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+      userManagementUseCase.create(userCreate);
+    });
+
+    assertEquals(IllegalArgumentException.class, exception.getClass(), "사용자 이름은 필수 입니다.");
+
+  }
 }

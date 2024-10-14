@@ -9,4 +9,9 @@ public class UserLoginSpecification implements Specification<User> {
   public boolean isSatisfiedBy(User user) {
     return user.getIsEnabled();
   }
+
+  @Override
+  public String getErrorMessage() {
+    return "로그인 할 수 없는 사용자 입니다.";
+  }
 }

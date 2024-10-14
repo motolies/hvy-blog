@@ -1,5 +1,6 @@
 package kr.hvy.blog.common;
 
+import static kr.hvy.common.specification.Specification.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -62,6 +63,21 @@ public class SpecificationTest {
     // when
     boolean result = userLoginSpecification
         .not()
+        .isSatisfiedBy(user);
+
+    // then
+    assertTrue(result, "명세가 만족해야 합니다.");
+  }
+
+  @Test
+  @DisplayName("and & Not 명세패턴 성공 케이스")
+  public void success_case_and_not() {
+    // given
+    User user = createUserDisable();
+
+    // when
+    boolean result = userCreateSpecification
+        .and(not(userLoginSpecification))
         .isSatisfiedBy(user);
 
     // then

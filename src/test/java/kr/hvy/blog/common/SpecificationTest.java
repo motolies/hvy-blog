@@ -1,5 +1,7 @@
 package kr.hvy.blog.common;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -9,6 +11,7 @@ import kr.hvy.blog.modules.auth.domain.User;
 import kr.hvy.blog.modules.auth.domain.code.AuthorityName;
 import kr.hvy.blog.modules.auth.domain.specification.UserCreateSpecification;
 import kr.hvy.blog.modules.auth.domain.specification.UserLoginSpecification;
+import kr.hvy.common.exception.SpecificationException;
 import kr.hvy.common.specification.Specification;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -69,6 +72,23 @@ public class SpecificationTest {
   }
 
   @Test
+  @DisplayName("isSatisfiedBy가 틀리면 exception 발생 테스트")
+  public void success_case_isSatisfiedBy_exception() {
+    // given
+    User user = createUserDisable();
+
+    // When & Then
+    Exception exception = assertThrows(SpecificationException.class, () -> {
+      userCreateSpecification
+          .and(userLoginSpecification)
+          .validateException(user);
+    }, "예외가 발생해야 합니다.");
+
+    // then
+    assertEquals(SpecificationException.class, exception.getClass(), exception.getMessage());
+  }
+
+  @Test
   @DisplayName("isSatisfiedBy 관계없이 ErrorMessage 수집")
   public void validate_option_case() {
     // given
@@ -77,7 +97,7 @@ public class SpecificationTest {
     // when
     Optional<List<String>> result = userCreateSpecification
         .or(userLoginSpecification)
-        .validateOptional(user);
+        .validateOptionalMessages(user);
 
     // then
     assertTrue(result.get().size() == 1, "하나의 오류메시지만 있어야 합니다.");

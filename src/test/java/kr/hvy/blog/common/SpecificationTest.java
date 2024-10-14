@@ -15,11 +15,8 @@ import kr.hvy.common.exception.SpecificationException;
 import kr.hvy.common.specification.Specification;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 
-@ExtendWith(MockitoExtension.class)
 public class SpecificationTest {
 
   private Specification<User> userCreateSpecification = new UserCreateSpecification();
@@ -75,14 +72,15 @@ public class SpecificationTest {
   @DisplayName("isSatisfiedBy가 틀리면 exception 발생 테스트")
   public void success_case_isSatisfiedBy_exception() {
     // given
-    User user = createUserDisable();
+    User user = createUserNotEnableAndPassword();
 
     // When & Then
     Exception exception = assertThrows(SpecificationException.class, () -> {
       userCreateSpecification
-          .and(userLoginSpecification)
+          .or(userLoginSpecification)
           .validateException(user);
-    }, "예외가 발생해야 합니다.");
+//    }, "예외가 발생해야 합니다.");
+    });
 
     // then
     assertEquals(SpecificationException.class, exception.getClass(), exception.getMessage());
@@ -116,12 +114,11 @@ public class SpecificationTest {
   }
 
   // 사용여부가 없는 사용자
-  private User createUserNotEnable() {
+  private User createUserNotEnableAndPassword() {
     return User.builder()
         .id(1L)
         .name("my name")
         .username("hi")
-        .password("bye")
         .authorities(Set.of(AuthorityName.ROLE_USER))
         .build();
   }

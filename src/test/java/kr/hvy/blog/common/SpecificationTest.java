@@ -14,6 +14,7 @@ import kr.hvy.blog.modules.auth.domain.specification.UserCreateSpecification;
 import kr.hvy.blog.modules.auth.domain.specification.UserLoginSpecification;
 import kr.hvy.common.exception.SpecificationException;
 import kr.hvy.common.specification.Specification;
+import org.apache.commons.lang3.ObjectUtils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +23,28 @@ public class SpecificationTest {
 
   private Specification<User> userCreateSpecification = new UserCreateSpecification();
   private Specification<User> userLoginSpecification = new UserLoginSpecification();
+
+  /**
+   * 테스트를 위한 커스텀 명세 추가
+   */
+  public class CustomMessageSpecification implements Specification<User> {
+
+    private final String customMessage;
+
+    public CustomMessageSpecification(String customMessage) {
+      this.customMessage = customMessage;
+    }
+
+    @Override
+    public boolean isSatisfiedBy(User user) {
+      return ObjectUtils.isNotEmpty(user.getIsEnabled()) ? user.getIsEnabled() : false;
+    }
+
+    @Override
+    public String getErrorMessage() {
+      return "[Error Detail] : " + customMessage;
+    }
+  }
 
 
   @Test
@@ -115,6 +138,38 @@ public class SpecificationTest {
 
     // then
     assertTrue(result.get().size() == 1, "하나의 오류메시지만 있어야 합니다.");
+  }
+
+  @Test
+  @DisplayName("명세패턴의 커스텀 오류 메시지 추가 - validateException")
+  public void custom_message_validateException() {
+    // given
+    User user = createUserDisable();
+    CustomMessageSpecification customMessageSpecification = new CustomMessageSpecification("이건 무조건 안돼!");
+
+    // When & Then
+    Exception exception = assertThrows(SpecificationException.class, () -> {
+      customMessageSpecification
+          .validateException(user);
+    });
+
+    // then
+    assertEquals(SpecificationException.class, exception.getClass(), exception.getMessage());
+  }
+
+  @Test
+  @DisplayName("명세패턴의 커스텀 오류 메시지 추가 - validateOptionalMessages")
+  public void custom_message_validateOptionalMessages() {
+    // given
+    User user = createUserDisable();
+    CustomMessageSpecification customMessageSpecification = new CustomMessageSpecification("이건 무조건 안돼!");
+
+    // when
+    Optional<List<String>> result = customMessageSpecification
+        .validateOptionalMessages(user);
+
+    // then
+    assertEquals(1, result.get().size(), "하나의 오류메시지만 있어야 합니다.");
   }
 
   // 유효한 사용자

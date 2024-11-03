@@ -33,10 +33,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.3'
-    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
     runtimeOnly 'com.mysql:mysql-connector-j'
 
-    implementation 'org.mapstruct:mapstruct:1.6.2'
 
     implementation 'io.hypersistence:hypersistence-utils-hibernate-60:3.8.3'
 
@@ -47,25 +46,39 @@ dependencies {
     implementation 'org.apache.commons:commons-lang3:3.17.0'
     implementation 'org.apache.commons:commons-collections4:4.5.0-M2'
 
+    // redis
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.redisson:redisson-spring-boot-starter:3.38.1'
+
+    // testContainer
+	testImplementation 'org.testcontainers:testcontainers'
+	testImplementation 'org.testcontainers:junit-jupiter'
+
 
     // H2 Database(나중엔 테스트만 남겨야 함)
     runtimeOnly 'com.h2database:h2'
-//	testImplementation 'com.h2database:h2'
 
-    // Testcontainers for Redis (테스트 시에 레디스도 임시 적재할 곳 있어야 함. 테스트 필요)
-//	testImplementation 'org.testcontainers:testcontainers'
-//	testImplementation 'org.testcontainers:junit-jupiter'
-//	testImplementation 'org.testcontainers:redis'
 
+    // lombok
     compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testCompileOnly 'org.projectlombok:lombok'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+
+    // mapstruct
+    implementation 'org.mapstruct:mapstruct:1.6.2'
+    annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.2' // mapstruct가 lombok 뒤에 있어야 함?
+
+
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
     runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
-    annotationProcessor 'org.projectlombok:lombok'
-    annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.2' // mapstruct가 lombok 뒤에 있어야 함?
+
+
     testAnnotationProcessor 'org.mapstruct:mapstruct-processor:1.6.2'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter-test:3.0.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
     testImplementation 'org.springframework.security:spring-security-test'
 
 }

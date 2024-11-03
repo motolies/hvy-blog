@@ -15,7 +15,7 @@ spring:
     redis: # Redis 설정
       host: localhost
       port: 6379
-      database: 0
+      timeout: 3600
   sql:
     init:
       platform: h2

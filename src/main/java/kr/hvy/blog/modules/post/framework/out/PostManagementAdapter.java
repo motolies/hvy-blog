@@ -1,7 +1,7 @@
-package kr.hvy.blog.modules.post.adapter.out;
+package kr.hvy.blog.modules.post.framework.out;
 
-import kr.hvy.blog.modules.post.adapter.out.persistence.JpaPostRepository;
-import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
+import kr.hvy.blog.modules.post.framework.out.persistence.JpaPostRepository;
+import kr.hvy.blog.modules.post.framework.out.entity.PostEntity;
 import kr.hvy.blog.modules.post.domain.PostMapper;
 import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;

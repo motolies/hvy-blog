@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.auth.adapter.in;
+package kr.hvy.blog.modules.auth.framework.in;
 
 import jakarta.servlet.http.HttpServletRequest;
 import kr.hvy.blog.infra.security.CookieProvider;

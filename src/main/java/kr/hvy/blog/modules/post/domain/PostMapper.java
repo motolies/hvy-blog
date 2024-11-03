@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.post.domain;
 
-import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
+import kr.hvy.blog.modules.post.framework.out.entity.PostEntity;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;
 import org.mapstruct.Mapper;

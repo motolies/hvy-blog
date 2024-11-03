@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.post.adapter.in;
+package kr.hvy.blog.modules.post.framework.in;
 
 import kr.hvy.blog.modules.post.application.port.in.PostManagementUseCase;
 import lombok.RequiredArgsConstructor;

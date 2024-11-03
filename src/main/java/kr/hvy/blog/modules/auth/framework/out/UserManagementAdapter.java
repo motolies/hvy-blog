@@ -1,10 +1,10 @@
-package kr.hvy.blog.modules.auth.adapter.out;
+package kr.hvy.blog.modules.auth.framework.out;
 
 import jakarta.transaction.Transactional;
-import kr.hvy.blog.modules.auth.adapter.out.entity.AuthorityEntity;
-import kr.hvy.blog.modules.auth.adapter.out.entity.UserEntity;
-import kr.hvy.blog.modules.auth.adapter.out.persistence.JpaAuthorityRepository;
-import kr.hvy.blog.modules.auth.adapter.out.persistence.JpaUserRepository;
+import kr.hvy.blog.modules.auth.framework.out.entity.AuthorityEntity;
+import kr.hvy.blog.modules.auth.framework.out.entity.UserEntity;
+import kr.hvy.blog.modules.auth.framework.out.persistence.JpaAuthorityRepository;
+import kr.hvy.blog.modules.auth.framework.out.persistence.JpaUserRepository;
 import kr.hvy.blog.modules.auth.application.port.out.UserManagementPort;
 import kr.hvy.blog.modules.auth.domain.User;
 import kr.hvy.blog.modules.auth.domain.UserMapper;

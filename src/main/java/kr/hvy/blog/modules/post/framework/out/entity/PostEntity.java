@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.post.adapter.out.entity;
+package kr.hvy.blog.modules.post.framework.out.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;

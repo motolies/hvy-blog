@@ -17,7 +17,7 @@ import kr.hvy.blog.infra.security.CookieProvider;
 import kr.hvy.blog.infra.security.CustomAccessDeniedHandler;
 import kr.hvy.blog.infra.security.CustomAuthenticationEntryPoint;
 import kr.hvy.blog.infra.security.JwtTokenProvider;
-import kr.hvy.blog.modules.auth.adapter.in.AuthController;
+import kr.hvy.blog.modules.auth.framework.in.AuthController;
 import kr.hvy.blog.modules.auth.application.service.UserManagementService;
 import kr.hvy.blog.modules.auth.domain.code.AuthorityName;
 import kr.hvy.blog.modules.auth.domain.dto.LoginRequest;

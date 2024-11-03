@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.auth.adapter.out.entity;
+package kr.hvy.blog.modules.auth.framework.out.entity;
 
 import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Converter;

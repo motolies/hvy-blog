@@ -4,6 +4,7 @@ import kr.hvy.blog.modules.post.domain.Post;
 
 public interface PostManagementPort {
 
-  Post create(Post post);
+  Post save(Post post);
 
+  Post findById(Long id);
 }

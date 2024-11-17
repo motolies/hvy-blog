@@ -1,6 +1,6 @@
 # server
 server:
-  port: ${PORT:8080}
+  port: ${PORT:9090}
   forward-headers-strategy: framework
 
 spring:

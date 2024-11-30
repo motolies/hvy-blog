@@ -14,9 +14,9 @@ public class Post {
   /**
    * id, status를 유니크로 사용할 예정
    */
-
   Long id;
-  PostStatus status;
+  @Builder.Default
+  PostStatus status = PostStatus.TEMP;
   String subject;
   String body;
   String categoryId;

@@ -13,8 +13,6 @@ import lombok.NoArgsConstructor;
 @Builder
 public class PostCreate {
   @Builder.Default
-  PostStatus status = PostStatus.TEMP;
-  @Builder.Default
   String subject = "";
   @Builder.Default
   String body = "";

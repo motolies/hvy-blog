@@ -4,8 +4,8 @@ import kr.hvy.blog.modules.post.application.port.in.PostManagementUseCase;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostUpdate;
 import lombok.RequiredArgsConstructor;
-import org.apache.commons.lang3.NotImplementedException;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -43,8 +43,11 @@ public class AdminPostController {
   /**
    * 포스트 삭제
    */
-  public ResponseEntity<?> delete(Long postId) {
-    throw new NotImplementedException("Not implemented yet");
+  @DeleteMapping("/{id}")
+  public ResponseEntity<?> delete(Long id) {
+    return ResponseEntity
+        .ok()
+        .body(postManagementUseCase.delete(id));
   }
 
 }

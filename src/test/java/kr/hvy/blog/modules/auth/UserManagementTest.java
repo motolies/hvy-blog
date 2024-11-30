@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.Set;
+import kr.hvy.blog.common.AbstractTestContainers;
 import kr.hvy.blog.modules.auth.application.port.in.UserManagementUseCase;
 import kr.hvy.blog.modules.auth.domain.code.AuthorityName;
 import kr.hvy.blog.modules.auth.domain.dto.UserCreate;
@@ -18,7 +19,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest
 @ActiveProfiles("test")  // 'application-test.yml' 사용
-public class UserManagementTest {
+public class UserManagementTest extends AbstractTestContainers {
 
   @Autowired
   private UserManagementUseCase userManagementUseCase;

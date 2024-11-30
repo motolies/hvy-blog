@@ -7,4 +7,6 @@ public interface PostManagementPort {
   Post save(Post post);
 
   Post findById(Long id);
+
+  void deleteById(Long id);
 }

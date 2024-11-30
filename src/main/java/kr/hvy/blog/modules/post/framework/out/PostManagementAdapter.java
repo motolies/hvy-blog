@@ -1,6 +1,5 @@
 package kr.hvy.blog.modules.post.framework.out;
 
-import java.util.Optional;
 import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
 import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.blog.modules.post.domain.PostMapper;
@@ -28,7 +27,10 @@ public class PostManagementAdapter implements PostManagementPort {
     return jpaPostRepository.findById(id)
         .map(postMapper::toDomain)
         .orElseThrow(() -> new DataNotFoundException("Not Found Post."));
-
   }
 
+  @Override
+  public void deleteById(Long id) {
+    jpaPostRepository.deleteById(id);
+  }
 }

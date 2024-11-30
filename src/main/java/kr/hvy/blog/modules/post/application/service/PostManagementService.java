@@ -33,4 +33,10 @@ public class PostManagementService implements PostManagementUseCase {
     Post savedPost = postManagementPort.save(newPost);
     return postMapper.toResponse(savedPost);
   }
+
+  @Override
+  public Long delete(Long id) {
+    postManagementPort.deleteById(id);
+    return id;
+  }
 }

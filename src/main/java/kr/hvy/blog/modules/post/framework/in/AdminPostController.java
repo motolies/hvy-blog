@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.post.framework.in;
 
 import kr.hvy.blog.modules.post.application.port.in.PostManagementUseCase;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
+import kr.hvy.blog.modules.post.domain.dto.PostPublicRequest;
 import kr.hvy.blog.modules.post.domain.dto.PostUpdate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -49,5 +50,34 @@ public class AdminPostController {
         .ok()
         .body(postManagementUseCase.delete(id));
   }
+
+  /**
+   * 메인 포스트로 지정
+   */
+  @PostMapping("/main/{postId}")
+  public ResponseEntity<?> setMainPost(@PathVariable Long postId) {
+    postManagementUseCase.setMainPost(postId);
+    return ResponseEntity.ok().build();
+  }
+
+  /**
+   * 포스트 공개/비공개 설정
+   */
+  @PostMapping("/public")
+  public ResponseEntity<?> setPublicPost(@RequestBody PostPublicRequest contentPublicRequest) {
+    return ResponseEntity
+        .ok()
+        .body(postManagementUseCase.setPostVisible(contentPublicRequest));
+  }
+
+  /**
+   * todo : 포스트에 태크 추가
+   */
+
+
+  /**
+   * todo : 포스트에 태그 삭제
+   */
+
 
 }

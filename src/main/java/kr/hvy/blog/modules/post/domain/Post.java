@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.post.domain;
 
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
-import kr.hvy.common.domain.vo.CreateUpdateDate;
+import kr.hvy.common.domain.vo.EventLog;
 import lombok.Builder;
 import lombok.Value;
 import lombok.With;
@@ -12,7 +12,7 @@ import lombok.With;
 public class Post {
 
   /**
-   * id, status를 유니크로 사용할 예정
+   * todo : id, status를 유니크로 사용할 예정
    */
   Long id;
   @Builder.Default
@@ -23,7 +23,11 @@ public class Post {
   boolean isPublic;
   boolean isMain;
   int viewCount;
+
   @Builder.Default
-  CreateUpdateDate createUpdateDate = CreateUpdateDate.defaultValues();
+  EventLog created = EventLog.defaultValues();
+
+  @Builder.Default
+  EventLog updated = EventLog.defaultValues();
 
 }

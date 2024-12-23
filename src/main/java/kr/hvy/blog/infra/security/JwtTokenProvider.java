@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import javax.crypto.SecretKey;
 import kr.hvy.blog.modules.auth.domain.SecurityUser;
 import kr.hvy.blog.modules.auth.domain.User;
@@ -59,6 +58,8 @@ public class JwtTokenProvider {
   public String createToken(User user) {
     Map<String, Object> claims = new HashMap<>();
     claims.put("roles", user.getAuthorities().stream().map(AuthorityName::getCode).toArray());
+    claims.put("userId", user.getUsername());
+    claims.put("name", user.getName());
 
     final Date createdDate = new Date();
     final Date expirationDate = new Date(createdDate.getTime() + tokenValidSecond * 1000);
@@ -75,32 +76,27 @@ public class JwtTokenProvider {
 
   private SecretKey getSecretKey(String secret) {
     byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
-    SecretKey secretKey = Keys.hmacShaKeyFor(keyBytes);
-    return secretKey;
+    return Keys.hmacShaKeyFor(keyBytes);
   }
 
   // JWT 토큰에서 인증 정보 조회(DB 조회하지 않고 강제주입)
   public Authentication getAuthenticationWithoutDB(String token) {
-    String userId = getUserHexId(token);
+    String userId = getUserId(token);
+    String loginId = getClaimFromToken(token, claims -> claims.get("userId", String.class));
+    String name = getClaimFromToken(token, claims -> claims.get("name", String.class));
     Set<GrantedAuthority> roles = getAuthoritiesFromToken(token);
     SecurityUser user = SecurityUser.builder()
         .id(Long.parseLong(userId))
+        .username(loginId)
+        .name(name)
         .authorities(roles)
         .build();
     return new UsernamePasswordAuthenticationToken((UserDetails) user, "", roles);
   }
 
-  public Set<AuthorityName> getAuthorityNames(String token) {
-    Function<Claims, ArrayList> func = t -> (ArrayList) t.get("roles");
-    List<String> listAuth = getClaimFromToken(token, func);
-    return listAuth.stream()
-        .map(s -> AuthorityName.valueOf(s.toUpperCase()))
-        .collect(Collectors.toSet());
-  }
-
   public Set<GrantedAuthority> getAuthoritiesFromToken(String token) {
     HashSet<GrantedAuthority> auth = new HashSet<GrantedAuthority>();
-    Function<Claims, ArrayList> func = t -> (ArrayList) t.get("roles");
+    Function<Claims, ArrayList> func = t -> t.get("roles", ArrayList.class);
 
     List<String> listAuth = getClaimFromToken(token, func);
     for (String role : listAuth) {
@@ -110,7 +106,7 @@ public class JwtTokenProvider {
   }
 
 
-  public String getUserHexId(String token) {
+  public String getUserId(String token) {
     return getClaimFromToken(token, Claims::getSubject);
   }
 

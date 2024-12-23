@@ -1,11 +1,12 @@
 package kr.hvy.blog.modules.auth.framework.out.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import io.hypersistence.utils.hibernate.id.Tsid;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
@@ -28,17 +29,17 @@ import lombok.NoArgsConstructor;
 public class AuthorityEntity {
 
   @Id
-  @Tsid
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
-  @Column(name = "NAME", length = 50, unique = true)
+  @Column(name = "name", length = 50, unique = true)
   @Convert(converter = AuthorityNameConverter.class)
   private AuthorityName name;
 
   @JsonIgnore
   @Builder.Default
   @ManyToMany(targetEntity = UserEntity.class, fetch = FetchType.LAZY)
-  @JoinTable(name = "user_authority_map", joinColumns = {@JoinColumn(name = "authority_id")}, inverseJoinColumns = {@JoinColumn(name = "user_id")})
+  @JoinTable(name = "user_authority_map", joinColumns = {@JoinColumn(name = "authorityId")}, inverseJoinColumns = {@JoinColumn(name = "userId")})
   private Set<UserEntity> users = new HashSet<>();
 
 }

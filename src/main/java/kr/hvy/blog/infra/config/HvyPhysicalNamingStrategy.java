@@ -3,7 +3,6 @@ package kr.hvy.blog.infra.config;
 import org.hibernate.boot.model.naming.Identifier;
 import org.hibernate.boot.model.naming.PhysicalNamingStrategy;
 import org.hibernate.engine.jdbc.env.spi.JdbcEnvironment;
-import org.springframework.stereotype.Component;
 
 //@Component
 public class HvyPhysicalNamingStrategy implements PhysicalNamingStrategy {
@@ -12,12 +11,12 @@ public class HvyPhysicalNamingStrategy implements PhysicalNamingStrategy {
 
   @Override
   public Identifier toPhysicalCatalogName(Identifier name, JdbcEnvironment jdbcEnvironment) {
-    return apply(name);
+    return name;
   }
 
   @Override
   public Identifier toPhysicalSchemaName(Identifier name, JdbcEnvironment jdbcEnvironment) {
-    return apply(name);
+    return name;
   }
 
   @Override
@@ -28,21 +27,16 @@ public class HvyPhysicalNamingStrategy implements PhysicalNamingStrategy {
 
   @Override
   public Identifier toPhysicalSequenceName(Identifier name, JdbcEnvironment jdbcEnvironment) {
-    return apply(name);
+    return name;
   }
 
   @Override
   public Identifier toPhysicalColumnName(Identifier name, JdbcEnvironment jdbcEnvironment) {
     // 칼럼명을 파스칼 케이스로 변환
-    return new Identifier(convertToPascalCase(name.getText()), name.isQuoted());
-  }
-
-  private Identifier apply(Identifier name) {
-    if (name == null) {
-      return null;
-    }
+//    return new Identifier(convertToPascalCase(name.getText()), name.isQuoted());
     return name;
   }
+
 
   private String convertToSnakeCase(String name) {
     StringBuilder result = new StringBuilder();

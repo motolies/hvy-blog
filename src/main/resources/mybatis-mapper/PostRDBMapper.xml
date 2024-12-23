@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="kr.hvy.blog.modules.post.framework.out.persistence.mapper.PostRDBMapper">
+
+    <resultMap id="noBodyContent" type="PostNoBodyResponse">
+        <id property="id" column="ID"/>
+        <result property="subject" column="SUBJECT"/>
+        <result property="categoryName" column="CATEGORY_NAME"/>
+        <result property="viewCount" column="VIEW_COUNT"/>
+        <result property="createDate" column="CREATE_DATE"/>
+        <result property="updateDate" column="UPDATE_DATE"/>
+    </resultMap>
+
+    <select id="findBySearchObject" parameterType="SearchObjectDto" resultMap="noBodyContent">
+        SELECT SQL_CALC_FOUND_ROWS
+        C.ID
+        , C.SUBJECT AS SUBJECT
+        , CAT.NAME AS CATEGORY_NAME
+        , C.VIEWCOUNT AS VIEW_COUNT
+        , C.CREATEDATE AS CREATE_DATE
+        , C.UPDATEDATE AS UPDATE_DATE
+        FROM TB_POST AS C
+        LEFT JOIN CATEGORY CAT ON C.CATEGORYID = CAT.ID
+        LEFT JOIN CONTENT_TAG_MAP AS MAP ON MAP.CONTENTID = C.ID
+        WHERE 1 = 1
+        <if test='isAdmin == false'>
+            AND C.ISPUBLIC = 1
+        </if>
+        <if test='obj.categories.size > 0'>
+            AND C.CATEGORYID IN (
+            SELECT ID
+            FROM CATEGORY
+            WHERE
+            <foreach collection="obj.categories" item="category" separator=" OR ">
+                /* TODO : 당장은 양쪽 라이크로 하지만 차후에는 category.id를 가지고 fullpath를 가져온 다음 fullpath로 like 검색을 하자 */
+                CAT.FULLPATH LIKE CONCAT('%/', #{category.id}, '/%')
+            </foreach>
+            )
+        </if>
+        <if test='obj.searchConditionDto.keywords.size > 0'>
+            <if test='obj.searchConditionDto.logic.equals("AND")'>
+                AND
+                <foreach collection="obj.searchConditionDto.keywords" index="index" item="key" open="(" separator=" AND " close=")">
+                    <choose>
+                        <when test='obj.searchType.equals("TITLE")'>
+                            C.SUBJECT LIKE CONCAT('%', #{key.name}, '%')
+                        </when>
+                        <when test='obj.searchType.equals("CONTENT")'>
+                            C.NORMALBODY LIKE CONCAT('%', #{key.name}, '%')
+                        </when>
+                        <otherwise>
+                            C.SUBJECT LIKE CONCAT('%', #{key.name}, '%') OR C.NORMALBODY LIKE CONCAT('%', #{key.name}, '%')
+                        </otherwise>
+                    </choose>
+                </foreach>
+            </if>
+            <if test='!obj.searchConditionDto.logic.equals("AND")'>
+                AND
+                <foreach collection="obj.searchConditionDto.keywords" index="index" item="key" open="(" separator=" OR " close=")">
+                    <choose>
+                        <when test='obj.searchType.equals("TITLE")'>
+                            C.SUBJECT LIKE CONCAT('%', #{key.name}, '%')
+                        </when>
+                        <when test='obj.searchType.equals("CONTENT")'>
+                            C.NORMALBODY LIKE CONCAT('%', #{key.name}, '%')
+                        </when>
+                        <otherwise>
+                            C.SUBJECT LIKE CONCAT('%', #{key.name}, '%') OR C.NORMALBODY LIKE CONCAT('%', #{key.name}, '%')
+                        </otherwise>
+                    </choose>
+                </foreach>
+            </if>
+        </if>
+        <if test='obj.tags.size > 0'>
+            AND MAP.TAGID IN
+            <foreach collection="obj.tags" item="tag" open="(" separator=", " close=")">
+                #{tag.id}
+            </foreach>
+        </if>
+        GROUP BY C.ID , C.SUBJECT , CAT.NAME , C.VIEWCOUNT , C.CREATEDATE , C.UPDATEDATE
+        ORDER BY C.CREATEDATE DESC
+        LIMIT #{obj.offset}, #{obj.pageSize}
+    </select>
+
+    <select id="findPrevNextById" resultType="PostPrevNextResponse">
+        SELECT
+        (
+        <![CDATA[
+         SELECT ID
+           FROM TB_POST
+          WHERE ID < #{id}
+         ]]>
+        <if test='isAdmin == false'>
+            AND ISPUBLIC = 1
+        </if>
+        ORDER BY ID DESC
+        LIMIT 1) AS PREV
+        , (SELECT ID
+        FROM TB_POST
+        WHERE ID > #{id}
+        <if test='isAdmin == false'>
+            AND ISPUBLIC = 1
+        </if>
+        ORDER BY ID ASC
+        LIMIT 1) AS NEXT
+        FROM DUAL;
+    </select>
+
+    <select id="findByTempPosts" resultType="Long">
+        SELECT ID
+          FROM TB_POST
+         WHERE SUBJECT = ''
+           AND BODY = ''
+    </select>
+
+    <select id="findByPublicPosts" resultType="Long">
+        SELECT ID
+          FROM TB_POST
+         WHERE ISPUBLIC = 1
+    </select>
+
+    <update id="setMainPost" parameterType="java.lang.Long" statementType="CALLABLE">
+        UPDATE TB_POST
+        SET IsMain = IF(Id = #{id}, TRUE, FALSE)
+    </update>
+
+</mapper>

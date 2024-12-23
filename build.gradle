@@ -34,7 +34,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.3'
 
-    runtimeOnly 'com.mysql:mysql-connector-j'
+//    runtimeOnly 'com.mysql:mysql-connector-j'
+    implementation 'org.mariadb.jdbc:mariadb-java-client:3.5.1'
 
 
     implementation 'io.hypersistence:hypersistence-utils-hibernate-60:3.8.3'
@@ -51,8 +52,8 @@ dependencies {
     implementation 'org.redisson:redisson-spring-boot-starter:3.38.1'
 
     // testContainer
-	testImplementation 'org.testcontainers:testcontainers'
-	testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
 
 
     // H2 Database(나중엔 테스트만 남겨야 함)

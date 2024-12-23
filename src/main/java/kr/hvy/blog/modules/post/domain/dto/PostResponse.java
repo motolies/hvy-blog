@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.post.domain.dto;
 
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
-import kr.hvy.common.domain.vo.CreateUpdateDate;
+import kr.hvy.common.domain.vo.EventLog;
 import lombok.Builder;
 import lombok.Data;
 
@@ -17,5 +17,6 @@ public class PostResponse {
   boolean isPublic;
   boolean isMain;
   int viewCount;
-  CreateUpdateDate createUpdateDate;
+  EventLog created;
+  EventLog updated;
 }

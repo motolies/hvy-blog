@@ -6,6 +6,8 @@ import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.Table;
@@ -18,7 +20,7 @@ import lombok.NoArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
 
 @Entity
-@Table(name = "users")
+@Table(name = "user")
 @Getter
 @Builder
 @AllArgsConstructor
@@ -26,13 +28,13 @@ import org.apache.commons.collections4.CollectionUtils;
 public class UserEntity {
 
   @Id
-  @Tsid
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
   @Column(nullable = false, length = 128)
   private String name;
 
-  @Column(name = "LoginId", length = 32, unique = true, nullable = false)
+  @Column(name = "loginId", length = 32, unique = true, nullable = false, updatable = false)
   private String username;
 
   @JsonIgnore

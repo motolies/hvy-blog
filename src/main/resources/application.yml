@@ -8,10 +8,10 @@ spring:
     init:
       mode: always # data.sql 실행
   datasource:
-    url: jdbc:h2:file:~/h2db;AUTO_SERVER=true
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: test
+    url: jdbc:mariadb://${DB_URL:mariadb:3309}/blog?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC
+    driver-class-name: org.mariadb.jdbc.Driver
+    username: ${DB_USER:motolies}
+    password: ${DB_PASS:motolies!!}
     hikari:
       pool-name: blogHikariCP
       connection-timeout: 30000
@@ -21,10 +21,6 @@ spring:
       max-lifetime: 1800000
       auto-commit: true
       leak-detection-threshold: 5000
-  h2:
-    console:
-      enabled: true  # H2 콘솔 활성화
-      path: /h2-console
   jmx:
     default-domain: blog
   jpa:
@@ -35,10 +31,11 @@ spring:
         format_sql: true
         type: trace
         release_mode: AFTER_TRANSACTION
+        dialect: org.hibernate.dialect.MariaDBDialect
     hibernate:
-      ddl-auto: create-drop
-#      naming.physical-strategy: kr.hvy.blog.infra.config.HvyPhysicalNamingStrategy
-    defer-datasource-initialization: true # data.sql 이 실행되기 전에 테이블 생성
+      ddl-auto: create
+      naming.physical-strategy: kr.hvy.blog.infra.config.HvyPhysicalNamingStrategy
+    defer-datasource-initialization: true
   servlet:
     multipart:
       max-file-size: 1GB
@@ -56,7 +53,7 @@ spring:
 
 #Configure Mybatis
 mybatis:
-  type-aliases-package: kr.hvy.blog.module
+  type-aliases-package: kr.hvy.blog.modules.post.domain,kr.hvy.common.mybatis.CountMapper # 많아지면 콤마로 구분
   mapper-locations: classpath:mybatis-mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true
@@ -68,9 +65,10 @@ logging:
   level:
     org:
       springframework.web: ERROR
-      hibernate.SQL: TRACE
-      hibernate.stat: TRACE
-      hibernate.type.descriptor.sql: TRACE
+      hibernate:
+        SQL: TRACE
+        stat: TRACE
+        type.descriptor.sql.BasicBinder: TRACE
       mybatis: DEBUG
     com:
       zaxxer.hikari: ERROR

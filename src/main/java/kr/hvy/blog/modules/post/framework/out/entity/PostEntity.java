@@ -1,5 +1,7 @@
 package kr.hvy.blog.modules.post.framework.out.entity;
 
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
@@ -11,7 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
-import kr.hvy.common.domain.embeddable.CreateUpdateDateEntity;
+import kr.hvy.common.domain.embeddable.EventLogEntity;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -47,15 +49,27 @@ public class PostEntity {
   private String categoryId;
 
   @Column(nullable = false)
-  private boolean isPublic;
+  private boolean publicAccess;
 
   @Column(nullable = false)
-  private boolean isMain;
+  private boolean mainPage;
 
   @Column(nullable = false)
   private int viewCount;
 
   @Embedded
+  @AttributeOverrides({
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
+  })
   @Builder.Default
-  private CreateUpdateDateEntity createUpdateDate = CreateUpdateDateEntity.defaultValues();
+  private EventLogEntity created = EventLogEntity.defaultValues();
+
+  @Embedded
+  @AttributeOverrides({
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
+  })
+  @Builder.Default
+  private EventLogEntity updated = EventLogEntity.defaultValues();
 }

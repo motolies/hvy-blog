@@ -6,12 +6,15 @@ import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.blog.modules.post.domain.PostMapper;
 import kr.hvy.blog.modules.post.domain.PostService;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
+import kr.hvy.blog.modules.post.domain.dto.PostPublicRequest;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;
 import kr.hvy.blog.modules.post.domain.dto.PostUpdate;
 import kr.hvy.common.layer.UseCase;
 import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
 
 @UseCase
+@Transactional
 @RequiredArgsConstructor
 public class PostManagementService implements PostManagementUseCase {
 
@@ -38,5 +41,18 @@ public class PostManagementService implements PostManagementUseCase {
   public Long delete(Long id) {
     postManagementPort.deleteById(id);
     return id;
+  }
+
+  @Override
+  public void setMainPost(Long id) {
+    postManagementPort.setMainPost(id);
+  }
+
+  @Override
+  public PostResponse setPostVisible(PostPublicRequest postPublicRequest) {
+    Post oldPost = postManagementPort.findById(postPublicRequest.getId());
+    Post newPost = postService.setPostVisible(oldPost, postPublicRequest.isPublicStatus());
+    Post savedPost = postManagementPort.save(newPost);
+    return postMapper.toResponse(savedPost);
   }
 }

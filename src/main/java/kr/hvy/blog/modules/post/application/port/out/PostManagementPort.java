@@ -5,6 +5,7 @@ import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.blog.modules.post.domain.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.domain.dto.PostPrevNextResponse;
 import kr.hvy.blog.modules.post.domain.dto.SearchObjectDto;
+import kr.hvy.blog.modules.tag.domain.dto.TagResponse;
 
 public interface PostManagementPort {
 
@@ -25,4 +26,8 @@ public interface PostManagementPort {
   Integer getTotalCount();
 
   void setMainPost(Long id);
+
+  Post addPostTag(Long postId, Long tagId);
+
+  Post deletePostTag(Long postId, Long tagId);
 }

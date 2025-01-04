@@ -1,0 +1,13 @@
+package kr.hvy.blog.modules.tag.domain.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class TagCreate {
+
+  String name;
+}

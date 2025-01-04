@@ -4,6 +4,7 @@ import kr.hvy.blog.modules.post.application.port.in.PostManagementUseCase;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostPublicRequest;
 import kr.hvy.blog.modules.post.domain.dto.PostUpdate;
+import kr.hvy.blog.modules.tag.domain.dto.TagCreate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -71,13 +72,23 @@ public class AdminPostController {
   }
 
   /**
-   * todo : 포스트에 태크 추가
+   * 포스트에 태크 추가
    */
-
+  @PostMapping("/{postId}/tag")
+  public ResponseEntity<?> addTagToPost(@PathVariable Long postId, @RequestBody TagCreate tagCreate) {
+    return ResponseEntity
+        .ok()
+        .body(postManagementUseCase.addPostTag(postId, tagCreate));
+  }
 
   /**
-   * todo : 포스트에 태그 삭제
+   * 포스트에 태그 삭제
    */
-
+  @DeleteMapping("/{postId}/tag/{tagId}")
+  public ResponseEntity<?> deletePostTag(@PathVariable Long postId, @PathVariable Long tagId) {
+    return ResponseEntity
+        .ok()
+        .body(postManagementUseCase.deletePostTag(postId, tagId));
+  }
 
 }

@@ -10,6 +10,8 @@ import kr.hvy.blog.modules.post.domain.dto.SearchObjectDto;
 import kr.hvy.blog.modules.post.framework.out.entity.PostEntity;
 import kr.hvy.blog.modules.post.framework.out.persistence.JpaPostRepository;
 import kr.hvy.blog.modules.post.framework.out.persistence.mapper.PostRDBMapper;
+import kr.hvy.blog.modules.tag.framework.out.entity.TagEntity;
+import kr.hvy.blog.modules.tag.framework.out.persistence.JpaTagRepository;
 import kr.hvy.common.exception.DataNotFoundException;
 import kr.hvy.common.layer.OutputAdapter;
 import kr.hvy.common.mybatis.MysqlRowCountRDBMapper;
@@ -21,6 +23,7 @@ public class PostManagementAdapter implements PostManagementPort {
 
   private final PostMapper postMapper;
   private final JpaPostRepository jpaPostRepository;
+  private final JpaTagRepository jpaTagRepository;
   private final PostRDBMapper postRDBMapper;
   private final MysqlRowCountRDBMapper countMapper;
 
@@ -79,5 +82,25 @@ public class PostManagementAdapter implements PostManagementPort {
   @Override
   public void setMainPost(Long id) {
     postRDBMapper.setMainPost(id);
+  }
+
+  @Override
+  public Post addPostTag(Long postId, Long tagId) {
+    TagEntity tag = jpaTagRepository.findById(tagId)
+        .orElseThrow(() -> new DataNotFoundException("Not Found Tag."));
+    PostEntity post = jpaPostRepository.findById(postId)
+        .orElseThrow(() -> new DataNotFoundException("Not Found Post."));
+    post.addTag(tag);
+    return postMapper.toDomain(jpaPostRepository.save(post));
+  }
+
+  @Override
+  public Post deletePostTag(Long postId, Long tagId) {
+    TagEntity tag = jpaTagRepository.findById(tagId)
+        .orElseThrow(() -> new DataNotFoundException("Not Found Tag."));
+    PostEntity post = jpaPostRepository.findById(postId)
+        .orElseThrow(() -> new DataNotFoundException("Not Found Post."));
+    post.removeTag(tag);
+    return postMapper.toDomain(jpaPostRepository.save(post));
   }
 }

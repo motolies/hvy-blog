@@ -1,24 +1,27 @@
-package kr.hvy.blog.modules.tag.framework.out.entity;
+package kr.hvy.blog.modules.file.framework.out.entity;
 
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonGetter;
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+import io.hypersistence.tsid.TSID;
+import io.hypersistence.utils.hibernate.id.Tsid;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.JoinTable;
-import jakarta.persistence.ManyToMany;
+import jakarta.persistence.JoinColumns;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import java.util.HashSet;
-import java.util.Set;
+import jakarta.persistence.Transient;
 import kr.hvy.blog.modules.post.framework.out.entity.PostEntity;
 import kr.hvy.common.domain.embeddable.EventLogEntity;
 import lombok.AllArgsConstructor;
@@ -29,39 +32,53 @@ import lombok.Setter;
 import lombok.With;
 import org.hibernate.annotations.Cascade;
 import org.hibernate.annotations.CascadeType;
-import org.hibernate.annotations.Formula;
 
 @Entity
-@Table(name = "`tag`")
+@Table(name = "`file`")
 @Getter
 @Setter
 @Builder
 @With
 @NoArgsConstructor
 @AllArgsConstructor
-public class TagEntity {
+public class FileEntity {
 
   @Id
-  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  @Tsid
   private Long id;
 
-  @Column(nullable = false, length = 64, unique = true)
-  private String name;
+  @JsonGetter("id")
+  public String getHexId() {
+    return TSID.from(this.id).toString();
+  }
 
+  @JsonSetter("id")
+  public void setHexId(String id) {
+    this.id = TSID.from(id).toLong();
+  }
 
-  @ManyToMany(fetch = FetchType.LAZY, targetEntity = PostEntity.class)
+  @ManyToOne(fetch = FetchType.LAZY, targetEntity = PostEntity.class)
   @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
-  @JoinTable(
-      name = "post_tag_map",
-      joinColumns = @JoinColumn(name = "tagId"),
-      inverseJoinColumns = @JoinColumn(name = "postId")
-  )
-  @JsonBackReference("post-tags")
-  @Builder.Default
-  private Set<PostEntity> posts = new HashSet<>();
+  @JoinColumns({@JoinColumn(name = "postId", referencedColumnName = "id", nullable = false)})
+  @JsonBackReference("post-files")
+  private PostEntity post;
 
-  @Formula("(select count(*) from tb_post_tag_map as m where m.tagId = id)")
-  private int postCount;
+  @Column(nullable = false, length = 256)
+  private String originName;
+
+  @Column(nullable = false, length = 512)
+  private String type;
+
+  @JsonIgnore
+  @Column(nullable = false, length = 512)
+  private String path;
+
+  @Column(nullable = false, columnDefinition = "BIGINT")
+  private long fileSize;
+
+  @JsonProperty("isDelete")
+  @Column(nullable = false, length = 1)
+  private boolean deleted;
 
   @Embedded
   @AttributeOverrides({
@@ -71,17 +88,19 @@ public class TagEntity {
   @Builder.Default
   private EventLogEntity created = EventLogEntity.defaultValues();
 
+  @Transient
+  private String resourceUri;
+
+  public String getResourceUri() {
+    return "/api/file/" + TSID.from(this.id);
+  }
+
   /*****************************************************************************
    * 연관관계 메소드
    *****************************************************************************/
-  public void addPost(PostEntity postEntity) {
-    this.posts.add(postEntity);
-    postEntity.getTags().add(this);
-  }
-
-  public void removePost(PostEntity postEntity) {
-    this.posts.remove(postEntity);
-    postEntity.getTags().remove(this);
+  public void setPost(PostEntity postEntity) {
+    this.post = postEntity;
+    postEntity.getFiles().add(this);
   }
 
 }

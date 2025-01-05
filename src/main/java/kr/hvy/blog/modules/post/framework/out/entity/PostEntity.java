@@ -1,6 +1,8 @@
 package kr.hvy.blog.modules.post.framework.out.entity;
 
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.Column;
@@ -13,11 +15,13 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToMany;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.util.HashSet;
 import java.util.Set;
+import kr.hvy.blog.modules.file.framework.out.entity.FileEntity;
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import kr.hvy.blog.modules.tag.framework.out.entity.TagEntity;
 import kr.hvy.common.domain.embeddable.EventLogEntity;
@@ -71,9 +75,17 @@ public class PostEntity {
   @OrderBy("name ASC")
   @ManyToMany(mappedBy = "posts", fetch = FetchType.LAZY, targetEntity = TagEntity.class)
   @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
-  @JsonManagedReference
+  @JsonManagedReference("post-tags")
   @Builder.Default
-  private Set<TagEntity> tag = new HashSet<>();
+  private Set<TagEntity> tags = new HashSet<>();
+
+  // todo : 나중에 파일 삭제시에 실제 파일도 삭제할 수 있도록 변경 예쩡 (cascade = CascadeType.ALL)
+  @OrderBy("originName ASC")
+  @OneToMany(mappedBy = "post", fetch = FetchType.LAZY, targetEntity = FileEntity.class)
+  @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
+  @JsonManagedReference("post-files")
+  @Builder.Default
+  private Set<FileEntity> files = new HashSet<>();
 
   @Embedded
   @AttributeOverrides({
@@ -95,12 +107,12 @@ public class PostEntity {
    * 연관관계 메소드
    *****************************************************************************/
   public void addTag(TagEntity tagEntity) {
-    this.tag.add(tagEntity);
+    this.tags.add(tagEntity);
     tagEntity.getPosts().add(this);
   }
 
   public void removeTag(TagEntity tagEntity) {
-    this.tag.remove(tagEntity);
+    this.tags.remove(tagEntity);
     tagEntity.getPosts().remove(this);
   }
 }

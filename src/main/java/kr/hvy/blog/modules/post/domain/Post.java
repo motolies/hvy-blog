@@ -1,6 +1,10 @@
 package kr.hvy.blog.modules.post.domain;
 
+import java.util.HashSet;
+import java.util.Set;
+import kr.hvy.blog.modules.file.domain.File;
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
+import kr.hvy.blog.modules.tag.domain.Tag;
 import kr.hvy.common.domain.vo.EventLog;
 import lombok.Builder;
 import lombok.Value;
@@ -23,6 +27,12 @@ public class Post {
   boolean isPublic;
   boolean isMain;
   int viewCount;
+
+  @Builder.Default
+  Set<Tag> tags = new HashSet<>();
+
+  @Builder.Default
+  Set<File> files = new HashSet<>();
 
   @Builder.Default
   EventLog created = EventLog.defaultValues();

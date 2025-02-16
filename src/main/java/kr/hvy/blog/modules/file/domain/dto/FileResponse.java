@@ -8,8 +8,7 @@ import lombok.Data;
 @Builder
 public class FileResponse {
 
-  Long id;
-  String hexId;
+  String id;
   String originName;
   String type;
   Long fileSize;

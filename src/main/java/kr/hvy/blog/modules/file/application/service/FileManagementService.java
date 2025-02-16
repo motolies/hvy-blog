@@ -55,6 +55,7 @@ public class FileManagementService extends AbstractFileManagementService impleme
 
   @Override
   public Long delete(Long id) {
+    // todo : 실제로 지우지 말고 deleted flag로 처리
     File file = fileManagementPort.findById(id);
     FileStoreUtils.deleteFile(rootLocation.toString(), file.getPath());
     fileManagementPort.deleteById(id);
@@ -63,7 +64,6 @@ public class FileManagementService extends AbstractFileManagementService impleme
 
   @Override
   public List<FileResponse> findByPostId(Long postId) {
-    // todo : 실제로 지우지 말고 deleted flag로 처리
     return fileManagementPort.findByPostId(postId).stream()
         .map(fileMapper::toResponse)
         .toList();

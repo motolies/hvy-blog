@@ -1,8 +1,8 @@
 package kr.hvy.blog.modules.file.domain;
 
+import kr.hvy.blog.modules.file.adapter.out.entity.FileEntity;
 import kr.hvy.blog.modules.file.domain.dto.FileCreate;
 import kr.hvy.blog.modules.file.domain.dto.FileResponse;
-import kr.hvy.blog.modules.file.adapter.out.entity.FileEntity;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.ObjectFactory;
@@ -15,7 +15,13 @@ public interface FileMapper {
 
   FileEntity toEntity(File file);
 
+  // File -> FileResponse 매핑 시 file.hexId 값을 fileResponse.id에 매핑
+  @Mapping(source = "hexId", target = "id")
   FileResponse toResponse(File file);
+
+  // FileResponse -> File 매핑 시 fileResponse.id 값을 file.hexId에 매핑
+  @Mapping(source = "id", target = "hexId")
+  File toEntity(FileResponse fileResponse);
 
   File toDomain(FileCreate fileCreate);
 

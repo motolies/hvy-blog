@@ -53,7 +53,7 @@ spring:
 
 #Configure Mybatis
 mybatis:
-  type-aliases-package: kr.hvy.blog.modules.post.domain,kr.hvy.common.mybatis.CountMapper # 많아지면 콤마로 구분
+  type-aliases-package: kr.hvy.blog.modules.post.domain,kr.hvy.blog.modules.category.domain,kr.hvy.common.mybatis.CountMapper # 많아지면 콤마로 구분
   mapper-locations: classpath:mybatis-mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true

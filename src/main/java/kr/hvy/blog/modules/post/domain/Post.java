@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.post.domain;
 
 import java.util.HashSet;
 import java.util.Set;
+import kr.hvy.blog.modules.category.domain.Category;
 import kr.hvy.blog.modules.file.domain.File;
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import kr.hvy.blog.modules.tag.domain.Tag;
@@ -23,10 +24,11 @@ public class Post {
   PostStatus status = PostStatus.TEMP;
   String subject;
   String body;
-  String categoryId;
   boolean isPublic;
   boolean isMain;
   int viewCount;
+  String categoryId;
+  Category category;
 
   @Builder.Default
   Set<Tag> tags = new HashSet<>();

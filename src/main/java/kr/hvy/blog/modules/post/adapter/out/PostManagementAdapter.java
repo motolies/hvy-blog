@@ -1,6 +1,8 @@
 package kr.hvy.blog.modules.post.adapter.out;
 
 import java.util.List;
+import kr.hvy.blog.modules.category.adapter.out.entity.CategoryEntity;
+import kr.hvy.blog.modules.category.adapter.out.persistence.JpaCategoryRepository;
 import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
 import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.blog.modules.post.domain.PostMapper;
@@ -26,11 +28,18 @@ public class PostManagementAdapter implements PostManagementPort {
   private final JpaTagRepository jpaTagRepository;
   private final PostRDBMapper postRDBMapper;
   private final MysqlRowCountRDBMapper countMapper;
+  private final JpaCategoryRepository jpaCategoryRepository;
 
   @Override
   public Post save(Post post) {
-    PostEntity postEntity = jpaPostRepository.save(postMapper.toEntity(post));
-    return postMapper.toDomain(postEntity);
+    CategoryEntity category = jpaCategoryRepository.findById(post.getCategoryId())
+        .orElseThrow(() -> new DataNotFoundException("Not Found Category."));
+
+    PostEntity postEntity = postMapper.toEntity(post);
+    postEntity.setCategory(category);
+
+    PostEntity savedEntity = jpaPostRepository.save(postEntity);
+    return postMapper.toDomain(savedEntity);
   }
 
   @Override

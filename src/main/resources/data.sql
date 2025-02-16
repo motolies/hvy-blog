@@ -34,3 +34,5 @@ WHERE NOT EXISTS (SELECT 1
                   WHERE userId = 1
                     AND authorityId = 2);
 select 1;
+INSERT INTO tb_category (`Order`, Id, Name, FullName, FullPath, ParentId)
+VALUES (0, 'ROOT', '전체글', '/전체글/', '/ROOT/', null)

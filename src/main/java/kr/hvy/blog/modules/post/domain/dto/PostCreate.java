@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.post.domain.dto;
 
 import jakarta.persistence.Column;
+import kr.hvy.blog.modules.category.domain.CategoryConstant;
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -17,7 +18,7 @@ public class PostCreate {
   @Builder.Default
   String body = "";
   @Builder.Default
-  String categoryId = "";
+  String categoryId = CategoryConstant.ROOT_CATEGORY_ID;
   @Builder.Default
   boolean isPublic = false;
   @Builder.Default

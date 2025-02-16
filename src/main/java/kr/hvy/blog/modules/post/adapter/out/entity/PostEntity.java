@@ -12,13 +12,16 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToMany;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.util.HashSet;
 import java.util.Set;
+import kr.hvy.blog.modules.category.adapter.out.entity.CategoryEntity;
 import kr.hvy.blog.modules.file.adapter.out.entity.FileEntity;
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import kr.hvy.blog.modules.tag.adapter.out.entity.TagEntity;
@@ -59,9 +62,6 @@ public class PostEntity {
   private String body;
 
   @Column(nullable = false)
-  private String categoryId;
-
-  @Column(nullable = false)
   private boolean publicAccess;
 
   @Column(nullable = false)
@@ -84,6 +84,10 @@ public class PostEntity {
   @JsonManagedReference("post-files")
   @Builder.Default
   private Set<FileEntity> files = new HashSet<>();
+
+  @ManyToOne(fetch = FetchType.LAZY, targetEntity = CategoryEntity.class)
+  @JoinColumn(name = "categoryId", referencedColumnName = "id", nullable = false)
+  private CategoryEntity category;
 
   @Embedded
   @AttributeOverrides({
@@ -112,5 +116,10 @@ public class PostEntity {
   public void removeTag(TagEntity tagEntity) {
     this.tags.remove(tagEntity);
     tagEntity.getPosts().remove(this);
+  }
+
+  public void setCategory(CategoryEntity category) {
+    this.category = category;
+    category.getPosts().add(this);
   }
 }

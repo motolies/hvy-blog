@@ -28,6 +28,7 @@ public interface PostMapper {
   // 맵핑에서 제외할 속성들
   @Mapping(target = "tags.posts", ignore = true)
   @Mapping(target = "files.post", ignore = true)
+  @Mapping(source = "category.id", target = "categoryId")
   Post toDomain(PostEntity postEntity);
 
   @ObjectFactory

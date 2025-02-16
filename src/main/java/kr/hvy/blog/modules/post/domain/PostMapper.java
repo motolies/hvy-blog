@@ -3,7 +3,7 @@ package kr.hvy.blog.modules.post.domain;
 import kr.hvy.blog.modules.file.domain.FileMapper;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;
-import kr.hvy.blog.modules.post.framework.out.entity.PostEntity;
+import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
 import kr.hvy.blog.modules.tag.domain.TagMapper;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;

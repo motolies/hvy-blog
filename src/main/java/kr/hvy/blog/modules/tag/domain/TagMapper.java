@@ -2,7 +2,7 @@ package kr.hvy.blog.modules.tag.domain;
 
 import kr.hvy.blog.modules.tag.domain.dto.TagCreate;
 import kr.hvy.blog.modules.tag.domain.dto.TagResponse;
-import kr.hvy.blog.modules.tag.framework.out.entity.TagEntity;
+import kr.hvy.blog.modules.tag.adapter.out.entity.TagEntity;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.ObjectFactory;

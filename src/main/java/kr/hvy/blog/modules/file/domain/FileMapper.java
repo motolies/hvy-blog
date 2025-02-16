@@ -2,7 +2,7 @@ package kr.hvy.blog.modules.file.domain;
 
 import kr.hvy.blog.modules.file.domain.dto.FileCreate;
 import kr.hvy.blog.modules.file.domain.dto.FileResponse;
-import kr.hvy.blog.modules.file.framework.out.entity.FileEntity;
+import kr.hvy.blog.modules.file.adapter.out.entity.FileEntity;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.ObjectFactory;

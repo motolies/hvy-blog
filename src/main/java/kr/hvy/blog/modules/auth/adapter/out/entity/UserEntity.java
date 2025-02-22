@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.util.HashSet;
 import java.util.Set;
 import lombok.AllArgsConstructor;
@@ -19,7 +20,7 @@ import lombok.NoArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
 
 @Entity
-@Table(name = "user")
+@Table(name = "user", uniqueConstraints = @UniqueConstraint(name = "uk_user_login_id", columnNames = "loginId"))
 @Getter
 @Builder
 @AllArgsConstructor

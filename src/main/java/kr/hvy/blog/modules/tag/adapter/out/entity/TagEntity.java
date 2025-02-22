@@ -8,6 +8,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -15,6 +16,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.util.HashSet;
 import java.util.Set;
 import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
@@ -30,7 +32,7 @@ import org.hibernate.annotations.CascadeType;
 import org.hibernate.annotations.Formula;
 
 @Entity
-@Table(name = "`tag`")
+@Table(name = "`tag`", uniqueConstraints = @UniqueConstraint(name = "uk_tag_name", columnNames = "name"))
 @Getter
 @Setter
 @Builder
@@ -51,8 +53,8 @@ public class TagEntity {
   @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
   @JoinTable(
       name = "post_tag_map",
-      joinColumns = @JoinColumn(name = "tagId"),
-      inverseJoinColumns = @JoinColumn(name = "postId")
+      joinColumns = @JoinColumn(name = "tagId", foreignKey = @ForeignKey(name = "fk_post_tag_map_tag_id")),
+      inverseJoinColumns = @JoinColumn(name = "postId", foreignKey = @ForeignKey(name = "fk_post_tag_map_post_id"))
   )
   @JsonBackReference("post-tags")
   @Builder.Default

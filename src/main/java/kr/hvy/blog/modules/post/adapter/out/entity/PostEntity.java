@@ -36,9 +36,8 @@ import org.hibernate.annotations.Cascade;
 import org.hibernate.annotations.CascadeType;
 
 @Entity
-@Table(name = "post", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"id", "status"})
-})
+@Table(name = "post"
+    , uniqueConstraints = @UniqueConstraint(name = "uk_post_id_status", columnNames = {"id", "status"}))
 @Getter
 @Setter
 @Builder
@@ -86,7 +85,7 @@ public class PostEntity {
   private Set<FileEntity> files = new HashSet<>();
 
   @ManyToOne(fetch = FetchType.LAZY, targetEntity = CategoryEntity.class)
-  @JoinColumn(name = "categoryId", referencedColumnName = "id", nullable = false)
+  @JoinColumn(name = "categoryId", referencedColumnName = "id", nullable = false, foreignKey = @jakarta.persistence.ForeignKey(name = "fk_post_category_id"))
   private CategoryEntity category;
 
   @Embedded

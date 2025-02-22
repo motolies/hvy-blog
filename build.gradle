@@ -27,7 +27,7 @@ dependencies {
 
     // Library
     implementation files('../hvy-common/build/libs/hvy-common-plain.jar')
-    implementation 'io.github.motolies:hvy-common:0.0.8'
+    implementation 'io.github.motolies:hvy-common:0.0.9'
 
 
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -37,7 +37,7 @@ dependencies {
 
 //    runtimeOnly 'com.mysql:mysql-connector-j'
     implementation 'org.mariadb.jdbc:mariadb-java-client:3.5.1'
-
+    implementation 'com.slack.api:bolt:1.45.3'
 
     implementation 'io.hypersistence:hypersistence-utils-hibernate-60:3.8.3'
 
@@ -50,7 +50,8 @@ dependencies {
 
     // redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
-    implementation 'org.redisson:redisson-spring-boot-starter:3.38.1'
+    implementation 'org.redisson:redisson-spring-boot-starter:3.44.0'
+
 
     // testContainer
     testImplementation 'org.testcontainers:testcontainers'

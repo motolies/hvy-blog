@@ -46,29 +46,29 @@ public class CategoryEntity {
 
 
   @Id
-  @Column(name = "Id", nullable = false, length = 32)
+  @Column(nullable = false, length = 32)
   private String id;
 
-  @Column(name = "Name", nullable = false, length = 64)
+  @Column(nullable = false, length = 64)
   private String name;
 
-  @Column(name = "`Order`", nullable = false, length = 11)
-  private int order;
+  @Column(nullable = false, length = 11)
+  private int seq;
 
-  @Column(name = "FullName", nullable = false, length = 512)
+  @Column(nullable = false, length = 512)
   private String fullName;
 
-  @Column(name = "FullPath", nullable = false, length = 512)
+  @Column(nullable = false, length = 512)
   private String fullPath;
 
-  @Column(name = "ParentId", columnDefinition = "VARCHAR(32)")
+  @Column(name = "parentId", columnDefinition = "VARCHAR(32)")
   @GenericGenerator(name = "CATEGORY_PID_CATEGORYID_GENERATOR", strategy = "foreign", parameters = @Parameter(name = "property", value = "parent"))
   private String parentId;
 
   @JsonBackReference
   @ManyToOne(targetEntity = CategoryEntity.class, fetch = FetchType.LAZY)
   @org.hibernate.annotations.Cascade({org.hibernate.annotations.CascadeType.LOCK})
-  @JoinColumns({@JoinColumn(name = "ParentId", referencedColumnName = "Id", nullable = true, insertable = false, updatable = false)})
+  @JoinColumns({@JoinColumn(name = "parentId", referencedColumnName = "Id", nullable = true, insertable = false, updatable = false)})
   private CategoryEntity parent;
 
   @JsonIgnore
@@ -78,7 +78,7 @@ public class CategoryEntity {
 
 
   @JsonManagedReference
-  @OrderBy("order ASC, name ASC")
+  @OrderBy("seq ASC, name ASC")
   @OneToMany(mappedBy = "parent", targetEntity = CategoryEntity.class, fetch = FetchType.LAZY)
   @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
   private List<CategoryEntity> categories = new ArrayList<>();

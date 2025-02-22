@@ -5,7 +5,7 @@
 <mapper namespace="kr.hvy.blog.modules.category.adapter.out.persistence.mapper.CategoryRDBMapper">
 
   <select id="findAllCategory" resultType="CategoryFlatResponse">
-    SELECT Id, Name, `Order`, FullName, ParentId
+    SELECT Id, Name, seq as `Order`, FullName, ParentId
     FROM tb_category
     ORDER BY FullName
   </select>

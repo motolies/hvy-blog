@@ -4,6 +4,7 @@ import kr.hvy.blog.modules.category.adapter.out.entity.CategoryEntity;
 import kr.hvy.blog.modules.category.domain.dto.CategoryCreate;
 import kr.hvy.blog.modules.category.domain.dto.CategoryResponse;
 import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
 import org.mapstruct.ObjectFactory;
 import org.mapstruct.factory.Mappers;
 
@@ -16,8 +17,10 @@ public interface CategoryMapper {
 
   Category toDomain(CategoryEntity categoryEntity);
 
+  @Mapping(source = "seq", target = "order")
   CategoryResponse toResponse(CategoryEntity categoryEntity);
 
+  @Mapping(source = "seq", target = "order")
   CategoryResponse toResponse(Category category);
 
   Category toDomain(CategoryCreate categoryCreate);

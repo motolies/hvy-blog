@@ -65,10 +65,10 @@ logging:
   level:
     org:
       springframework.web: ERROR
-      hibernate:
-        SQL: TRACE
-        stat: TRACE
-        type.descriptor.sql.BasicBinder: TRACE
+#      hibernate:
+#        SQL: TRACE
+#        stat: TRACE
+#        type.descriptor.sql.BasicBinder: TRACE
       mybatis: DEBUG
     com:
       zaxxer.hikari: ERROR

@@ -7,6 +7,7 @@ import kr.hvy.blog.modules.category.domain.CategoryMapper;
 import kr.hvy.blog.modules.category.domain.CategoryService;
 import kr.hvy.blog.modules.category.domain.dto.CategoryCreate;
 import kr.hvy.blog.modules.category.domain.dto.CategoryResponse;
+import kr.hvy.blog.modules.category.domain.dto.CategoryUpdate;
 import kr.hvy.common.layer.UseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,9 +29,13 @@ public class CategoryManagementService implements CategoryManagementUseCase {
   }
 
   @Override
-  public CategoryResponse update(String s, Void updateDto) {
-    // todo : 나중에 구현할지 말지 정해야 함
-    return CategoryManagementUseCase.super.update(s, updateDto);
+  public CategoryResponse update(String categoryId, CategoryUpdate updateDto) {
+    Category category = categoryManagementPort.findById(categoryId);
+    Category parentCategory = categoryManagementPort.findById(updateDto.getParentId());
+    Category updatedCategory = categoryService.update(category, updateDto);
+
+    Category savedCategory = categoryManagementPort.save(updatedCategory);
+    return categoryMapper.toResponse(savedCategory);
   }
 
   @Override

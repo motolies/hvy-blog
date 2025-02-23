@@ -25,6 +25,7 @@ create or replace table tb_post
     status       CHAR(3) not null,
     subject      varchar(512)             not null,
     body         longtext                 not null,
+    normalBody         longtext                 not null,
     publicAccess bit                      not null,
     mainPage     bit                      not null,
     viewCount    int                      not null,

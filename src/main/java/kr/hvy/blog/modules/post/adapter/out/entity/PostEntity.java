@@ -39,6 +39,9 @@ public class PostEntity {
     @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String body;
 
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
+    private String normalBody;
+
     @Column(nullable = false)
     private boolean publicAccess;
 

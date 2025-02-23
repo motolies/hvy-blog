@@ -35,7 +35,8 @@ public class CategoryManagementService implements CategoryManagementUseCase {
 
   @Override
   public String delete(String categoryId) {
-    categoryService.delete(categoryId);
+    Category category = categoryManagementPort.findById(categoryId);
+    categoryService.delete(category);
     return categoryManagementPort.deleteById(categoryId);
   }
 

@@ -14,4 +14,6 @@ public interface CategoryManagementPort {
   String deleteById(String id);
 
   List<CategoryFlatResponse> findAllCategory();
+
+  Category findById(String id);
 }

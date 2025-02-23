@@ -52,4 +52,11 @@ public class CategoryManagementAdapter implements CategoryManagementPort {
   public List<CategoryFlatResponse> findAllCategory() {
     return categoryRDBMapper.findAllCategory();
   }
+
+  @Override
+  public Category findById(String id) {
+    return jpaCategoryRepository.findById(id)
+        .map(categoryMapper::toDomain)
+        .orElseThrow(() -> new IllegalArgumentException("카테고리가 존재하지 않습니다."));
+  }
 }

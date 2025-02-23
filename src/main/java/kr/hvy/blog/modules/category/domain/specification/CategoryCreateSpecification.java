@@ -25,14 +25,6 @@ public class CategoryCreateSpecification implements Specification<CategoryCreate
       errorMessages.add("카테고리명은 필수항목 입니다.");
     }
 
-    if (StringUtils.isBlank(categoryCreate.getId())) {
-      errorMessages.add("카테고리 ID는 필수항목 입니다.");
-    } else {
-      if (categoryCreate.getId().trim().equalsIgnoreCase(CategoryConstant.ROOT_CATEGORY_ID)) {
-        errorMessages.add("카테고리 ID는 ROOT가 될 수 없습니다.");
-      }
-    }
-
     return !CollectionUtils.isNotEmpty(errorMessages);
   }
 

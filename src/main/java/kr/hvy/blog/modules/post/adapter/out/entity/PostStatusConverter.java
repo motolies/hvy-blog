@@ -7,7 +7,7 @@ import kr.hvy.common.code.base.AbstractEnumCodeConverter;
 @Converter(autoApply = true)
 public class PostStatusConverter extends AbstractEnumCodeConverter<PostStatus, String> {
 
-  protected PostStatusConverter(Class<PostStatus> enumClass) {
-    super(enumClass);
+  protected PostStatusConverter() {
+    super(PostStatus.class);
   }
 }

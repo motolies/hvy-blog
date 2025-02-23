@@ -7,7 +7,7 @@ import kr.hvy.common.code.base.AbstractEnumCodeConverter;
 @Converter(autoApply = true)
 public class AuthorityNameConverter extends AbstractEnumCodeConverter<AuthorityName, String> {
 
-  protected AuthorityNameConverter(Class<AuthorityName> enumClass) {
-    super(enumClass);
+  protected AuthorityNameConverter() {
+    super(AuthorityName.class);
   }
 }

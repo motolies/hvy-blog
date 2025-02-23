@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.post.application.service;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import java.util.List;
 import kr.hvy.blog.modules.post.application.port.in.PostManagementUseCase;
 import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
 import kr.hvy.blog.modules.post.domain.Post;
@@ -83,5 +84,15 @@ public class PostManagementService implements PostManagementUseCase {
   public PostResponse deletePostTag(Long postId, Long tagId) {
     Post post = postManagementPort.deletePostTag(postId, tagId);
     return postMapper.toResponse(post);
+  }
+
+  @Override
+  public void migration() {
+    List<Post> posts = postManagementPort.findAll();
+    posts.forEach(post -> {
+      Post replacePost = postService.migration(post);
+      postManagementPort.save(replacePost);
+    });
+
   }
 }

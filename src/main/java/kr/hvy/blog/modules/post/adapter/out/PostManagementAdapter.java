@@ -112,4 +112,12 @@ public class PostManagementAdapter implements PostManagementPort {
     post.removeTag(tag);
     return postMapper.toDomain(jpaPostRepository.save(post));
   }
+
+  @Override
+  public List<Post> findAll() {
+    return jpaPostRepository.findAll()
+        .stream()
+        .map(postMapper::toDomain)
+        .toList();
+  }
 }

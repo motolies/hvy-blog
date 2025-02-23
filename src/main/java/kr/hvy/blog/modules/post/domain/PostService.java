@@ -1,6 +1,8 @@
 package kr.hvy.blog.modules.post.domain;
 
 import java.time.LocalDateTime;
+import java.util.Set;
+import kr.hvy.blog.modules.file.domain.File;
 import kr.hvy.blog.modules.post.domain.dto.PostUpdate;
 import kr.hvy.blog.modules.post.domain.specification.PostAuthoritySpecification;
 import kr.hvy.blog.modules.post.domain.specification.PostUpdateSpecification;
@@ -45,4 +47,14 @@ public class PostService {
   }
 
 
+  public Post migration(Post post) {
+    // body 에 링크 변경
+    String body = post.getBody();
+    Set<File> files = post.getFiles();
+    for (File file : files) {
+      body = body.replaceAll(file.getOriginId(), file.getHexId());
+    }
+    return post.withBody(body);
+
+  }
 }

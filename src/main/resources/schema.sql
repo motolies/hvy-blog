@@ -42,6 +42,7 @@ create or replace table tb_post
 create or replace table tb_file
 (
     id         bigint       not null        primary key,
+    originId       varchar(64) not null,
     postId     bigint       not null,
     originName varchar(256) not null,
     type       varchar(512) not null,

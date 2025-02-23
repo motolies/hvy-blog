@@ -30,4 +30,6 @@ public interface PostManagementPort {
   Post addPostTag(Long postId, Long tagId);
 
   Post deletePostTag(Long postId, Long tagId);
+
+  List<Post> findAll();
 }

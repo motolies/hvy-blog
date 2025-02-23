@@ -13,6 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class File {
 
   Long id;
+  String originId;
   String hexId;
   String originName;
   String type;

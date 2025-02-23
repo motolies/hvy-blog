@@ -35,6 +35,10 @@ public class FileEntity {
         this.id = TSID.from(id).toLong();
     }
 
+    @Column(nullable = false, length = 64)
+    private String originId;
+
+
     @ManyToOne(fetch = FetchType.LAZY, targetEntity = PostEntity.class)
     @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
     @JoinColumn(name = "postId", referencedColumnName = "id", nullable = false, foreignKey = @ForeignKey(name = "fk_file_post"))

@@ -19,4 +19,6 @@ public interface PostManagementUseCase extends CrudUseCase<Post, PostResponse, P
   TagResponse addPostTag(Long postId, TagCreate tagCreate);
 
   PostResponse deletePostTag(Long postId, Long tagId);
+
+  void migration();
 }

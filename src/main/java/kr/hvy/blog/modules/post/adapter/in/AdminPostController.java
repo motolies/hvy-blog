@@ -91,4 +91,12 @@ public class AdminPostController {
         .body(postManagementUseCase.deletePostTag(postId, tagId));
   }
 
+
+  @PostMapping("/migration")
+  public ResponseEntity<?> migration() {
+//    postManagementUseCase.migration();
+    return ResponseEntity
+        .ok().build();
+  }
+
 }

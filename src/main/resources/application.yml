@@ -6,7 +6,7 @@ server:
 spring:
   sql:
     init:
-      mode: always # data.sql 실행
+      mode: never # data.sql 실행
   datasource:
     url: jdbc:mariadb://${DB_URL:mariadb:3309}/blog?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC
     driver-class-name: org.mariadb.jdbc.Driver
@@ -33,7 +33,7 @@ spring:
         release_mode: AFTER_TRANSACTION
         dialect: org.hibernate.dialect.MariaDBDialect
     hibernate:
-      ddl-auto: create
+      ddl-auto: validate
       naming.physical-strategy: kr.hvy.blog.infra.config.HvyPhysicalNamingStrategy
     defer-datasource-initialization: true
   servlet:

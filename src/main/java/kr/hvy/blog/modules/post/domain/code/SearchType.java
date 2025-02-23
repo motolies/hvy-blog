@@ -1,12 +1,13 @@
 package kr.hvy.blog.modules.post.domain.code;
 
-import kr.hvy.common.code.CommonEnumCode;
+
+import kr.hvy.common.code.base.EnumCode;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
 @Getter
 @AllArgsConstructor
-public enum SearchType implements CommonEnumCode<String> {
+public enum SearchType implements EnumCode<String> {
 
   TITLE("TITLE", "제목"),
   CONTENT("CONTENT", "본문"),

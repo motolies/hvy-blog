@@ -110,7 +110,7 @@ public class AuthControllerTest {
         .maxAge(31449600) // 1년
         .build();
 
-    given(cookieProvider.setSpringCookie(any(HttpServletRequest.class), any(String.class), any(String.class)))
+    given(cookieProvider.createCookie(any(HttpServletRequest.class), any(String.class), any(String.class)))
         .willReturn(mockResponseCookie);
 
     // Act & Assert

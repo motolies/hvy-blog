@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import kr.hvy.blog.modules.post.application.port.in.PostPublicUseCase;
-import kr.hvy.blog.modules.post.domain.dto.SearchObjectDto;
+import kr.hvy.blog.modules.post.domain.dto.SearchObject;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -73,10 +73,10 @@ public class PostController {
     String decodedQuery = new String(Base64.getDecoder().decode(query), StandardCharsets.UTF_8);
 
     // https://stackoverflow.com/questions/4486787/jackson-with-json-unrecognized-field-not-marked-as-ignorable
-    SearchObjectDto searchObjectDto = objectMapper.readValue(decodedQuery, SearchObjectDto.class);
+    SearchObject searchObject = objectMapper.readValue(decodedQuery, SearchObject.class);
 
     return ResponseEntity
         .status(HttpStatus.OK)
-        .body(postPublicUseCase.searchPosts(searchObjectDto));
+        .body(postPublicUseCase.searchPosts(searchObject));
   }
 }

@@ -4,8 +4,7 @@ import java.util.List;
 import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.blog.modules.post.domain.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.domain.dto.PostPrevNextResponse;
-import kr.hvy.blog.modules.post.domain.dto.SearchObjectDto;
-import kr.hvy.blog.modules.tag.domain.dto.TagResponse;
+import kr.hvy.blog.modules.post.domain.dto.SearchObject;
 
 public interface PostManagementPort {
 
@@ -21,7 +20,7 @@ public interface PostManagementPort {
 
   List<Long> findByPublicPosts();
 
-  List<PostNoBodyResponse> findBySearchObject(Boolean isAdmin, SearchObjectDto searchObjectDto);
+  List<PostNoBodyResponse> findBySearchObject(Boolean isAdmin, SearchObject searchObject);
 
   Integer getTotalCount();
 

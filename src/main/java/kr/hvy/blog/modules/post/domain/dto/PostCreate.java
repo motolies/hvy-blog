@@ -1,8 +1,6 @@
 package kr.hvy.blog.modules.post.domain.dto;
 
-import jakarta.persistence.Column;
 import kr.hvy.blog.modules.category.domain.CategoryConstant;
-import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -13,6 +11,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 public class PostCreate {
+
   @Builder.Default
   String subject = "";
   @Builder.Default

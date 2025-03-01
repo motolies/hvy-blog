@@ -50,7 +50,7 @@ public class AuthController {
     UserResponse user = userManagementUseCase.login(loginRequest);
     String token = userManagementUseCase.makeToken(user);
 
-    ResponseCookie springCookie = cookieProvider.setSpringCookie(request, tokenHeader, token);
+    ResponseCookie springCookie = cookieProvider.createCookie(request, tokenHeader, token);
 
     return ResponseEntity
         .status(HttpStatus.OK)

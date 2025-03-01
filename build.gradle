@@ -52,6 +52,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.redisson:redisson-spring-boot-starter:3.44.0'
 
+    // https://mvnrepository.com/artifact/com.google.guava/guava
+    implementation 'com.google.guava:guava:33.4.0-jre'
+
 
     // testContainer
     testImplementation 'org.testcontainers:testcontainers'

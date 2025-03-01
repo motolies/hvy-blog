@@ -8,7 +8,7 @@ import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.blog.modules.post.domain.PostMapper;
 import kr.hvy.blog.modules.post.domain.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.domain.dto.PostPrevNextResponse;
-import kr.hvy.blog.modules.post.domain.dto.SearchObjectDto;
+import kr.hvy.blog.modules.post.domain.dto.SearchObject;
 import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
 import kr.hvy.blog.modules.post.adapter.out.persistence.JpaPostRepository;
 import kr.hvy.blog.modules.post.adapter.out.persistence.mapper.PostRDBMapper;
@@ -79,8 +79,8 @@ public class PostManagementAdapter implements PostManagementPort {
   }
 
   @Override
-  public List<PostNoBodyResponse> findBySearchObject(Boolean isAdmin, SearchObjectDto searchObjectDto) {
-    return postRDBMapper.findBySearchObject(isAdmin, searchObjectDto);
+  public List<PostNoBodyResponse> findBySearchObject(Boolean isAdmin, SearchObject searchObject) {
+    return postRDBMapper.findBySearchObject(isAdmin, searchObject);
   }
 
   @Override

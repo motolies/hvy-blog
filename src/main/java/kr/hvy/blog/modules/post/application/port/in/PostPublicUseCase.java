@@ -5,7 +5,7 @@ import kr.hvy.blog.modules.post.domain.core.Page;
 import kr.hvy.blog.modules.post.domain.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.domain.dto.PostPrevNextResponse;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;
-import kr.hvy.blog.modules.post.domain.dto.SearchObjectDto;
+import kr.hvy.blog.modules.post.domain.dto.SearchObject;
 
 public interface PostPublicUseCase {
 
@@ -32,6 +32,6 @@ public interface PostPublicUseCase {
   /**
    * 검색 상세(base64 인코딩한 파라미터(json object)
    */
-  Page<PostNoBodyResponse> searchPosts(SearchObjectDto searchObjectDto);
+  Page<PostNoBodyResponse> searchPosts(SearchObject searchObject);
 
 }

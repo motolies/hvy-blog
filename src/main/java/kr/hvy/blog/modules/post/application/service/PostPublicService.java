@@ -10,7 +10,7 @@ import kr.hvy.blog.modules.post.domain.core.Page;
 import kr.hvy.blog.modules.post.domain.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.domain.dto.PostPrevNextResponse;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;
-import kr.hvy.blog.modules.post.domain.dto.SearchObjectDto;
+import kr.hvy.blog.modules.post.domain.dto.SearchObject;
 import kr.hvy.common.layer.UseCase;
 import kr.hvy.common.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
@@ -47,16 +47,16 @@ public class PostPublicService implements PostPublicUseCase {
   }
 
   @Override
-  public Page<PostNoBodyResponse> searchPosts(SearchObjectDto searchObjectDto) {
+  public Page<PostNoBodyResponse> searchPosts(SearchObject searchObject) {
     // id를 먼저 가져온 후 해당 아이디로 검색
 
-    List<PostNoBodyResponse> list = postManagementPort.findBySearchObject(SecurityUtils.hasAdminRole(), searchObjectDto);
+    List<PostNoBodyResponse> list = postManagementPort.findBySearchObject(SecurityUtils.hasAdminRole(), searchObject);
     int count = postManagementPort.getTotalCount();
 
      Page<PostNoBodyResponse> pager = new Page<>();
     pager.setList(list);
-    pager.setPage(searchObjectDto.getPage());
-    pager.setPageSize(searchObjectDto.getPageSize());
+    pager.setPage(searchObject.getPage());
+    pager.setPageSize(searchObject.getPageSize());
     pager.setTotalCount(count);
     return pager;
   }

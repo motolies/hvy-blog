@@ -2,17 +2,15 @@ package kr.hvy.blog.modules.file.application.service;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 
 public abstract class AbstractFileManagementService {
 
-  protected static Path rootLocation;
+  protected Path rootLocation;
 
-  @Value("${path.upload}")
-  public void setRootLocation(String path) {
-    rootLocation = Paths.get(path);
+  public AbstractFileManagementService(String rootLocation) {
+    this.rootLocation = Paths.get(rootLocation);
   }
 
   protected Resource loadAsResource(String fileName) throws Exception {

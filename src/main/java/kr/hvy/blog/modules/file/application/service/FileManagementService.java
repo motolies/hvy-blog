@@ -13,13 +13,12 @@ import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
 import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.common.file.FileStoreUtils;
 import kr.hvy.common.layer.UseCase;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.transaction.annotation.Transactional;
 
 @UseCase
 @Transactional
-@RequiredArgsConstructor
 public class FileManagementService extends AbstractFileManagementService implements FileManagementUseCase {
 
   private final FileManagementPort fileManagementPort;
@@ -27,6 +26,15 @@ public class FileManagementService extends AbstractFileManagementService impleme
   private final PostManagementPort postManagementPort;
   private final FileCreateSpecification fileCreateSpecification = new FileCreateSpecification();
   private final FileMapper fileMapper;
+
+  public FileManagementService(@Value("${path.upload}") String rootLocation, FileManagementPort fileManagementPort, FileService fileService, PostManagementPort postManagementPort,
+      FileMapper fileMapper) {
+    super(rootLocation);
+    this.fileManagementPort = fileManagementPort;
+    this.fileService = fileService;
+    this.postManagementPort = postManagementPort;
+    this.fileMapper = fileMapper;
+  }
 
 
   @Override
@@ -55,9 +63,7 @@ public class FileManagementService extends AbstractFileManagementService impleme
 
   @Override
   public Long delete(Long id) {
-    // todo : 실제로 지우지 말고 deleted flag로 처리
     File file = fileManagementPort.findById(id);
-    FileStoreUtils.deleteFile(rootLocation.toString(), file.getPath());
     fileManagementPort.deleteById(id);
     return id;
   }
@@ -67,6 +73,10 @@ public class FileManagementService extends AbstractFileManagementService impleme
     return fileManagementPort.findByPostId(postId).stream()
         .map(fileMapper::toResponse)
         .toList();
+  }
+
+  public void deleteFile(String path) {
+    FileStoreUtils.deleteFile(rootLocation.toString(), path);
   }
 
 }

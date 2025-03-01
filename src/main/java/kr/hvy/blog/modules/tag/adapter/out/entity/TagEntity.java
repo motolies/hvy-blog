@@ -49,8 +49,7 @@ public class TagEntity {
   private String name;
 
 
-  @ManyToMany(fetch = FetchType.LAZY, targetEntity = PostEntity.class)
-  @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
+  @ManyToMany(fetch = FetchType.LAZY, targetEntity = PostEntity.class, cascade = {jakarta.persistence.CascadeType.PERSIST, jakarta.persistence.CascadeType.MERGE})
   @JoinTable(
       name = "post_tag_map",
       joinColumns = @JoinColumn(name = "tagId", foreignKey = @ForeignKey(name = "fk_post_tag_map_tag_id")),
@@ -83,5 +82,7 @@ public class TagEntity {
     this.posts.remove(postEntity);
     postEntity.getTags().remove(this);
   }
+
+
 
 }

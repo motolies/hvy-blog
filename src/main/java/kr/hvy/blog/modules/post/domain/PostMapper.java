@@ -1,9 +1,9 @@
 package kr.hvy.blog.modules.post.domain;
 
 import kr.hvy.blog.modules.file.domain.FileMapper;
+import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostResponse;
-import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
 import kr.hvy.blog.modules.tag.domain.TagMapper;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -19,6 +19,8 @@ public interface PostMapper {
 
   PostMapper INSTANCE = Mappers.getMapper(PostMapper.class);
 
+  @Mapping(source = "public", target = "publicAccess")
+  @Mapping(source = "main", target = "mainPage")
   PostEntity toEntity(Post post);
 
   PostResponse toResponse(Post post);
@@ -29,6 +31,8 @@ public interface PostMapper {
   @Mapping(target = "tags.posts", ignore = true)
   @Mapping(target = "files.post", ignore = true)
   @Mapping(source = "category.id", target = "categoryId")
+  @Mapping(source = "publicAccess", target = "isPublic")
+  @Mapping(source = "mainPage", target = "isMain")
   Post toDomain(PostEntity postEntity);
 
   @ObjectFactory

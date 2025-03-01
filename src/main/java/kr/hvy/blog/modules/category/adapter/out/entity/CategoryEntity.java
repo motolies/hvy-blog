@@ -69,15 +69,13 @@ public class CategoryEntity {
   private CategoryEntity parent;
 
   @JsonIgnore
-  @OneToMany(mappedBy = "category", targetEntity = PostEntity.class, fetch = FetchType.LAZY)
-  @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
+  @OneToMany(mappedBy = "category", targetEntity = PostEntity.class, fetch = FetchType.LAZY, cascade = {jakarta.persistence.CascadeType.PERSIST, jakarta.persistence.CascadeType.MERGE})
   private Set<PostEntity> posts = new HashSet<>();
 
 
   @JsonManagedReference
   @OrderBy("seq ASC, name ASC")
-  @OneToMany(mappedBy = "parent", targetEntity = CategoryEntity.class, fetch = FetchType.LAZY)
-  @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
+  @OneToMany(mappedBy = "parent", targetEntity = CategoryEntity.class, fetch = FetchType.LAZY, cascade = {jakarta.persistence.CascadeType.PERSIST, jakarta.persistence.CascadeType.MERGE})
   private List<CategoryEntity> categories = new ArrayList<>();
 
 

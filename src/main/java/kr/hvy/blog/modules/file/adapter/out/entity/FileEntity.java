@@ -21,6 +21,8 @@ import org.hibernate.annotations.CascadeType;
 @AllArgsConstructor
 public class FileEntity {
 
+    // todo : 파일이 삭제될 떄 실제 파일도 삭제될 수 있도록 처리, 엔티티 리스너?
+
     @Id
     @Tsid
     private Long id;
@@ -39,8 +41,7 @@ public class FileEntity {
     private String originId;
 
 
-    @ManyToOne(fetch = FetchType.LAZY, targetEntity = PostEntity.class)
-    @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
+    @ManyToOne(fetch = FetchType.LAZY, targetEntity = PostEntity.class, cascade = {jakarta.persistence.CascadeType.PERSIST, jakarta.persistence.CascadeType.MERGE})
     @JoinColumn(name = "postId", referencedColumnName = "id", nullable = false, foreignKey = @ForeignKey(name = "fk_file_post"))
     @JsonBackReference("post-files")
     private PostEntity post;

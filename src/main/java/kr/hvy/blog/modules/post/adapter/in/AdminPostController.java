@@ -46,7 +46,7 @@ public class AdminPostController {
    * 포스트 삭제
    */
   @DeleteMapping("/{id}")
-  public ResponseEntity<?> delete(Long id) {
+  public ResponseEntity<?> delete(@PathVariable Long id) {
     return ResponseEntity
         .ok()
         .body(postManagementUseCase.delete(id));

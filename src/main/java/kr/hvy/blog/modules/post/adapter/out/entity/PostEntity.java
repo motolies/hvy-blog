@@ -3,11 +3,13 @@ package kr.hvy.blog.modules.post.adapter.out.entity;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -17,6 +19,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreRemove;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
@@ -34,8 +37,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.With;
 import org.apache.commons.lang3.StringUtils;
-import org.hibernate.annotations.Cascade;
-import org.hibernate.annotations.CascadeType;
 
 @Entity
 @Table(name = "post"
@@ -75,22 +76,19 @@ public class PostEntity {
   private int viewCount;
 
   @OrderBy("name ASC")
-  @ManyToMany(mappedBy = "posts", fetch = FetchType.LAZY, targetEntity = TagEntity.class)
-  @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
+  @ManyToMany(mappedBy = "posts", fetch = FetchType.LAZY, targetEntity = TagEntity.class, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
   @JsonManagedReference("post-tags")
   @Builder.Default
   private Set<TagEntity> tags = new HashSet<>();
 
-  // todo : 나중에 파일 삭제시에 실제 파일도 삭제할 수 있도록 변경 예쩡 (cascade = CascadeType.ALL)
   @OrderBy("originName ASC")
-  @OneToMany(mappedBy = "post", fetch = FetchType.LAZY, targetEntity = FileEntity.class)
-  @Cascade({CascadeType.SAVE_UPDATE, CascadeType.LOCK})
+  @OneToMany(mappedBy = "post", fetch = FetchType.LAZY, targetEntity = FileEntity.class, cascade = CascadeType.ALL, orphanRemoval = true)
   @JsonManagedReference("post-files")
   @Builder.Default
   private Set<FileEntity> files = new HashSet<>();
 
   @ManyToOne(fetch = FetchType.LAZY, targetEntity = CategoryEntity.class)
-  @JoinColumn(name = "categoryId", referencedColumnName = "id", nullable = false, foreignKey = @jakarta.persistence.ForeignKey(name = "fk_post_category_id"))
+  @JoinColumn(name = "categoryId", referencedColumnName = "id", nullable = false, foreignKey = @ForeignKey(name = "fk_post_category_id"))
   private CategoryEntity category;
 
   @Embedded
@@ -119,6 +117,13 @@ public class PostEntity {
     }
   }
 
+  @PreRemove
+  protected void preRemove() {
+    // https://www.baeldung.com/jpa-remove-entity-many-to-many
+    // 다대다 관계에서 연관된 엔티티를 삭제할 때는 연관된 엔티티의 컬렉션에서 삭제해야 한다.
+    // 복사본을 만들어서 순회해야 null pointer exception이 발생하지 않는다.
+    new HashSet<>(this.tags).forEach(this::removeTag);
+  }
 
   /*****************************************************************************
    * 연관관계 메소드

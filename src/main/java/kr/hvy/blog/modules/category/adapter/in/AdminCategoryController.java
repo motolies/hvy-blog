@@ -3,7 +3,6 @@ package kr.hvy.blog.modules.category.adapter.in;
 import kr.hvy.blog.modules.category.application.port.in.CategoryManagementUseCase;
 import kr.hvy.blog.modules.category.domain.dto.CategoryCreate;
 import kr.hvy.blog.modules.category.domain.dto.CategoryUpdate;
-import kr.hvy.blog.modules.common.dto.DeleteResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -30,12 +29,9 @@ public class AdminCategoryController {
 
   @DeleteMapping("/{categoryId}")
   public ResponseEntity<?> delete(@PathVariable String categoryId) {
-    DeleteResponse<String> response = DeleteResponse.<String>builder()
-        .id(categoryManagementUseCase.delete(categoryId))
-        .build();
     return ResponseEntity
         .ok()
-        .body(response);
+        .body(categoryManagementUseCase.delete(categoryId));
   }
 
   @PutMapping("/{categoryId}")

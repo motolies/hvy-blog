@@ -11,6 +11,7 @@ import kr.hvy.blog.modules.file.domain.dto.FileResponse;
 import kr.hvy.blog.modules.file.domain.specification.FileCreateSpecification;
 import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
 import kr.hvy.blog.modules.post.domain.Post;
+import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.file.FileStoreUtils;
 import kr.hvy.common.layer.UseCase;
 import org.springframework.beans.factory.annotation.Value;
@@ -58,14 +59,13 @@ public class FileManagementService extends AbstractFileManagementService impleme
       throw new RuntimeException(e);
     }
 
-
   }
 
   @Override
-  public Long delete(Long id) {
-    File file = fileManagementPort.findById(id);
+  public DeleteResponse<Long> delete(Long id) {
     fileManagementPort.deleteById(id);
-    return id;
+    return DeleteResponse.<Long>builder()
+        .id(id).build();
   }
 
   @Override

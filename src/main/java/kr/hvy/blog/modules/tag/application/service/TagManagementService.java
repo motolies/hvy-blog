@@ -7,6 +7,7 @@ import kr.hvy.blog.modules.tag.domain.TagMapper;
 import kr.hvy.blog.modules.tag.domain.TagService;
 import kr.hvy.blog.modules.tag.domain.dto.TagCreate;
 import kr.hvy.blog.modules.tag.domain.dto.TagResponse;
+import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.layer.UseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,7 +30,9 @@ public class TagManagementService implements TagManagementUseCase {
   }
 
   @Override
-  public Long delete(Long tagId) {
-    return tagManagementPort.deleteById(tagId);
+  public DeleteResponse<Long> delete(Long tagId) {
+    tagManagementPort.deleteById(tagId);
+    return DeleteResponse.<Long>builder()
+        .id(tagId).build();
   }
 }

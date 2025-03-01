@@ -12,6 +12,7 @@ import kr.hvy.blog.modules.auth.domain.dto.LoginRequest;
 import kr.hvy.blog.modules.auth.domain.dto.RsaKeyResponse;
 import kr.hvy.blog.modules.auth.domain.dto.UserCreate;
 import kr.hvy.blog.modules.auth.domain.dto.UserResponse;
+import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.layer.UseCase;
 import kr.hvy.common.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
@@ -70,9 +71,9 @@ public class UserManagementService implements UserManagementUseCase, UserDetails
   }
 
   @Override
-  public Long delete(Long aLong) {
-    UserManagementUseCase.super.delete(aLong);
-    return aLong;
+  public DeleteResponse<Long> delete(Long id) {
+    UserManagementUseCase.super.delete(id);
+    return DeleteResponse.<Long>builder().id(id).build();
   }
 
   @Override

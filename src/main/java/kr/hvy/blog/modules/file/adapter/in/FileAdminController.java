@@ -1,9 +1,9 @@
 package kr.hvy.blog.modules.file.adapter.in;
 
 import io.hypersistence.tsid.TSID;
-import kr.hvy.blog.modules.common.dto.DeleteResponse;
 import kr.hvy.blog.modules.file.application.port.in.FileManagementUseCase;
 import kr.hvy.blog.modules.file.domain.dto.FileCreate;
+import kr.hvy.common.domain.dto.DeleteResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -50,12 +50,11 @@ public class FileAdminController {
   public ResponseEntity<?> delete(@PathVariable String fileId) {
     Long id = TSID.from(fileId).toLong();
     fileManagementUseCase.delete(id);
-    DeleteResponse<String> deleteResponse = DeleteResponse.<String>builder()
-        .id(fileId)
-        .build();
     return ResponseEntity
         .ok()
-        .body(deleteResponse);
+        .body(DeleteResponse.<String>builder()
+            .id(fileId)
+            .build());
   }
 
 }

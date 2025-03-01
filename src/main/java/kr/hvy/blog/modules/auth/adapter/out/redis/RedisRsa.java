@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.auth.adapter.out.redis;
 
 import org.springframework.data.annotation.Id;
-import kr.hvy.blog.modules.common.dto.RedisConstant;
+import kr.hvy.blog.modules.common.RedisConstant;
 import lombok.Builder;
 import lombok.Data;
 import org.springframework.data.redis.core.RedisHash;

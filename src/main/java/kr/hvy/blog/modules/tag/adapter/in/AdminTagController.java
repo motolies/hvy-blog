@@ -1,6 +1,5 @@
 package kr.hvy.blog.modules.tag.adapter.in;
 
-import kr.hvy.blog.modules.common.dto.DeleteResponse;
 import kr.hvy.blog.modules.tag.application.port.in.TagManagementUseCase;
 import kr.hvy.blog.modules.tag.domain.dto.TagCreate;
 import lombok.RequiredArgsConstructor;
@@ -28,14 +27,9 @@ public class AdminTagController {
 
   @DeleteMapping("/{tagId}")
   public ResponseEntity<?> delete(@PathVariable Long tagId) {
-
-    DeleteResponse<Long> response = DeleteResponse.<Long>builder()
-        .id(tagManagementUseCase.delete(tagId))
-        .build();
-
     return ResponseEntity
         .ok()
-        .body(response);
+        .body(tagManagementUseCase.delete(tagId));
   }
 
 }

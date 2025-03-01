@@ -8,6 +8,7 @@ import kr.hvy.blog.modules.category.domain.CategoryService;
 import kr.hvy.blog.modules.category.domain.dto.CategoryCreate;
 import kr.hvy.blog.modules.category.domain.dto.CategoryResponse;
 import kr.hvy.blog.modules.category.domain.dto.CategoryUpdate;
+import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.layer.UseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,10 +40,12 @@ public class CategoryManagementService implements CategoryManagementUseCase {
   }
 
   @Override
-  public String delete(String categoryId) {
+  public DeleteResponse<String> delete(String categoryId) {
     Category category = categoryManagementPort.findById(categoryId);
     categoryService.delete(category);
-    return categoryManagementPort.deleteById(categoryId);
+    categoryManagementPort.deleteById(categoryId);
+    return DeleteResponse.<String>builder()
+        .id(categoryId).build();
   }
 
 

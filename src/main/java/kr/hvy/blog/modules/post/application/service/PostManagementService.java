@@ -17,6 +17,7 @@ import kr.hvy.blog.modules.tag.application.port.out.TagManagementPort;
 import kr.hvy.blog.modules.tag.domain.TagMapper;
 import kr.hvy.blog.modules.tag.domain.dto.TagCreate;
 import kr.hvy.blog.modules.tag.domain.dto.TagResponse;
+import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.layer.UseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,9 +53,10 @@ public class PostManagementService implements PostManagementUseCase {
   }
 
   @Override
-  public Long delete(Long id) {
+  public DeleteResponse<Long> delete(Long id) {
     postManagementPort.deleteById(id);
-    return id;
+    return DeleteResponse.<Long>builder()
+        .id(id).build();
   }
 
   @Override

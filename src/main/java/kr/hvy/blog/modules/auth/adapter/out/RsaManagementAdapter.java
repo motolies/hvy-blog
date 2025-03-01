@@ -10,7 +10,7 @@ import java.util.stream.IntStream;
 import kr.hvy.blog.modules.auth.adapter.out.persistence.JpaRsaRepository;
 import kr.hvy.blog.modules.auth.adapter.out.redis.RedisRsa;
 import kr.hvy.blog.modules.auth.application.port.out.RsaManagementUseCase;
-import kr.hvy.blog.modules.common.dto.RedisConstant;
+import kr.hvy.blog.modules.common.RedisConstant;
 import kr.hvy.common.layer.OutputAdapter;
 import kr.hvy.common.security.encrypt.RSAEncrypt;
 import lombok.RequiredArgsConstructor;

@@ -1,15 +1,19 @@
 package kr.hvy.blog.modules.auth.application.service;
 
 import kr.hvy.blog.infra.security.JwtTokenProvider;
+import kr.hvy.blog.modules.auth.adapter.out.redis.RedisRsa;
 import kr.hvy.blog.modules.auth.application.port.in.UserManagementUseCase;
+import kr.hvy.blog.modules.auth.application.port.out.RsaManagementUseCase;
 import kr.hvy.blog.modules.auth.application.port.out.UserManagementPort;
 import kr.hvy.blog.modules.auth.domain.User;
 import kr.hvy.blog.modules.auth.domain.UserMapper;
 import kr.hvy.blog.modules.auth.domain.UserService;
 import kr.hvy.blog.modules.auth.domain.dto.LoginRequest;
+import kr.hvy.blog.modules.auth.domain.dto.RsaKeyResponse;
 import kr.hvy.blog.modules.auth.domain.dto.UserCreate;
 import kr.hvy.blog.modules.auth.domain.dto.UserResponse;
 import kr.hvy.common.layer.UseCase;
+import kr.hvy.common.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -24,10 +28,25 @@ public class UserManagementService implements UserManagementUseCase, UserDetails
   private final UserMapper userMapper;
   private final UserManagementPort userManagementPort;
   private final UserService userService;
+  private final RsaManagementUseCase rsaManagementUseCase;
+
+  @Override
+  public RsaKeyResponse getRsaKey() {
+    String rsaKey = rsaManagementUseCase.getRandomRsaPublicKey();
+    return RsaKeyResponse.builder().publicKey(rsaKey).build();
+  }
+
+  @Override
+  public UserResponse getProfile() {
+    String loginId = SecurityUtils.getUsername();
+    User user = userManagementPort.findByUsername(loginId);
+    return userMapper.toResponse(user);
+  }
 
   public UserResponse login(LoginRequest loginRequest) {
     User user = userManagementPort.findByUsername(loginRequest.getUsername());
-    userService.login(user, loginRequest);
+    RedisRsa rsa = rsaManagementUseCase.findByPublicKey(loginRequest.getPublicKey());
+    userService.login(user, loginRequest, rsa);
     return userMapper.toResponse(user);
   }
 
@@ -57,8 +76,8 @@ public class UserManagementService implements UserManagementUseCase, UserDetails
   }
 
   @Override
-  public UserResponse findById(Long aLong) {
-    return UserManagementUseCase.super.findById(aLong);
+  public UserResponse findById(Long id) {
+    return UserManagementUseCase.super.findById(id);
   }
 
   @Override
@@ -66,4 +85,6 @@ public class UserManagementService implements UserManagementUseCase, UserDetails
     User user = userManagementPort.findByUsername(username);
     return userMapper.toSecurityUser(user);
   }
+
+
 }

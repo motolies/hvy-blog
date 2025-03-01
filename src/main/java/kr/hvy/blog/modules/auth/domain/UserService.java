@@ -1,9 +1,12 @@
 package kr.hvy.blog.modules.auth.domain;
 
+import java.util.Base64;
+import kr.hvy.blog.modules.auth.adapter.out.redis.RedisRsa;
 import kr.hvy.blog.modules.auth.domain.dto.LoginRequest;
 import kr.hvy.blog.modules.auth.domain.dto.UserCreate;
 import kr.hvy.blog.modules.auth.domain.specification.UserCreateSpecification;
 import kr.hvy.blog.modules.auth.domain.specification.UserLoginSpecification;
+import kr.hvy.common.security.encrypt.RSAEncrypt;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -14,8 +17,16 @@ public class UserService {
 
   private final PasswordEncoder passwordEncoder;
 
-  public void login(User user, LoginRequest loginRequest) {
-    if (!passwordEncoder.matches(loginRequest.getPassword(), user.getPassword())) {
+  public void login(User user, LoginRequest loginRequest, RedisRsa rsa) {
+
+    String password = null;
+    try {
+      password = RSAEncrypt.getDecryptMessage(loginRequest.getPassword(), Base64.getDecoder().decode(rsa.getPrivateKey()));
+    } catch (Exception e) {
+      throw new IllegalArgumentException("Password does not match.");
+    }
+
+    if (!passwordEncoder.matches(password, user.getPassword())) {
       throw new IllegalArgumentException("Password does not match.");
     }
 

@@ -7,11 +7,14 @@ import kr.hvy.blog.modules.auth.domain.dto.LoginRequest;
 import kr.hvy.blog.modules.auth.domain.dto.UserCreate;
 import kr.hvy.blog.modules.auth.domain.dto.UserResponse;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.ObjectUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,6 +30,20 @@ public class AuthController {
 
   private final CookieProvider cookieProvider;
   private final UserManagementUseCase userManagementUseCase;
+
+  @PostMapping("/shake")
+  public ResponseEntity<?> shake() {
+    return ResponseEntity.ok(userManagementUseCase.getRsaKey());
+  }
+
+  @GetMapping("/profile")
+  public ResponseEntity<?> getMeInfo(Authentication authentication) {
+    if(ObjectUtils.isEmpty(authentication)) {
+      return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+    }
+
+    return ResponseEntity.ok(userManagementUseCase.getProfile());
+  }
 
   @PostMapping("/login")
   public ResponseEntity<?> login(HttpServletRequest request, @RequestBody LoginRequest loginRequest) {

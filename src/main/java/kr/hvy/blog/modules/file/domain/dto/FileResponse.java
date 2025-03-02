@@ -12,7 +12,11 @@ public class FileResponse {
   String originName;
   String type;
   Long fileSize;
-  boolean isDelete;
+
   @Builder.Default
   EventLog created = EventLog.defaultValues();
+
+  public String getResourceUri() {
+    return "/api/file/" + this.id;
+  }
 }

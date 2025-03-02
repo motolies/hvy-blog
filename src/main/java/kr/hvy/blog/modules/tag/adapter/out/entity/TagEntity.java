@@ -4,6 +4,7 @@ package kr.hvy.blog.modules.tag.adapter.out.entity;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
@@ -27,8 +28,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.With;
-import org.hibernate.annotations.Cascade;
-import org.hibernate.annotations.CascadeType;
 import org.hibernate.annotations.Formula;
 
 @Entity
@@ -49,7 +48,7 @@ public class TagEntity {
   private String name;
 
 
-  @ManyToMany(fetch = FetchType.LAZY, targetEntity = PostEntity.class, cascade = {jakarta.persistence.CascadeType.PERSIST, jakarta.persistence.CascadeType.MERGE})
+  @ManyToMany(fetch = FetchType.LAZY, targetEntity = PostEntity.class, cascade = {jakarta.persistence.CascadeType.PERSIST, CascadeType.MERGE})
   @JoinTable(
       name = "post_tag_map",
       joinColumns = @JoinColumn(name = "tagId", foreignKey = @ForeignKey(name = "fk_post_tag_map_tag_id")),
@@ -82,7 +81,6 @@ public class TagEntity {
     this.posts.remove(postEntity);
     postEntity.getTags().remove(this);
   }
-
 
 
 }

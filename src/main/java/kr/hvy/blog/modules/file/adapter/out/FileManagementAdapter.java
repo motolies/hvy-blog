@@ -6,6 +6,7 @@ import kr.hvy.blog.modules.file.domain.File;
 import kr.hvy.blog.modules.file.domain.FileMapper;
 import kr.hvy.blog.modules.file.adapter.out.entity.FileEntity;
 import kr.hvy.blog.modules.file.adapter.out.persistence.JpaFileRepository;
+import kr.hvy.blog.modules.post.adapter.out.persistence.JpaPostRepository;
 import kr.hvy.blog.modules.post.domain.PostMapper;
 import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
 import kr.hvy.common.layer.OutputAdapter;
@@ -18,11 +19,13 @@ public class FileManagementAdapter implements FileManagementPort {
   private final FileMapper fileMapper;
   private final PostMapper postMapper;
   private final JpaFileRepository jpaFileRepository;
+  private final JpaPostRepository jpaPostRepository;
 
   @Override
   public File save(File file) {
     FileEntity fileEntity = fileMapper.toEntity(file);
-    PostEntity post = postMapper.toEntity(file.getPost());
+    PostEntity post = jpaPostRepository.findById(file.getPost().getId())
+        .orElseThrow(() -> new RuntimeException("Post not found"));
     fileEntity.setPost(post);
 
     FileEntity saved = jpaFileRepository.save(fileEntity);

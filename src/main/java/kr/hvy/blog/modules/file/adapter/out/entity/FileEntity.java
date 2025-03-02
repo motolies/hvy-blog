@@ -10,6 +10,7 @@ import io.hypersistence.tsid.TSID;
 import io.hypersistence.utils.hibernate.id.Tsid;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
@@ -54,11 +55,11 @@ public class FileEntity {
     this.id = TSID.from(id).toLong();
   }
 
-  @Column(nullable = false, length = 64)
+  @Column(nullable = true, length = 64)
   private String originId;
 
-
-  @ManyToOne(fetch = FetchType.LAZY, targetEntity = PostEntity.class, cascade = {jakarta.persistence.CascadeType.PERSIST, jakarta.persistence.CascadeType.MERGE})
+  // post 없이 저장하거나, file 저장시 post를 저장하지 않으므로 CascadeType.PERSIST 제거
+  @ManyToOne(fetch = FetchType.LAZY, targetEntity = PostEntity.class, cascade = {CascadeType.MERGE})
   @JoinColumn(name = "postId", referencedColumnName = "id", nullable = false, foreignKey = @ForeignKey(name = "fk_file_post"))
   @JsonBackReference("post-files")
   private PostEntity post;

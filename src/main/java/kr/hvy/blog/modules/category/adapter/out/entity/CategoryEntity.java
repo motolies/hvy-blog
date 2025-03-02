@@ -25,8 +25,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.With;
-import org.hibernate.annotations.Cascade;
-import org.hibernate.annotations.CascadeType;
+
+import jakarta.persistence.CascadeType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.Parameter;
 
@@ -63,19 +63,18 @@ public class CategoryEntity {
   private String parentId;
 
   @JsonBackReference
-  @ManyToOne(targetEntity = CategoryEntity.class, fetch = FetchType.LAZY)
-  @org.hibernate.annotations.Cascade({org.hibernate.annotations.CascadeType.LOCK})
+  @ManyToOne(targetEntity = CategoryEntity.class, fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
   @JoinColumn(name = "parentId", referencedColumnName = "Id", nullable = true, insertable = false, updatable = false, foreignKey = @ForeignKey(name = "fk_parent_id"))
   private CategoryEntity parent;
 
   @JsonIgnore
-  @OneToMany(mappedBy = "category", targetEntity = PostEntity.class, fetch = FetchType.LAZY, cascade = {jakarta.persistence.CascadeType.PERSIST, jakarta.persistence.CascadeType.MERGE})
+  @OneToMany(mappedBy = "category", targetEntity = PostEntity.class, fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
   private Set<PostEntity> posts = new HashSet<>();
 
 
   @JsonManagedReference
   @OrderBy("seq ASC, name ASC")
-  @OneToMany(mappedBy = "parent", targetEntity = CategoryEntity.class, fetch = FetchType.LAZY, cascade = {jakarta.persistence.CascadeType.PERSIST, jakarta.persistence.CascadeType.MERGE})
+  @OneToMany(mappedBy = "parent", targetEntity = CategoryEntity.class, fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
   private List<CategoryEntity> categories = new ArrayList<>();
 
 

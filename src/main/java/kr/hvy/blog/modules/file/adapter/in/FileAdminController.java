@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,7 +27,7 @@ public class FileAdminController {
   /**
    * 파일 목록 조회
    */
-  @PostMapping("/list/{postId}")
+  @GetMapping("/list/{postId}")
   public ResponseEntity<?> list(@PathVariable Long postId) {
     return ResponseEntity
         .ok()

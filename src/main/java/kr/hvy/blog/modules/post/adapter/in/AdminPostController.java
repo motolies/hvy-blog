@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.post.adapter.in;
 
+import jakarta.validation.Valid;
 import kr.hvy.blog.modules.post.application.port.in.PostManagementUseCase;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
 import kr.hvy.blog.modules.post.domain.dto.PostPublicRequest;
@@ -36,7 +37,7 @@ public class AdminPostController {
    * 포스트 수정
    */
   @PutMapping("/{id}")
-  public ResponseEntity<?> update(@PathVariable Long id, @RequestBody PostUpdate postUpdate) {
+  public ResponseEntity<?> update(@PathVariable Long id, @RequestBody @Valid PostUpdate postUpdate) {
     return ResponseEntity
         .ok()
         .body(postManagementUseCase.update(id, postUpdate));

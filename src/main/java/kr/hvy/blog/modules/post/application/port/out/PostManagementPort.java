@@ -8,7 +8,9 @@ import kr.hvy.blog.modules.post.domain.dto.SearchObject;
 
 public interface PostManagementPort {
 
-  Post save(Post post);
+  Post insert(Post post);
+
+  Post update(Post post);
 
   Post findById(Long id);
 

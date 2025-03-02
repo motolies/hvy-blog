@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.post.adapter.out;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import kr.hvy.blog.modules.category.adapter.out.entity.CategoryEntity;
 import kr.hvy.blog.modules.category.adapter.out.persistence.JpaCategoryRepository;
@@ -14,9 +15,12 @@ import kr.hvy.blog.modules.post.adapter.out.persistence.JpaPostRepository;
 import kr.hvy.blog.modules.post.adapter.out.persistence.mapper.PostRDBMapper;
 import kr.hvy.blog.modules.tag.adapter.out.entity.TagEntity;
 import kr.hvy.blog.modules.tag.adapter.out.persistence.JpaTagRepository;
+import kr.hvy.common.domain.embeddable.EventLogEntity;
+import kr.hvy.common.domain.vo.EventLog;
 import kr.hvy.common.exception.DataNotFoundException;
 import kr.hvy.common.layer.OutputAdapter;
 import kr.hvy.common.mybatis.MysqlRowCountRDBMapper;
+import kr.hvy.common.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 
 @OutputAdapter
@@ -31,12 +35,29 @@ public class PostManagementAdapter implements PostManagementPort {
   private final JpaCategoryRepository jpaCategoryRepository;
 
   @Override
-  public Post save(Post post) {
+  public Post insert(Post post) {
     CategoryEntity category = jpaCategoryRepository.findById(post.getCategoryId())
         .orElseThrow(() -> new DataNotFoundException("Not Found Category."));
 
     PostEntity postEntity = postMapper.toEntity(post);
     postEntity.setCategory(category);
+
+    PostEntity savedEntity = jpaPostRepository.save(postEntity);
+    return postMapper.toDomain(savedEntity);
+  }
+
+  @Override
+  public Post update(Post post) {
+    CategoryEntity category = jpaCategoryRepository.findById(post.getCategoryId())
+        .orElseThrow(() -> new DataNotFoundException("Not Found Category."));
+
+    PostEntity postEntity = jpaPostRepository.findById(post.getId())
+        .orElseThrow(()-> new DataNotFoundException("Not Found Post."));
+
+    postEntity.setCategory(category);
+
+    PostEntity updatedEntity = postMapper.toEntity(post);
+    postEntity.update(updatedEntity);
 
     PostEntity savedEntity = jpaPostRepository.save(postEntity);
     return postMapper.toDomain(savedEntity);

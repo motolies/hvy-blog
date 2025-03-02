@@ -87,7 +87,7 @@ public class PostEntity {
   @Builder.Default
   private Set<FileEntity> files = new HashSet<>();
 
-  @ManyToOne(fetch = FetchType.LAZY, targetEntity = CategoryEntity.class)
+  @ManyToOne(fetch = FetchType.LAZY, targetEntity = CategoryEntity.class, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
   @JoinColumn(name = "categoryId", referencedColumnName = "id", nullable = false, foreignKey = @ForeignKey(name = "fk_post_category_id"))
   private CategoryEntity category;
 
@@ -124,6 +124,18 @@ public class PostEntity {
     // 복사본을 만들어서 순회해야 null pointer exception이 발생하지 않는다.
     new HashSet<>(this.tags).forEach(this::removeTag);
   }
+
+  /*****************************************************************************
+   * 비즈니스 로직
+   *****************************************************************************/
+  public void update(PostEntity postEntity) {
+    this.subject = postEntity.getSubject();
+    this.body = postEntity.getBody();
+    this.publicAccess = postEntity.isPublicAccess();
+    this.mainPage = postEntity.isMainPage();
+    this.updated = EventLogEntity.defaultValues();
+  }
+
 
   /*****************************************************************************
    * 연관관계 메소드

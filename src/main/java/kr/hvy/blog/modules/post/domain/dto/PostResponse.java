@@ -17,6 +17,7 @@ public class PostResponse {
   PostStatus status;
   String subject;
   String body;
+  String categoryId;
   CategoryResponse category;
   boolean isPublic;
   boolean isMain;

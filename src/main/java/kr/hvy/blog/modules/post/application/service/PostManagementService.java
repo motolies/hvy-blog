@@ -40,7 +40,7 @@ public class PostManagementService implements PostManagementUseCase {
   @Override
   public PostResponse create(PostCreate createDto) {
     Post post = postMapper.toDomain(createDto);
-    Post savedPost = postManagementPort.save(post);
+    Post savedPost = postManagementPort.insert(post);
     return postMapper.toResponse(savedPost);
   }
 
@@ -48,7 +48,7 @@ public class PostManagementService implements PostManagementUseCase {
   public PostResponse update(Long id, PostUpdate updateDto) {
     Post oldPost = postManagementPort.findById(id);
     Post newPost = postService.update(oldPost, updateDto);
-    Post savedPost = postManagementPort.save(newPost);
+    Post savedPost = postManagementPort.update(newPost);
     return postMapper.toResponse(savedPost);
   }
 
@@ -68,7 +68,7 @@ public class PostManagementService implements PostManagementUseCase {
   public PostResponse setPostVisible(PostPublicRequest postPublicRequest) {
     Post oldPost = postManagementPort.findById(postPublicRequest.getId());
     Post newPost = postService.setPostVisible(oldPost, postPublicRequest.isPublicStatus());
-    Post savedPost = postManagementPort.save(newPost);
+    Post savedPost = postManagementPort.insert(newPost);
     return postMapper.toResponse(savedPost);
   }
 
@@ -93,7 +93,7 @@ public class PostManagementService implements PostManagementUseCase {
     List<Post> posts = postManagementPort.findAll();
     posts.forEach(post -> {
       Post replacePost = postService.migration(post);
-      postManagementPort.save(replacePost);
+      postManagementPort.insert(replacePost);
     });
 
   }

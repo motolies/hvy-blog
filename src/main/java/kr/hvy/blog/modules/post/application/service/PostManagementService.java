@@ -68,7 +68,7 @@ public class PostManagementService implements PostManagementUseCase {
   public PostResponse setPostVisible(PostPublicRequest postPublicRequest) {
     Post oldPost = postManagementPort.findById(postPublicRequest.getId());
     Post newPost = postService.setPostVisible(oldPost, postPublicRequest.isPublicStatus());
-    Post savedPost = postManagementPort.insert(newPost);
+    Post savedPost = postManagementPort.update(newPost);
     return postMapper.toResponse(savedPost);
   }
 
@@ -93,7 +93,7 @@ public class PostManagementService implements PostManagementUseCase {
     List<Post> posts = postManagementPort.findAll();
     posts.forEach(post -> {
       Post replacePost = postService.migration(post);
-      postManagementPort.insert(replacePost);
+      postManagementPort.update(replacePost);
     });
 
   }

@@ -15,12 +15,12 @@
 
     <select id="findBySearchObject" parameterType="SearchObject" resultMap="noBodyContent">
         SELECT SQL_CALC_FOUND_ROWS
-        p.id
-        , p.subject AS SUBJECT
-        , cat.name AS CATEGORY_NAME
-        , p.viewCount AS VIEW_COUNT
-        , p.createdAt AS CREATE_DATE
-        , p.updatedAt AS UPDATE_DATE
+        p.id,
+        p.subject AS SUBJECT,
+        cat.name AS CATEGORY_NAME,
+        p.viewCount AS VIEW_COUNT,
+        p.createdAt AS CREATE_DATE,
+        p.updatedAt AS UPDATE_DATE
         FROM tb_post AS p
         LEFT JOIN tb_category cat ON p.categoryId = cat.id
         LEFT JOIN tb_post_tag_map AS MAP ON MAP.postId = p.id
@@ -45,10 +45,10 @@
                     AND
                     <foreach collection="obj.searchCondition.keywords" index="index" item="key" open="(" separator=" AND " close=")">
                         <choose>
-                            <when test='obj.searchType.equals("TITLE")'>
+                            <when test='obj.searchType.code.equals("TITLE")'>
                                 p.subject LIKE CONCAT('%', #{key.name}, '%')
                             </when>
-                            <when test='obj.searchType.equals("CONTENT")'>
+                            <when test='obj.searchType.code.equals("CONTENT")'>
                                 p.normalBody LIKE CONCAT('%', #{key.name}, '%')
                             </when>
                             <otherwise>
@@ -61,10 +61,10 @@
                     AND
                     <foreach collection="obj.searchCondition.keywords" index="index" item="key" open="(" separator=" OR " close=")">
                         <choose>
-                            <when test='obj.searchType.equals("TITLE")'>
+                            <when test='obj.searchType.code.equals("TITLE")'>
                                 p.subject LIKE CONCAT('%', #{key.name}, '%')
                             </when>
-                            <when test='obj.searchType.equals("CONTENT")'>
+                            <when test='obj.searchType.code.equals("CONTENT")'>
                                 p.normalBody LIKE CONCAT('%', #{key.name}, '%')
                             </when>
                             <otherwise>
@@ -119,12 +119,12 @@
     <select id="findByPublicPosts" resultType="Long">
         SELECT ID
           FROM TB_POST
-         WHERE ISPUBLIC = 1
+         WHERE publicAccess = 1
     </select>
 
     <update id="setMainPost" parameterType="java.lang.Long" statementType="CALLABLE">
         UPDATE TB_POST
-        SET IsMain = IF(Id = #{id}, TRUE, FALSE)
+        SET mainPage = IF(Id = #{id}, TRUE, FALSE)
     </update>
 
 </mapper>

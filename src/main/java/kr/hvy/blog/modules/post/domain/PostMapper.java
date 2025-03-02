@@ -24,6 +24,8 @@ public interface PostMapper {
   PostEntity toEntity(Post post);
 
   @Mapping(source = "category.id", target = "categoryId")
+  @Mapping(source = "public", target = "isPublic")
+  @Mapping(source = "main", target = "isMain")
   PostResponse toResponse(Post post);
 
   Post toDomain(PostCreate postCreate);

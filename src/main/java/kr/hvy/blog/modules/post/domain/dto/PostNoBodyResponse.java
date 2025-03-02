@@ -1,21 +1,20 @@
 package kr.hvy.blog.modules.post.domain.dto;
 
-import java.io.Serial;
-import java.io.Serializable;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
-public class PostNoBodyResponse implements Serializable {
+@NoArgsConstructor
+@AllArgsConstructor
+public class PostNoBodyResponse {
 
-    @Serial
-    private static final long serialVersionUID = -1192209274850300944L;
-
-    private int id;
-    private String subject;
-    private String categoryName;
-    private int viewCount;
-    private java.sql.Timestamp createDate;
-    private java.sql.Timestamp updateDate;
+  private int id;
+  private String subject;
+  private String categoryName;
+  private int viewCount;
+  private java.sql.Timestamp createDate;
+  private java.sql.Timestamp updateDate;
 
 }
 

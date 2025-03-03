@@ -27,7 +27,6 @@ public class PostService {
         .build();
 
     return post
-        .withStatus(update.getStatus())
         .withSubject(update.getSubject())
         .withBody(update.getBody())
         .withCategoryId(update.getCategoryId())

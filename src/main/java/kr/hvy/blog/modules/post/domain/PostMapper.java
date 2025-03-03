@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.post.domain;
 
+import kr.hvy.blog.modules.category.domain.CategoryMapper;
 import kr.hvy.blog.modules.file.domain.FileMapper;
 import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
 import kr.hvy.blog.modules.post.domain.dto.PostCreate;
@@ -12,7 +13,7 @@ import org.mapstruct.factory.Mappers;
 
 @Mapper(componentModel = "spring",
     // 사용하는 하위 맵퍼 클래스 명시
-    uses = {TagMapper.class, FileMapper.class}
+    uses = {TagMapper.class, FileMapper.class, CategoryMapper.class}
 )
 
 public interface PostMapper {

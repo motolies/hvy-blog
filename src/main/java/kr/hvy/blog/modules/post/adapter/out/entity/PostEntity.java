@@ -5,7 +5,6 @@ import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -22,12 +21,10 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreRemove;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import java.util.HashSet;
 import java.util.Set;
 import kr.hvy.blog.modules.category.adapter.out.entity.CategoryEntity;
 import kr.hvy.blog.modules.file.adapter.out.entity.FileEntity;
-import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import kr.hvy.blog.modules.tag.adapter.out.entity.TagEntity;
 import kr.hvy.common.domain.embeddable.EventLogEntity;
 import lombok.AllArgsConstructor;
@@ -39,8 +36,7 @@ import lombok.With;
 import org.apache.commons.lang3.StringUtils;
 
 @Entity
-@Table(name = "post"
-    , uniqueConstraints = @UniqueConstraint(name = "uk_post_id_status", columnNames = {"id", "status"}))
+@Table(name = "post")
 @Getter
 @Setter
 @Builder
@@ -52,10 +48,6 @@ public class PostEntity {
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
-
-  @Convert(converter = PostStatusConverter.class)
-  @Column(nullable = false, columnDefinition = "CHAR(3)")
-  private PostStatus status;
 
   @Column(nullable = false, length = 512)
   private String subject;

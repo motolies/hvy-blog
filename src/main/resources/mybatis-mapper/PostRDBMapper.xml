@@ -25,7 +25,6 @@
         LEFT JOIN tb_category cat ON p.categoryId = cat.id
         LEFT JOIN tb_post_tag_map AS MAP ON MAP.postId = p.id
         <where>
-            p.status = 'PUB'
             <if test='isAdmin == false'>
                 AND c.publicAccess = 1
             </if>
@@ -95,7 +94,7 @@
           WHERE ID < #{id}
          ]]>
         <if test='isAdmin == false'>
-            AND publicAccess = 1 AND status = 'PUB'
+            AND publicAccess = 1
         </if>
         ORDER BY ID DESC
         LIMIT 1) AS PREV
@@ -103,7 +102,7 @@
         FROM TB_POST
         WHERE ID > #{id}
         <if test='isAdmin == false'>
-            AND publicAccess = 1 AND status = 'PUB'
+            AND publicAccess = 1
         </if>
         ORDER BY ID ASC
         LIMIT 1) AS NEXT
@@ -113,7 +112,7 @@
     <select id="findByTempPosts" resultType="Long">
         SELECT ID
           FROM TB_POST
-         WHERE status = 'TEM'
+         WHERE subject is null OR subject = ''
     </select>
 
     <select id="findByPublicPosts" resultType="Long">

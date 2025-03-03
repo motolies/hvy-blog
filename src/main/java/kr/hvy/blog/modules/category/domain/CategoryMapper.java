@@ -3,6 +3,7 @@ package kr.hvy.blog.modules.category.domain;
 import kr.hvy.blog.modules.category.adapter.out.entity.CategoryEntity;
 import kr.hvy.blog.modules.category.domain.dto.CategoryCreate;
 import kr.hvy.blog.modules.category.domain.dto.CategoryResponse;
+import kr.hvy.blog.modules.category.domain.dto.CategorySingleResponse;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.ObjectFactory;
@@ -19,6 +20,9 @@ public interface CategoryMapper {
 
   @Mapping(source = "seq", target = "order")
   CategoryResponse toResponse(CategoryEntity categoryEntity);
+
+  @Mapping(source = "seq", target = "order")
+  CategorySingleResponse toResponseSingle(CategoryEntity categoryEntity);
 
   @Mapping(source = "seq", target = "order")
   CategoryResponse toResponse(Category category);

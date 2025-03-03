@@ -2,7 +2,6 @@ package kr.hvy.blog.modules.category.domain.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
-import kr.hvy.blog.modules.category.domain.Category;
 import lombok.Builder;
 import lombok.Data;
 
@@ -17,5 +16,5 @@ public class CategoryResponse {
   private String parentId;
   private int postCount;
   @JsonProperty("children")
-  List<Category> categories;
+  List<CategoryResponse> categories;
 }

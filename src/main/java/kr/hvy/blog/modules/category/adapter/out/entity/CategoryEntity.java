@@ -27,6 +27,7 @@ import lombok.Setter;
 import lombok.With;
 
 import jakarta.persistence.CascadeType;
+import org.hibernate.annotations.Formula;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.Parameter;
 
@@ -77,5 +78,7 @@ public class CategoryEntity {
   @OneToMany(mappedBy = "parent", targetEntity = CategoryEntity.class, fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
   private List<CategoryEntity> categories = new ArrayList<>();
 
+  @Formula("(select count(*) from tb_post as p where p.categoryId = id)")
+  private int postCount;
 
 }

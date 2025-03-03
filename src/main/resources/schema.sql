@@ -22,7 +22,6 @@ create or replace table tb_category
 create or replace table tb_post
 (
     id           bigint auto_increment        primary key,
-    status       CHAR(3) not null,
     subject      varchar(512)             not null,
     body         longtext                 not null,
     normalBody         longtext                 not null,
@@ -35,7 +34,6 @@ create or replace table tb_post
     updatedAt    datetime(6)              not null,
     updatedBy    varchar(255)             null,
 
-    constraint uk_post_id_status        unique (id, status),
     constraint fk_post_category_id        foreign key (categoryId) references tb_category (id)
 );
 

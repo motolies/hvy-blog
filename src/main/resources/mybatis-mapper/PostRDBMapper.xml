@@ -26,11 +26,11 @@
         LEFT JOIN tb_post_tag_map AS MAP ON MAP.postId = p.id
         <where>
             <if test='isAdmin == false'>
-                AND c.publicAccess = 1
+                AND p.publicAccess = 1
             </if>
             <if test='obj.categories.size > 0'>
-                AND c.categoryId IN (
-                SELECT c.id
+                AND p.categoryId IN (
+                SELECT id
                 FROM tb_category
                 WHERE
                 <foreach collection="obj.categories" item="category" separator=" OR ">

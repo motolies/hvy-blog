@@ -55,9 +55,6 @@ public class FileEntity {
     this.id = TSID.from(id).toLong();
   }
 
-  @Column(nullable = true, length = 64)
-  private String originId;
-
   // post 없이 저장하거나, file 저장시 post를 저장하지 않으므로 CascadeType.PERSIST 제거
   @ManyToOne(fetch = FetchType.LAZY, targetEntity = PostEntity.class, cascade = {CascadeType.MERGE})
   @JoinColumn(name = "postId", referencedColumnName = "id", nullable = false, foreignKey = @ForeignKey(name = "fk_file_post"))

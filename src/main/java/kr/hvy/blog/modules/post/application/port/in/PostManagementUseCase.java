@@ -20,5 +20,4 @@ public interface PostManagementUseCase extends CrudUseCase<Post, PostResponse, P
 
   PostResponse deletePostTag(Long postId, Long tagId);
 
-  void migration();
 }

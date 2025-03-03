@@ -88,13 +88,4 @@ public class PostManagementService implements PostManagementUseCase {
     return postMapper.toResponse(post);
   }
 
-  @Override
-  public void migration() {
-    List<Post> posts = postManagementPort.findAll();
-    posts.forEach(post -> {
-      Post replacePost = postService.migration(post);
-      postManagementPort.update(replacePost);
-    });
-
-  }
 }

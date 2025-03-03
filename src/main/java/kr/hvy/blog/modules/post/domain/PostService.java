@@ -45,15 +45,4 @@ public class PostService {
     return post.withPublic(visible);
   }
 
-
-  public Post migration(Post post) {
-    // body 에 링크 변경
-    String body = post.getBody();
-    Set<File> files = post.getFiles();
-    for (File file : files) {
-      body = body.replaceAll(file.getOriginId(), file.getHexId());
-    }
-    return post.withBody(body);
-
-  }
 }

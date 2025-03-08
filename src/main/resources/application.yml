@@ -26,10 +26,10 @@ spring:
   jpa:
     properties:
       hibernate:
-        show_sql: true
-        use_sql_comments: true
-        format_sql: true
-        type: trace
+#        show_sql: true
+#        use_sql_comments: true
+#        format_sql: true
+#        type: trace
         release_mode: AFTER_TRANSACTION
         dialect: org.hibernate.dialect.MariaDBDialect
     hibernate:
@@ -73,17 +73,26 @@ logging:
     com:
       zaxxer.hikari: ERROR
       zaxxer.hikari.HikariConfig: DEBUG
-    kr.hvy.blog:
-      service: TRACE
-      controller: TRACE
-      security: ERROR
-      repository: TRACE
-      mapper: TRACE
+    kr.hvy:
+      common.db.log: DEBUG # sql log
+      blog.service: TRACE
+      blog.controller: TRACE
+      blog.security: ERROR
+      blog.repository: TRACE
+      blog.mapper: TRACE
     io.github.motolies: DEBUG
   logback:
     rollingpolicy:
       max-history: 7
       max-size: 10MB
+
+datasource-wrapper:
+  wrap: true # wrap 여부, wrap=true로 설정하면 datasource-proxy가 datasource를 감싸서 사용
+  format: true # SQL 포맷팅 여부
+  names: # 여러 데이터소스를 사용할 경우 이름을 지정
+    - "dataSource"
+    - "readDataSource"
+    - "writeDataSource"
 
 # jwt
 jwt:

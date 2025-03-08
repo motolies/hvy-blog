@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableAsync;
 
-@SpringBootApplication(scanBasePackages = {"kr.hvy.blog", "kr.hvy.common"})
+@SpringBootApplication
 @MapperScan(basePackages = {"kr.hvy.blog.modules.*.adapter.out.persistence.mapper", "kr.hvy.common.mybatis"})
 @EnableJpaRepositories(basePackages = {"kr.hvy.blog", "kr.hvy.common"})
 @EntityScan(basePackages = {"kr.hvy.blog", "kr.hvy.common"})

@@ -8,9 +8,13 @@ import kr.hvy.blog.modules.category.domain.CategoryService;
 import kr.hvy.blog.modules.category.domain.dto.CategoryCreate;
 import kr.hvy.blog.modules.category.domain.dto.CategoryResponse;
 import kr.hvy.blog.modules.category.domain.dto.CategoryUpdate;
+import kr.hvy.blog.modules.common.CacheConstant;
 import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.layer.UseCase;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.transaction.annotation.Transactional;
 
 @UseCase
@@ -23,6 +27,10 @@ public class CategoryManagementService implements CategoryManagementUseCase {
   private final CategoryManagementPort categoryManagementPort;
 
   @Override
+  @Caching(evict = {
+      @CacheEvict(cacheNames = CacheConstant.CATEGORY, key = CacheConstant.ALL),
+      @CacheEvict(cacheNames = CacheConstant.CATEGORY, key = CacheConstant.ROOT)
+  })
   public CategoryResponse create(CategoryCreate createDto) {
     Category newCategory = categoryService.create(createDto);
     Category savedCategory = categoryManagementPort.save(newCategory);
@@ -30,6 +38,11 @@ public class CategoryManagementService implements CategoryManagementUseCase {
   }
 
   @Override
+  @CachePut(cacheNames = CacheConstant.CATEGORY, key = "#categoryId")
+  @Caching(evict = {
+      @CacheEvict(cacheNames = CacheConstant.CATEGORY, key = CacheConstant.ALL),
+      @CacheEvict(cacheNames = CacheConstant.CATEGORY, key = CacheConstant.ROOT)
+  })
   public CategoryResponse update(String categoryId, CategoryUpdate updateDto) {
     Category category = categoryManagementPort.findById(categoryId);
     Category parentCategory = categoryManagementPort.findById(updateDto.getParentId());
@@ -40,6 +53,11 @@ public class CategoryManagementService implements CategoryManagementUseCase {
   }
 
   @Override
+  @Caching(evict = {
+      @CacheEvict(cacheNames = CacheConstant.CATEGORY, key = CacheConstant.ALL),
+      @CacheEvict(cacheNames = CacheConstant.CATEGORY, key = CacheConstant.ROOT),
+      @CacheEvict(cacheNames = CacheConstant.CATEGORY, key = "#categoryId")
+  })
   public DeleteResponse<String> delete(String categoryId) {
     Category category = categoryManagementPort.findById(categoryId);
     categoryService.delete(category);

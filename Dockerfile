@@ -1,5 +1,5 @@
 ### STAGE 1: Build ###
-FROM gradle:8.10.2-jdk21-alpine AS builder
+FROM gradle:8.12.1-jdk21-alpine AS builder
 WORKDIR /home/gradle/project
 
 # Gradle 빌드 스크립트 및 Wrapper 파일 복사

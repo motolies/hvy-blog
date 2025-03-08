@@ -1,7 +1,5 @@
-# server
 server:
   port: ${PORT:9090}
-  forward-headers-strategy: framework
 
 spring:
   sql:
@@ -26,10 +24,6 @@ spring:
   jpa:
     properties:
       hibernate:
-#        show_sql: true
-#        use_sql_comments: true
-#        format_sql: true
-#        type: trace
         release_mode: AFTER_TRANSACTION
         dialect: org.hibernate.dialect.MariaDBDialect
     hibernate:
@@ -61,28 +55,23 @@ mybatis:
     call-setters-on-nulls: true
     jdbc-type-for-null: NULL
 
-
 # log
 logging:
   level:
-    org:
-      springframework.web: ERROR
-#      hibernate:
-#        SQL: TRACE
-#        stat: TRACE
-#        type.descriptor.sql.BasicBinder: TRACE
-      mybatis: DEBUG
-    com:
-      zaxxer.hikari: ERROR
-      zaxxer.hikari.HikariConfig: DEBUG
+    org.springframework:
+      web: ERROR
+    org.mybatis: DEBUG
+    com.zaxxer:
+        hikari: ERROR
+        hikari.HikariConfig: DEBUG
     kr.hvy:
       common.db.log: DEBUG # sql log
-      blog.service: TRACE
-      blog.controller: TRACE
-      blog.security: ERROR
-      blog.repository: TRACE
-      blog.mapper: TRACE
-    io.github.motolies: DEBUG
+      blog:
+        service: TRACE
+        controller: TRACE
+        security: ERROR
+        repository: TRACE
+        mapper: TRACE
   logback:
     rollingpolicy:
       max-history: 7
@@ -109,13 +98,6 @@ jwt:
 # file
 path.upload: ${FILE_PATH:${user.home}/skyscape/file}
 
-# springdoc
-springdoc:
-  default-consumes-media-type: application/json
-  default-produces-media-type: application/json
-  swagger-ui:
-    path: /swagger-ui
-
 # slack
 slack:
   token: ${SLACK_BOT_TOKEN:xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx}
@@ -133,6 +115,7 @@ scheduler:
 cookie:
   same-site: LAX
   secure: false
+
 
 ---
 spring:

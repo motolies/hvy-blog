@@ -30,8 +30,7 @@ public class CategoryManagementAdapter implements CategoryManagementPort {
   @Override
   public CategoryResponse findByRoot() {
     return categoryMapper.toResponse(jpaCategoryRepository.findById(CategoryConstant.ROOT_CATEGORY_ID)
-        .orElseThrow(() -> new IllegalArgumentException("카테고리가 존재하지 않습니다.")
-        ));
+        .orElseThrow(() -> new IllegalArgumentException("카테고리가 존재하지 않습니다.")));
   }
 
   @Override

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="true" scanPeriod="30 seconds">
+
+  <appender class="ch.qos.logback.core.ConsoleAppender" name="CONSOLE_JSON">
+    <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+      <layout class="com.example.demo.common.log.TraceJsonLayout">
+        <appendLineSeparator>true</appendLineSeparator>
+        <jsonFormatter class="ch.qos.logback.contrib.jackson.JacksonJsonFormatter"/>
+        <timestampFormat>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</timestampFormat>
+        <timestampFormatTimezoneId>Etc/Utc</timestampFormatTimezoneId>
+      </layout>
+    </encoder>
+  </appender>
+
+  <springProfile name="prod">
+    <root level="INFO">
+      <appender-ref ref="CONSOLE_JSON"/>
+    </root>
+  </springProfile>
+
+  <!-- 로그 파일 위치 및 공통 패턴 정의 -->
+  <property name="LOG_HOME" value="logs"/>
+
+  <!-- 콘솔 출력 appender (모든 프로필 공통) -->
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight([%-5level] [%X{traceId},%X{spanId}]) %cyan(%logger{15}) - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- 기본(default) 프로필이 아닐 때만 파일 롤링 appender 활성화 -->
+  <springProfile name="!default">
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+      <file>${LOG_HOME}/application.log</file>
+      <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+        <fileNamePattern>${LOG_HOME}/application.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+        <maxHistory>7</maxHistory>
+        <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+          <maxFileSize>10MB</maxFileSize>
+        </timeBasedFileNamingAndTriggeringPolicy>
+      </rollingPolicy>
+      <encoder>
+        <pattern>${LOG_PATTERN}</pattern>
+      </encoder>
+    </appender>
+  </springProfile>
+
+  <!-- root 로거 설정: 기본(default) 프로필은 콘솔만, 그 외 프로필은 콘솔과 파일 둘 다 사용 -->
+  <springProfile name="default">
+    <root level="INFO">
+      <appender-ref ref="CONSOLE"/>
+    </root>
+  </springProfile>
+
+  <springProfile name="!default">
+    <root level="INFO">
+      <appender-ref ref="CONSOLE"/>
+      <appender-ref ref="FILE"/>
+    </root>
+  </springProfile>
+
+</configuration>

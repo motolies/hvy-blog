@@ -27,7 +27,7 @@ dependencies {
 
     // Library
     implementation files('../hvy-common/build/libs/hvy-common-plain.jar')
-    implementation 'io.github.motolies:hvy-common:0.0.19'
+    implementation 'io.github.motolies:hvy-common:0.0.20'
 
 
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -65,6 +65,9 @@ dependencies {
     // guava
     implementation 'com.google.guava:guava:33.4.0-jre'
 
+    // logging
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave:1.4.3'
 
     // testContainer
     testImplementation 'org.testcontainers:testcontainers'

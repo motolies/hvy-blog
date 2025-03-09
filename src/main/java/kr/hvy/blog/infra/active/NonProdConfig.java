@@ -9,8 +9,8 @@ import org.springframework.context.annotation.Profile;
 @Configuration
 @Profile("default")
 @ComponentScan(
-    basePackages = {"kr.hvy.blog", "kr.hvy.common"},
-    excludeFilters = {
+    basePackages = {"kr.hvy.blog", "kr.hvy.common"}
+    , excludeFilters = {
         @ComponentScan.Filter(type = FilterType.REGEX,
             pattern = "kr\\.hvy\\.common\\.aop\\.log\\..*" // 해당 패키지 및 하위 클래스들 배제
         )

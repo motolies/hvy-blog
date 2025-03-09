@@ -2,14 +2,17 @@ package kr.hvy.blog.modules.post.domain.dto;
 
 import java.util.List;
 import kr.hvy.blog.modules.post.domain.code.SearchType;
+import kr.hvy.common.domain.dto.paging.PageRequest;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class SearchObject {
+@EqualsAndHashCode(callSuper = true)
+public class SearchObject extends PageRequest {
 
   private SearchType searchType;
 
@@ -20,13 +23,5 @@ public class SearchObject {
 
   // [{"id": "1", "name": "Java"}]
   private List<SearchElement> tags;
-
-  public int getOffset() {
-    return (page - 1) * pageSize;
-  }
-
-  private int page;
-
-  private int pageSize;
 
 }

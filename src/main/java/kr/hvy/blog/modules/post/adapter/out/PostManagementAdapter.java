@@ -1,26 +1,21 @@
 package kr.hvy.blog.modules.post.adapter.out;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import kr.hvy.blog.modules.category.adapter.out.entity.CategoryEntity;
 import kr.hvy.blog.modules.category.adapter.out.persistence.JpaCategoryRepository;
+import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
+import kr.hvy.blog.modules.post.adapter.out.persistence.JpaPostRepository;
+import kr.hvy.blog.modules.post.adapter.out.persistence.mapper.PostRDBMapper;
 import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
 import kr.hvy.blog.modules.post.domain.Post;
 import kr.hvy.blog.modules.post.domain.PostMapper;
 import kr.hvy.blog.modules.post.domain.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.domain.dto.PostPrevNextResponse;
 import kr.hvy.blog.modules.post.domain.dto.SearchObject;
-import kr.hvy.blog.modules.post.adapter.out.entity.PostEntity;
-import kr.hvy.blog.modules.post.adapter.out.persistence.JpaPostRepository;
-import kr.hvy.blog.modules.post.adapter.out.persistence.mapper.PostRDBMapper;
 import kr.hvy.blog.modules.tag.adapter.out.entity.TagEntity;
 import kr.hvy.blog.modules.tag.adapter.out.persistence.JpaTagRepository;
-import kr.hvy.common.domain.embeddable.EventLogEntity;
-import kr.hvy.common.domain.vo.EventLog;
 import kr.hvy.common.exception.DataNotFoundException;
 import kr.hvy.common.layer.OutputAdapter;
-import kr.hvy.common.mybatis.MysqlRowCountRDBMapper;
-import kr.hvy.common.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 
 @OutputAdapter
@@ -31,7 +26,6 @@ public class PostManagementAdapter implements PostManagementPort {
   private final JpaPostRepository jpaPostRepository;
   private final JpaTagRepository jpaTagRepository;
   private final PostRDBMapper postRDBMapper;
-  private final MysqlRowCountRDBMapper countMapper;
   private final JpaCategoryRepository jpaCategoryRepository;
 
   @Override
@@ -52,7 +46,7 @@ public class PostManagementAdapter implements PostManagementPort {
         .orElseThrow(() -> new DataNotFoundException("Not Found Category."));
 
     PostEntity postEntity = jpaPostRepository.findById(post.getId())
-        .orElseThrow(()-> new DataNotFoundException("Not Found Post."));
+        .orElseThrow(() -> new DataNotFoundException("Not Found Post."));
 
     postEntity.setCategory(category);
 
@@ -100,13 +94,8 @@ public class PostManagementAdapter implements PostManagementPort {
   }
 
   @Override
-  public List<PostNoBodyResponse> findBySearchObject(Boolean isAdmin, SearchObject searchObject) {
-    return postRDBMapper.findBySearchObject(isAdmin, searchObject);
-  }
-
-  @Override
-  public Integer getTotalCount() {
-    return countMapper.getTotalCount();
+  public List<PostNoBodyResponse> findBySearchObject(SearchObject searchObject) {
+    return postRDBMapper.findBySearchObject(searchObject);
   }
 
   @Override

@@ -14,7 +14,7 @@
     </resultMap>
 
     <select id="findBySearchObject" parameterType="SearchObject" resultMap="noBodyContent">
-        SELECT SQL_CALC_FOUND_ROWS
+        SELECT
         p.id,
         p.subject AS SUBJECT,
         cat.name AS CATEGORY_NAME,
@@ -28,26 +28,26 @@
             <if test='isAdmin == false'>
                 AND p.publicAccess = 1
             </if>
-            <if test='obj.categories.size > 0'>
+            <if test='categories.size > 0'>
                 AND p.categoryId IN (
                 SELECT id
                 FROM tb_category
                 WHERE
-                <foreach collection="obj.categories" item="category" separator=" OR ">
+                <foreach collection="categories" item="category" separator=" OR ">
                     /* TODO : 당장은 양쪽 라이크로 하지만 차후에는 category.id를 가지고 fullpath를 가져온 다음 fullpath로 like 검색을 하자 */
                     cat.fullPath LIKE CONCAT('%/', #{category.id}, '/%')
                 </foreach>
                 )
             </if>
-            <if test='obj.searchCondition.keywords.size > 0'>
-                <if test='obj.searchCondition.logic.equals("AND")'>
+            <if test='searchCondition.keywords.size > 0'>
+                <if test='searchCondition.logic.equals("AND")'>
                     AND
-                    <foreach collection="obj.searchCondition.keywords" index="index" item="key" open="(" separator=" AND " close=")">
+                    <foreach collection="searchCondition.keywords" index="index" item="key" open="(" separator=" AND " close=")">
                         <choose>
-                            <when test='obj.searchType.code.equals("TITLE")'>
+                            <when test='searchType.code.equals("TITLE")'>
                                 p.subject LIKE CONCAT('%', #{key.name}, '%')
                             </when>
-                            <when test='obj.searchType.code.equals("CONTENT")'>
+                            <when test='searchType.code.equals("CONTENT")'>
                                 p.normalBody LIKE CONCAT('%', #{key.name}, '%')
                             </when>
                             <otherwise>
@@ -56,14 +56,14 @@
                         </choose>
                     </foreach>
                 </if>
-                <if test='!obj.searchCondition.logic.equals("AND")'>
+                <if test='!searchCondition.logic.equals("AND")'>
                     AND
-                    <foreach collection="obj.searchCondition.keywords" index="index" item="key" open="(" separator=" OR " close=")">
+                    <foreach collection="searchCondition.keywords" index="index" item="key" open="(" separator=" OR " close=")">
                         <choose>
-                            <when test='obj.searchType.code.equals("TITLE")'>
+                            <when test='searchType.code.equals("TITLE")'>
                                 p.subject LIKE CONCAT('%', #{key.name}, '%')
                             </when>
-                            <when test='obj.searchType.code.equals("CONTENT")'>
+                            <when test='searchType.code.equals("CONTENT")'>
                                 p.normalBody LIKE CONCAT('%', #{key.name}, '%')
                             </when>
                             <otherwise>
@@ -73,16 +73,15 @@
                     </foreach>
                 </if>
             </if>
-            <if test='obj.tags.size > 0'>
+            <if test='tags.size > 0'>
                 AND map.tagId IN
-                <foreach collection="obj.tags" item="tag" open="(" separator=", " close=")">
+                <foreach collection="tags" item="tag" open="(" separator=", " close=")">
                     #{tag.id}
                 </foreach>
             </if>
         </where>
         GROUP BY p.Id , p.subject , cat.name , p.viewCount , p.createdAt , p.updatedAt
-        ORDER BY p.createdAt DESC
-        LIMIT #{obj.offset}, #{obj.pageSize}
+
     </select>
 
     <select id="findPrevNextById" resultType="PostPrevNextResponse">

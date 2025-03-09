@@ -22,9 +22,7 @@ public interface PostManagementPort {
 
   List<Long> findByPublicPosts();
 
-  List<PostNoBodyResponse> findBySearchObject(Boolean isAdmin, SearchObject searchObject);
-
-  Integer getTotalCount();
+  List<PostNoBodyResponse> findBySearchObject(SearchObject searchObject);
 
   void setMainPost(Long id);
 

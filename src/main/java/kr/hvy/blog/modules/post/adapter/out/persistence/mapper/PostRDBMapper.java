@@ -10,7 +10,7 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface PostRDBMapper {
 
-  List<PostNoBodyResponse> findBySearchObject(boolean isAdmin, @Param("obj") SearchObject searchObject);
+  List<PostNoBodyResponse> findBySearchObject(SearchObject searchObject);
 
   PostPrevNextResponse findPrevNextById(boolean isAdmin, Long id);
 

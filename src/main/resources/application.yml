@@ -44,6 +44,19 @@ spring:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
       timeout: 3600
+  cloud:
+    stream:
+      kafka:
+        enabled: false # kafka 사용 여부
+
+hvy:
+  sql:
+    datasource-wrapper:
+      enable-wrapper: true
+      format: true
+      slow-query-threshold: 500
+      data-source-names:
+        - "dataSource"
 
 #Configure Mybatis
 mybatis:
@@ -76,14 +89,6 @@ logging:
     rollingpolicy:
       max-history: 7
       max-size: 10MB
-
-datasource-wrapper:
-  wrap: true # wrap 여부, wrap=true로 설정하면 datasource-proxy가 datasource를 감싸서 사용
-  format: true # SQL 포맷팅 여부
-  names: # 여러 데이터소스를 사용할 경우 이름을 지정
-    - "dataSource"
-    - "readDataSource"
-    - "writeDataSource"
 
 # jwt
 jwt:

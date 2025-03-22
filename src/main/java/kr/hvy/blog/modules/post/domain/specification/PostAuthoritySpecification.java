@@ -8,7 +8,7 @@ public class PostAuthoritySpecification implements Specification<Post> {
 
   @Override
   public boolean isSatisfiedBy(Post post) {
-    return SecurityUtils.hasAdminRole() || isOwner(post);
+    return SecurityUtils.hasAdminRole() || isOwner(post) || post.isPublic();
   }
 
   private boolean isOwner(Post post) {

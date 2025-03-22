@@ -20,6 +20,7 @@ configurations {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
 }
 
@@ -33,12 +34,18 @@ dependencyManagement {
     }
 }
 
+// 기본 환경을 local로 설정 (커맨드라인에서 -Penv=prod로 변경 가능)
+def env = project.findProperty("env") ?: "local"
+
 dependencies {
 
     // Library
-//    implementation files('../hvy-common/build/libs/hvy-common-plain.jar')
-    implementation 'io.github.motolies:hvy-common:0.0.23'
-
+    if (env == "prod") {
+        implementation 'io.github.motolies:hvy-common:0.0.24'
+    } else {
+        // MavenLocal에 배포된 hvy-common을 사용
+        implementation 'kr.hvy:hvy-common:local'
+    }
 
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-web'

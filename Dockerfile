@@ -2,6 +2,10 @@
 FROM gradle:8.12.1-jdk21-alpine AS builder
 WORKDIR /home/gradle/project
 
+# Build time에 사용할 환경 변수 지정 (default: prod)
+ARG ENV_TYPE=prod
+ENV ENV_TYPE=${ENV_TYPE}
+
 # Gradle 빌드 스크립트 및 Wrapper 파일 복사
 COPY build.gradle settings.gradle gradlew ./
 COPY gradle gradle
@@ -9,7 +13,8 @@ RUN chmod +x gradlew
 
 # 의존성 미리 다운로드 (캐시 활용)
 RUN echo Download Start: $(date +%F_%T)
-RUN ./gradlew --no-daemon dependencies
+# gradlew 실행 시 -Penv 환경 변수를 전달합니다.
+RUN ./gradlew --no-daemon dependencies  -Penv=${ENV_TYPE}
 RUN echo Download End: $(date +%F_%T)
 
 # 소스 코드 복사 및 빌드 (테스트는 제외)

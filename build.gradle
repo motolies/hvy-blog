@@ -41,7 +41,7 @@ dependencies {
 
     // Library
     if (env == "prod") {
-        implementation 'io.github.motolies:hvy-common:0.0.24'
+        implementation 'io.github.motolies:hvy-common:0.0.25'
     } else {
         // MavenLocal에 배포된 hvy-common을 사용
         implementation 'io.github.motolies:hvy-common:local'
@@ -56,20 +56,10 @@ dependencies {
     // jdbc driver
     implementation 'org.mariadb.jdbc:mariadb-java-client:3.5.1'
 
-    // slack
-    implementation 'com.slack.api:bolt:1.45.3'
-
-    // tsid
-    implementation 'io.hypersistence:hypersistence-utils-hibernate-60:3.8.3'
-
     // jwt
     implementation 'io.jsonwebtoken:jjwt-api:0.11.2'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.2'
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.2'
-
-    // apache commons
-//    implementation 'org.apache.commons:commons-lang3:3.17.0'
-//    implementation 'org.apache.commons:commons-collections4:4.5.0-M2'
 
     // redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
@@ -77,14 +67,9 @@ dependencies {
 
     // cache
     implementation 'org.springframework.boot:spring-boot-starter-cache'
-    implementation 'com.github.ben-manes.caffeine:caffeine:3.2.0'
-
-    // guava
-    implementation 'com.google.guava:guava:33.4.0-jre'
 
     // logging
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
-    implementation 'io.micrometer:micrometer-tracing-bridge-brave:1.4.3'
 
     // testContainer
     testImplementation 'org.testcontainers:testcontainers'
@@ -92,9 +77,6 @@ dependencies {
 
     // H2 Database(나중엔 테스트만 남겨야 함)
     runtimeOnly 'com.h2database:h2'
-
-    implementation 'net.ttddyy:datasource-proxy:1.10.1'
-
 
     // lombok
     compileOnly 'org.projectlombok:lombok'

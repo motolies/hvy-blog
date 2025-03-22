@@ -14,12 +14,12 @@ RUN chmod +x gradlew
 # 의존성 미리 다운로드 (캐시 활용)
 RUN echo Download Start: $(date +%F_%T)
 # gradlew 실행 시 -Penv 환경 변수를 전달합니다.
-RUN ./gradlew --no-daemon dependencies  -Penv=${ENV_TYPE}
+RUN ./gradlew --no-daemon dependencies -Penv=${ENV_TYPE}
 RUN echo Download End: $(date +%F_%T)
 
 # 소스 코드 복사 및 빌드 (테스트는 제외)
 COPY src src
-RUN ./gradlew --no-daemon build -x test
+RUN ./gradlew --no-daemon build -x test -Penv=${ENV_TYPE}
 RUN echo BuildEnd: $(date +%F_%T)
 
 

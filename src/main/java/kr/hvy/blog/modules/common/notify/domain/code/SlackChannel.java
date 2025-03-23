@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.common;
+package kr.hvy.blog.modules.common.notify.domain.code;
 
 import kr.hvy.common.code.base.EnumCode;
 import lombok.AllArgsConstructor;

@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.post.adapter.out;
 
 import java.util.List;
-import kr.hvy.blog.modules.common.CacheConstant;
+import kr.hvy.blog.modules.common.cache.domain.code.CacheConstant;
 import kr.hvy.blog.modules.post.adapter.out.persistence.JpaSearchEngineRepository;
 import kr.hvy.blog.modules.post.application.port.out.PostSearchEngineManagementPort;
 import kr.hvy.blog.modules.post.domain.PostSearchEngineMapper;

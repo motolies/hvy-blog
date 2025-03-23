@@ -8,7 +8,7 @@ import kr.hvy.blog.modules.category.domain.CategoryService;
 import kr.hvy.blog.modules.category.domain.dto.CategoryCreate;
 import kr.hvy.blog.modules.category.domain.dto.CategoryResponse;
 import kr.hvy.blog.modules.category.domain.dto.CategoryUpdate;
-import kr.hvy.blog.modules.common.CacheConstant;
+import kr.hvy.blog.modules.common.cache.domain.code.CacheConstant;
 import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.layer.UseCase;
 import lombok.RequiredArgsConstructor;

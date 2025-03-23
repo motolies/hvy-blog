@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.common;
+package kr.hvy.blog.modules.common.cache.domain.code;
 
 public class CacheConstant {
   public static final String ALL = "'all'";

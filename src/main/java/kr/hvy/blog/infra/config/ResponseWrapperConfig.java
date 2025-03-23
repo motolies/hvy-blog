@@ -2,7 +2,7 @@ package kr.hvy.blog.infra.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Optional;
-import kr.hvy.blog.modules.common.SlackChannel;
+import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
 import kr.hvy.common.advice.ResponseWrapperConfigure;
 import kr.hvy.common.advice.dto.ApiResponse;
 import kr.hvy.common.code.ApiResponseStatus;

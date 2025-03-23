@@ -5,7 +5,7 @@ import kr.hvy.blog.modules.category.application.port.in.CategoryPublicUseCase;
 import kr.hvy.blog.modules.category.application.port.out.CategoryManagementPort;
 import kr.hvy.blog.modules.category.domain.dto.CategoryFlatResponse;
 import kr.hvy.blog.modules.category.domain.dto.CategoryResponse;
-import kr.hvy.blog.modules.common.CacheConstant;
+import kr.hvy.blog.modules.common.cache.domain.code.CacheConstant;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;

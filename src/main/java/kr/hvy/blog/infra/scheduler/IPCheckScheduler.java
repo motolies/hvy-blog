@@ -6,6 +6,7 @@ import java.util.Optional;
 import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
 import kr.hvy.blog.modules.common.publicip.application.port.out.PublicIPManagementPort;
 import kr.hvy.blog.modules.common.publicip.domain.PublicIP;
+import kr.hvy.common.client.RestApi;
 import kr.hvy.common.notify.Notify;
 import kr.hvy.common.notify.NotifyRequest;
 import kr.hvy.common.scheduler.AbstractScheduler;
@@ -14,7 +15,6 @@ import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 @Slf4j
 @Component
@@ -23,7 +23,7 @@ public class IPCheckScheduler extends AbstractScheduler {
 
   private final Notify notify;
 
-  private final RestClient restClient;
+  private final RestApi restApi;
 
   private static final String AWS_IP_CHECK_URL = "https://checkip.amazonaws.com";
 
@@ -70,10 +70,8 @@ public class IPCheckScheduler extends AbstractScheduler {
   }
 
   private String getPublicIPFromAWS() throws IOException, InterruptedException {
-    return Objects.requireNonNull(restClient.get()
-            .uri(AWS_IP_CHECK_URL)
-            .retrieve()
-            .body(String.class))
+    // AWS에서 퍼블릭 IP를 확인
+    return Objects.requireNonNull(restApi.get(AWS_IP_CHECK_URL, null, String.class))
         .trim();
   }
 

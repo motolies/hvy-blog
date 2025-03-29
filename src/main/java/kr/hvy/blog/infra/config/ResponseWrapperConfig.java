@@ -21,14 +21,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class ResponseWrapperConfig extends ResponseWrapperConfigure {
 
   public ResponseWrapperConfig(ObjectMapper objectMapper, Optional<Notify> notify) {
-    super(objectMapper, notify, SlackChannel.ERROR.getChannel());
+    super(objectMapper, notify, Optional.of(SlackChannel.ERROR.getChannel()));
   }
 
   @ResponseStatus(HttpStatus.BAD_REQUEST)
   @ExceptionHandler({SpecificationException.class, DataNotFoundException.class})
   public ApiResponse<?> handleException(RuntimeException ex) {
     notify.ifPresent(value -> value.sendMessage(NotifyRequest.builder()
-        .channel(defaultErrorChannel)
+        .channel(defaultErrorChannel.orElse("#hvy-error"))
         .exception(ex)
         .build()));
 

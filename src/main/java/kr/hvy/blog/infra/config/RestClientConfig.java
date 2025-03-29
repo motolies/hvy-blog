@@ -19,7 +19,7 @@ public class RestClientConfig extends RestClientConfigurer {
 
   @Bean
   public RestApi RestApi(RestClient restClient, Optional<Notify> notify) {
-    return new RestApi(restClient, notify, SlackChannel.ERROR.getChannel());
+    return new RestApi(restClient, notify, Optional.of(SlackChannel.ERROR.getChannel()));
   }
 
 

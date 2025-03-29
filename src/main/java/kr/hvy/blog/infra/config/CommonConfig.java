@@ -19,9 +19,4 @@ public class CommonConfig {
     return ObjectMapperConfigurer.getObjectMapper();
   }
 
-  @Bean
-  public ApiLogInterceptor apiLogInterceptor(Optional<Notify> notify){
-    return new ApiLogInterceptor(notify, SlackChannel.ERROR.getChannel());
-  }
-
 }

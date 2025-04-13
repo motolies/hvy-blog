@@ -9,4 +9,6 @@ public interface JpaPostRepository extends JpaRepository<PostEntity, Long> {
   List<PostEntity> findByMainPage(boolean main);
 
   List<PostEntity> findByPublicAccess(boolean isPublic);
+
+  List<PostEntity> findBySubjectAndBody(String subject, String body);
 }

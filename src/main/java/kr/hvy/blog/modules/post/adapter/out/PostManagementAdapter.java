@@ -17,7 +17,9 @@ import kr.hvy.blog.modules.tag.adapter.out.persistence.JpaTagRepository;
 import kr.hvy.common.exception.DataNotFoundException;
 import kr.hvy.common.layer.OutputAdapter;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @OutputAdapter
 @RequiredArgsConstructor
 public class PostManagementAdapter implements PostManagementPort {
@@ -28,10 +30,17 @@ public class PostManagementAdapter implements PostManagementPort {
   private final PostRDBMapper postRDBMapper;
   private final JpaCategoryRepository jpaCategoryRepository;
 
+  private void deleteByTempPosts() {
+    List<PostEntity> tempPosts = jpaPostRepository.findBySubjectAndBody("", "");
+    jpaPostRepository.deleteAll(tempPosts);
+    jpaPostRepository.flush();
+  }
+
   @Override
   public Post insert(Post post) {
     CategoryEntity category = jpaCategoryRepository.findById(post.getCategoryId())
         .orElseThrow(() -> new DataNotFoundException("Not Found Category."));
+    deleteByTempPosts();
 
     PostEntity postEntity = postMapper.toEntity(post);
     postEntity.setCategory(category);

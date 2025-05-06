@@ -41,10 +41,16 @@ dependencies {
 
     // Library
     if (env == "prod") {
-        implementation 'io.github.motolies:hvy-common:0.0.31'
+        implementation('io.github.motolies:hvy-common:0.0.33') {
+            exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream'
+            exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream-binder-kafka'
+        }
     } else {
         // MavenLocal에 배포된 hvy-common을 사용
-        implementation 'io.github.motolies:hvy-common:local'
+        implementation('io.github.motolies:hvy-common:local') {
+            exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream'
+            exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream-binder-kafka'
+        }
     }
 
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'

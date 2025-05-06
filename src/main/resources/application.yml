@@ -112,9 +112,12 @@ slack:
 scheduler:
   public-ip:
     lock-name: PUBLIC-IP-TEST
-    cron-expression: "*/10 * * * * ?"
+    cron-expression: "* * 0 * * ?"
   ppomppu:
     lock-name: PPOMPPU-TEST
+    cron-expression: "*/10 * * * * ?"
+  log-cleaner:
+    lock-name: LOGCLEANER-TEST
     cron-expression: "*/10 * * * * ?"
 
 cookie:
@@ -135,6 +138,9 @@ scheduler:
   ppomppu:
     lock-name: PPOMPPU-PROD
     cron-expression: "* */10 * * * ?"
+  log-cleaner:
+    lock-name: LOGCLEANER-PROD
+    cron-expression: "* * 0 * * ?"
 
 cookie:
   same-site: NONE

@@ -1,1 +1,6 @@
 rootProject.name = 'blog'
+def commonLibPath = file('../hvy-common')
+// 로컬 소스가 있는 경우 멀티모듈처럼 사용하기 위해 includeBuild을 사용합니다.
+if (commonLibPath.exists()) {
+   includeBuild(commonLibPath)
+}

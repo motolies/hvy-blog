@@ -1,7 +1,7 @@
 # H2 Database 설정
 spring:
   datasource:
-    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL
     driver-class-name: org.h2.Driver
     username: sa
     password:
@@ -9,13 +9,23 @@ spring:
     console:
       enabled: true
   jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
     hibernate:
       ddl-auto: create-drop  # 테스트 후 데이터베이스 초기화
   data:
     redis: # Redis 설정
       host: localhost
       port: 6379
-      timeout: 3600
+      timeout: 10000  # 10초로 증가
+      lettuce:
+        pool:
+          max-active: 10
+          max-idle: 10
+          min-idle: 1
+          max-wait: 3000
+        shutdown-timeout: 100
   sql:
     init:
       platform: h2

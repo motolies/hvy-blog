@@ -8,10 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import kr.hvy.blog.modules.auth.domain.User;
+import kr.hvy.blog.modules.auth.domain.entity.User;
+import kr.hvy.blog.modules.auth.domain.entity.Authority;
 import kr.hvy.blog.modules.auth.domain.code.AuthorityName;
-import kr.hvy.blog.modules.auth.domain.specification.UserCreateSpecification;
-import kr.hvy.blog.modules.auth.domain.specification.UserLoginSpecification;
+import kr.hvy.blog.modules.auth.application.specification.UserCreateSpecification;
+import kr.hvy.blog.modules.auth.application.specification.UserLoginSpecification;
 import kr.hvy.common.exception.SpecificationException;
 import kr.hvy.common.specification.Specification;
 import org.apache.commons.lang3.ObjectUtils;
@@ -174,34 +175,43 @@ public class SpecificationTest {
 
   // 유효한 사용자
   private User createValidUser() {
+    Authority authority = Authority.builder()
+        .name(AuthorityName.ROLE_USER)
+        .build();
     return User.builder()
         .id(1L)
         .name("my name")
         .username("hi")
         .password("bye")
-        .authorities(Set.of(AuthorityName.ROLE_USER))
+        .authorities(Set.of(authority))
         .isEnabled(true)
         .build();
   }
 
   // 사용여부가 없는 사용자
   private User createUserNotEnableAndPassword() {
+    Authority authority = Authority.builder()
+        .name(AuthorityName.ROLE_USER)
+        .build();
     return User.builder()
         .id(1L)
         .name("my name")
         .username("hi")
-        .authorities(Set.of(AuthorityName.ROLE_USER))
+        .authorities(Set.of(authority))
         .build();
   }
 
   // 사용이 불가한 사용자
   private User createUserDisable() {
+    Authority authority = Authority.builder()
+        .name(AuthorityName.ROLE_USER)
+        .build();
     return User.builder()
         .id(1L)
         .name("my name")
         .username("hi")
         .password("bye")
-        .authorities(Set.of(AuthorityName.ROLE_USER))
+        .authorities(Set.of(authority))
         .isEnabled(false)
         .build();
   }

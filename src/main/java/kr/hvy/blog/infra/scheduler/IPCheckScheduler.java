@@ -4,8 +4,8 @@ import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
-import kr.hvy.blog.modules.common.publicip.application.port.out.PublicIPManagementPort;
-import kr.hvy.blog.modules.common.publicip.domain.PublicIP;
+import kr.hvy.blog.modules.common.publicip.application.service.PublicIpService;
+import kr.hvy.blog.modules.common.publicip.domain.RedisPublicIp;
 import kr.hvy.common.client.RestApi;
 import kr.hvy.common.notify.Notify;
 import kr.hvy.common.notify.NotifyRequest;
@@ -27,7 +27,7 @@ public class IPCheckScheduler extends AbstractScheduler {
 
   private static final String AWS_IP_CHECK_URL = "https://checkip.amazonaws.com";
 
-  private final PublicIPManagementPort publicIPManagementPort;
+  private final PublicIpService publicIpService;
 
   @Scheduled(cron = "${scheduler.public-ip.cron-expression}")    // 10분마다
   @SchedulerLock(name = "${scheduler.public-ip.lock-name}", lockAtLeastFor = "PT30S", lockAtMostFor = "PT50S")
@@ -45,7 +45,7 @@ public class IPCheckScheduler extends AbstractScheduler {
       // 현재 저장된 public ip 체크
       // 저장된 값이 없으면 저장하고 종료
       // 저장된 값이 있으면 비교하여 다르면 알림
-      Optional<PublicIP> oldPublicIP = publicIPManagementPort.getPublicIP();
+      Optional<RedisPublicIp> oldPublicIP = publicIpService.getPublicIP();
       oldPublicIP.ifPresentOrElse(old -> {
             if (!old.getIp().equals(newPublicIP)) {
               String msg = "Public IP changed from " + old.getIp() + " to " + newPublicIP;
@@ -57,11 +57,11 @@ public class IPCheckScheduler extends AbstractScheduler {
                   .build());
 
               // update new ip
-              publicIPManagementPort.save(newPublicIP);
+              publicIpService.save(newPublicIP);
             }
           },
           () -> {
-            publicIPManagementPort.save(newPublicIP);
+            publicIpService.save(newPublicIP);
           });
 
     } catch (IOException | InterruptedException e) {

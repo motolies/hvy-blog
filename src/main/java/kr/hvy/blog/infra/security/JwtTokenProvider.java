@@ -20,8 +20,7 @@ import java.util.Set;
 import java.util.function.Function;
 import javax.crypto.SecretKey;
 import kr.hvy.blog.modules.auth.domain.SecurityUser;
-import kr.hvy.blog.modules.auth.domain.User;
-import kr.hvy.blog.modules.auth.domain.code.AuthorityName;
+import kr.hvy.blog.modules.auth.domain.entity.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,7 +56,7 @@ public class JwtTokenProvider {
   // JWT 토큰 생성
   public String createToken(User user) {
     Map<String, Object> claims = new HashMap<>();
-    claims.put("roles", user.getAuthorities().stream().map(AuthorityName::getCode).toArray());
+    claims.put("roles", user.getAuthorities().stream().map(auth -> auth.getName().getCode()).toArray());
     claims.put("userId", user.getUsername());
     claims.put("name", user.getName());
 

@@ -2,7 +2,7 @@ package kr.hvy.blog.infra.security;
 
 
 import java.util.Optional;
-import kr.hvy.blog.modules.auth.domain.User;
+import kr.hvy.blog.modules.auth.domain.SecurityUser;
 import kr.hvy.blog.modules.auth.domain.code.AuthorityName;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -14,9 +14,9 @@ public class SecurutyHelper {
    *
    * @return the current user
    */
-  public static User getCurrentUser() {
+  public static SecurityUser getCurrentUser() {
     return Optional.ofNullable(SecurityContextHolder.getContext().getAuthentication().getPrincipal())
-        .map(User.class::cast)
+        .map(SecurityUser.class::cast)
         .orElse(null);
   }
 
@@ -27,12 +27,12 @@ public class SecurutyHelper {
    * @return the boolean
    */
   public static boolean isAdmin() {
-    User user = getCurrentUser();
+    SecurityUser user = getCurrentUser();
     if (user == null) {
       return false;
     } else {
       return user.getAuthorities().stream()
-          .anyMatch(auth -> auth.equals(AuthorityName.ROLE_ADMIN));
+          .anyMatch(auth -> auth.getAuthority().equals(AuthorityName.ROLE_ADMIN.getCode()));
     }
   }
 }

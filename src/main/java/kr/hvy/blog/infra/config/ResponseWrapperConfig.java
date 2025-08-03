@@ -25,7 +25,7 @@ public class ResponseWrapperConfig extends ResponseWrapperConfigure {
   }
 
   @ResponseStatus(HttpStatus.BAD_REQUEST)
-  @ExceptionHandler({SpecificationException.class, DataNotFoundException.class})
+  @ExceptionHandler({SpecificationException.class, DataNotFoundException.class, IllegalArgumentException.class, IllegalStateException.class})
   public ApiResponse<?> handleException(RuntimeException ex) {
     notify.ifPresent(value -> value.sendMessage(NotifyRequest.builder()
         .channel(defaultErrorChannel.orElse("#hvy-error"))

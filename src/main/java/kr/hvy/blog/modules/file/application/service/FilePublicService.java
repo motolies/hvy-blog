@@ -1,29 +1,29 @@
 package kr.hvy.blog.modules.file.application.service;
 
-import kr.hvy.blog.modules.file.application.port.in.FilePublicUseCase;
-import kr.hvy.blog.modules.file.application.port.out.FileManagementPort;
-import kr.hvy.blog.modules.file.domain.File;
-import kr.hvy.blog.modules.file.domain.dto.FileResourceResponse;
-import kr.hvy.blog.modules.file.domain.specification.FileAuthoritySpecification;
-import kr.hvy.common.layer.UseCase;
+import kr.hvy.blog.modules.file.application.dto.FileResourceResponse;
+import kr.hvy.blog.modules.file.application.specification.FileAuthoritySpecification;
+import kr.hvy.blog.modules.file.domain.entity.File;
+import kr.hvy.blog.modules.file.repository.FileRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-@UseCase
-public class FilePublicService extends AbstractFileManagementService implements FilePublicUseCase {
+@Slf4j
+@Service
+@Transactional
+public class FilePublicService extends AbstractFileManagementService {
 
-  private final FileManagementPort fileManagementPort;
-  private final FileAuthoritySpecification fileAuthoritySpecification = new FileAuthoritySpecification();
+  private final FileAuthoritySpecification FILE_AUTHORITY_SPECIFICATION = new FileAuthoritySpecification();
 
-  public FilePublicService(@Value("${path.upload}") String rootLocation, FileManagementPort fileManagementPort) {
-    super(rootLocation);
-    this.fileManagementPort = fileManagementPort;
+  public FilePublicService(@Value("${path.upload}") String rootLocation, FileRepository fileRepository) {
+    super(rootLocation, fileRepository);
   }
 
-  @Override
   public FileResourceResponse download(Long id) throws Exception {
-    File file = fileManagementPort.findById(id);
+    File file = findById(id);
     // 권한 체크
-    fileAuthoritySpecification.validateException(file);
+    FILE_AUTHORITY_SPECIFICATION.validateException(file);
 
     return FileResourceResponse.builder()
         .originalName(file.getOriginName())

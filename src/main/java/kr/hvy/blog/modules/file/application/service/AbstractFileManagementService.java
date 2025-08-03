@@ -2,15 +2,21 @@ package kr.hvy.blog.modules.file.application.service;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Optional;
+import kr.hvy.blog.modules.file.domain.entity.File;
+import kr.hvy.blog.modules.file.repository.FileRepository;
+import kr.hvy.common.exception.DataNotFoundException;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 
 public abstract class AbstractFileManagementService {
 
   protected Path rootLocation;
+  protected FileRepository fileRepository;
 
-  public AbstractFileManagementService(String rootLocation) {
+  public AbstractFileManagementService(String rootLocation, FileRepository fileRepository) {
     this.rootLocation = Paths.get(rootLocation);
+    this.fileRepository = fileRepository;
   }
 
   protected Resource loadAsResource(String fileName) throws Exception {
@@ -33,6 +39,11 @@ public abstract class AbstractFileManagementService {
 
   protected Path loadPath(String fileName) {
     return rootLocation.resolve(fileName);
+  }
+
+  protected File findById(Long id) {
+    return fileRepository.findById(id)
+        .orElseThrow(() -> new DataNotFoundException("Not Found File."));
   }
 
 }

@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
+
 @Slf4j
 @Component
 public class CookieProvider {
@@ -20,6 +21,9 @@ public class CookieProvider {
   }
 
   private String getRootDomain(String refererUrl) {
+    if (refererUrl == null) {
+      return null;
+    }
     try {
       URI uri = new URI(refererUrl);
       return InternetDomainName.from(uri.getHost()).topDomainUnderRegistrySuffix().toString();

@@ -1,30 +1,30 @@
 package kr.hvy.blog.modules.category.application.service;
 
 import java.util.List;
-import kr.hvy.blog.modules.category.application.port.in.CategoryPublicUseCase;
-import kr.hvy.blog.modules.category.application.port.out.CategoryManagementPort;
-import kr.hvy.blog.modules.category.domain.dto.CategoryFlatResponse;
-import kr.hvy.blog.modules.category.domain.dto.CategoryResponse;
+import kr.hvy.blog.modules.category.application.dto.CategoryFlatResponse;
+import kr.hvy.blog.modules.category.application.dto.CategoryResponse;
 import kr.hvy.blog.modules.common.cache.domain.code.CacheConstant;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
+@Transactional
 @RequiredArgsConstructor
-public class CategoryPublicService implements CategoryPublicUseCase {
+public class CategoryPublicService {
 
-  private final CategoryManagementPort categoryManagementPort;
+  private final CategoryService categoryService;
 
-  @Override
   @Cacheable(cacheNames = CacheConstant.CATEGORY, key = CacheConstant.ALL)
   public List<CategoryFlatResponse> getAllCategories() {
-    return categoryManagementPort.findAllCategory();
+    return categoryService.findAllCategory();
   }
 
-  @Override
   @Cacheable(cacheNames = CacheConstant.CATEGORY, key = CacheConstant.ROOT)
   public CategoryResponse getRootCategory() {
-    return categoryManagementPort.findByRoot();
+    return categoryService.findByRoot();
   }
 }

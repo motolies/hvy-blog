@@ -1,25 +1,30 @@
 package kr.hvy.blog.modules.post.application.service;
 
 import java.util.List;
-import kr.hvy.blog.modules.post.application.port.in.PostSearchEnginePublicUseCase;
-import kr.hvy.blog.modules.post.application.port.out.PostManagementPort;
-import kr.hvy.blog.modules.post.application.port.out.PostSearchEngineManagementPort;
-import kr.hvy.blog.modules.post.domain.PostMapper;
-import kr.hvy.blog.modules.post.domain.PostService;
-import kr.hvy.blog.modules.post.domain.dto.PostSearchEngineResponse;
-import kr.hvy.common.layer.UseCase;
+import kr.hvy.blog.modules.common.cache.domain.code.CacheConstant;
+import kr.hvy.blog.modules.post.application.dto.PostSearchEngineResponse;
+import kr.hvy.blog.modules.post.mapper.PostSearchEngineDtoMapper;
+import kr.hvy.blog.modules.post.repository.SearchEngineRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-@UseCase
+@Slf4j
+@Service
+@Transactional
 @RequiredArgsConstructor
-public class PostSearchEnginePublicService implements PostSearchEnginePublicUseCase {
+public class PostSearchEnginePublicService {
 
-  private final PostMapper postMapper;
-  private final PostSearchEngineManagementPort postSearchEngineManagementPort;
+  private final SearchEngineRepository searchEngineRepository;
+  private final PostSearchEngineDtoMapper postSearchEngineDtoMapper;
 
-
-  @Override
-  public List<PostSearchEngineResponse> mainPostSearchEngines() {
-    return postSearchEngineManagementPort.findAll();
+  @Cacheable(cacheNames = CacheConstant.SEARCH_ENGINE)
+  public List<PostSearchEngineResponse> findAll() {
+    return searchEngineRepository.findAll().stream()
+        .map(postSearchEngineDtoMapper::toResponse)
+        .toList();
   }
+
 }

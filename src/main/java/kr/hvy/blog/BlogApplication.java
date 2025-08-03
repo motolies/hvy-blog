@@ -8,7 +8,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 @SpringBootApplication
-@MapperScan(basePackages = {"kr.hvy.blog.modules.*.adapter.out.persistence.mapper"})
+@MapperScan(basePackages = {"kr.hvy.blog.modules.*.repository.mapper"})
 @EnableJpaRepositories(basePackages = {"kr.hvy.blog", "kr.hvy.common"})
 @EntityScan(basePackages = {"kr.hvy.blog", "kr.hvy.common"})
 @EnableAsync

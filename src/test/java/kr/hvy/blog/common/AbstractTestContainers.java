@@ -2,10 +2,12 @@ package kr.hvy.blog.common;
 
 import org.springframework.boot.test.context.SpringBootTest;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import java.time.Duration;
 
 @Testcontainers
 @SpringBootTest
@@ -16,9 +18,12 @@ public abstract class AbstractTestContainers {
 
 
   @Container
-  private static final GenericContainer redisContainer = new GenericContainer(REDIS_IMAGE)
+  @SuppressWarnings("resource") // Testcontainers가 자체적으로 리소스를 관리합니다
+  private static final GenericContainer<?> redisContainer = new GenericContainer<>(REDIS_IMAGE)
       .withExposedPorts(REDIS_PORT)
-      .withReuse(true); // 컨테이너 재사용 설정
+      .withCommand("redis-server", "--maxmemory", "128m", "--maxmemory-policy", "allkeys-lru")
+      .waitingFor(Wait.forLogMessage(".*Ready to accept connections.*", 1)
+          .withStartupTimeout(Duration.ofSeconds(30)));
 
   static {
     redisContainer.start();

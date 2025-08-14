@@ -30,6 +30,7 @@ import kr.hvy.blog.modules.tag.mapper.TagDtoMapper;
 import kr.hvy.blog.modules.tag.repository.TagRepository;
 import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.exception.DataNotFoundException;
+import kr.hvy.common.specification.Specification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
@@ -55,8 +56,6 @@ public class PostService {
   private final PostMapper postMapper;
   private final CategoryRepository categoryRepository;
 
-  private final PostUpdateSpecification POST_UPDATE_SPECIFICATION = new PostUpdateSpecification();
-  private final PostAuthoritySpecification POST_AUTHORITY_SPECIFICATION = new PostAuthoritySpecification();
 
   private void deleteByTempPosts() {
     List<Post> tempPosts = postRepository.findBySubjectAndBody("", "");
@@ -73,7 +72,7 @@ public class PostService {
   public Post findByIdCheckAuthority(Long id) {
     Post post = findById(id);
 
-    POST_AUTHORITY_SPECIFICATION.validateException(post);
+    Specification.validate(PostAuthoritySpecification::new, post);
 
     return post;
   }
@@ -119,7 +118,7 @@ public class PostService {
 
 
   public PostResponse update(Long id, PostUpdate updateDto) {
-    POST_UPDATE_SPECIFICATION.validateException(updateDto);
+    Specification.validate(PostUpdateSpecification::new, updateDto);
 
     Post post = findById(id);
     Category category = categoryRepository.findById(updateDto.getCategoryId())

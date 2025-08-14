@@ -18,6 +18,7 @@ import kr.hvy.blog.modules.category.repository.mapper.CategoryMapper;
 import kr.hvy.blog.modules.common.cache.domain.code.CacheConstant;
 import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.exception.DataNotFoundException;
+import kr.hvy.common.specification.Specification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -38,11 +39,6 @@ public class CategoryService {
   private final CategoryDtoMapper categoryDtoMapper;
   private final CategoryRepository categoryRepository;
   private final CategoryMapper categoryMapper;
-
-  private final CategoryCreateSpecification CATEGORY_CREATE_SPECIFICATION = new CategoryCreateSpecification();
-  private final CategoryDeleteSpecification CATEGORY_DELETE_SPECIFICATION = new CategoryDeleteSpecification();
-  private final CategoryUpdateSpecification CATEGORY_UPDATE_SPECIFICATION = new CategoryUpdateSpecification();
-
 
   public CategoryResponse findByRoot() {
     return categoryDtoMapper.toResponse(categoryRepository.findById(CategoryConstant.ROOT_CATEGORY_ID)
@@ -70,7 +66,7 @@ public class CategoryService {
       @CacheEvict(cacheNames = CacheConstant.CATEGORY, key = CacheConstant.ROOT)
   })
   public CategoryResponse create(CategoryCreate createDto) {
-    CATEGORY_CREATE_SPECIFICATION.validateException(createDto);
+    Specification.validate(CategoryCreateSpecification::new, createDto);
     Category savedCategory = save(categoryDtoMapper.toDomain(createDto));
     return categoryDtoMapper.toResponse(savedCategory);
   }
@@ -86,7 +82,7 @@ public class CategoryService {
       throw new IllegalArgumentException("ROOT 카테고리는 변경할 수 없습니다.");
     }
 
-    CATEGORY_UPDATE_SPECIFICATION.validateException(updateDto);
+    Specification.validate(CategoryUpdateSpecification::new, updateDto);
 
     Category category = findById(categoryId);
     category.update(updateDto);
@@ -102,7 +98,7 @@ public class CategoryService {
   })
   public DeleteResponse<String> delete(String categoryId) {
     Category category = findById(categoryId);
-    CATEGORY_DELETE_SPECIFICATION.validateException(category);
+    Specification.validate(CategoryDeleteSpecification::new, category);
     categoryRepository.deleteById(categoryId);
 
     return DeleteResponse.<String>builder()

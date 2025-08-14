@@ -12,6 +12,7 @@ import kr.hvy.blog.modules.tag.mapper.TagDtoMapper;
 import kr.hvy.blog.modules.tag.repository.TagRepository;
 import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.exception.DataNotFoundException;
+import kr.hvy.common.specification.Specification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -29,8 +30,6 @@ public class TagService {
 
   private final TagDtoMapper tagDtoMapper;
   private final TagRepository tagRepository;
-
-  private final TagCreateSpecification TAG_CREATE_SPECIFICATION = new TagCreateSpecification();
 
 
   public Tag findById(Long id) {
@@ -59,7 +58,7 @@ public class TagService {
   }
 
   public TagResponse create(TagCreate createDto) {
-    TAG_CREATE_SPECIFICATION.validateException(createDto);
+    Specification.validate(TagCreateSpecification::new, createDto);
 
     Tag tag = tagRepository.findByName(createDto.getName())
         .orElseGet(() -> tagRepository.save(tagDtoMapper.toDomain(createDto)));

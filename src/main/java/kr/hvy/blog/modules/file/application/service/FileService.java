@@ -10,6 +10,7 @@ import kr.hvy.blog.modules.file.repository.FileRepository;
 import kr.hvy.blog.modules.post.application.service.PostService;
 import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.file.FileStoreUtils;
+import kr.hvy.common.specification.Specification;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -22,8 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class FileService extends AbstractFileManagementService {
 
   private final PostService postService;
-  private final FileCreateSpecification FILE_CREATE_SPECIFICATION = new FileCreateSpecification();
-  private final FileAuthoritySpecification FILE_AUTHORITY_SPECIFICATION = new FileAuthoritySpecification();
+
 
   public FileService(@Value("${path.upload}") String rootLocation, FileRepository fileRepository, PostService postService) {
     super(rootLocation, fileRepository);
@@ -32,7 +32,7 @@ public class FileService extends AbstractFileManagementService {
 
 
   public FileResponse create(FileCreate fileCreate) {
-    FILE_CREATE_SPECIFICATION.validateException(fileCreate);
+    Specification.validate(FileCreateSpecification::new, fileCreate);
 
     try {
       // 파일 먼저 저장
@@ -51,7 +51,7 @@ public class FileService extends AbstractFileManagementService {
   public DeleteResponse<Long> delete(Long fileId) {
     // 파일 조회 및 권한 체크
     File file = findById(fileId);
-    FILE_AUTHORITY_SPECIFICATION.validateException(file);
+    Specification.validate(FileAuthoritySpecification::new, file);
 
     // 파일이 속한 PostEntity를 찾아서 삭제
     Long postId = file.getPost().getId();

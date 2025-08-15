@@ -84,29 +84,29 @@
 
     </select>
 
-    <select id="findPrevNextById" resultType="PostPrevNextResponse">
-        SELECT
-        (
-        <![CDATA[
+  <select id="findPrevNextById" resultType="PostPrevNextResponse">
+    SELECT
+    IFNULL((
+    <![CDATA[
          SELECT ID
            FROM TB_POST
           WHERE ID < #{id}
          ]]>
-        <if test='isAdmin == false'>
-            AND publicAccess = 1
-        </if>
-        ORDER BY ID DESC
-        LIMIT 1) AS PREV
-        , (SELECT ID
-        FROM TB_POST
-        WHERE ID > #{id}
-        <if test='isAdmin == false'>
-            AND publicAccess = 1
-        </if>
-        ORDER BY ID ASC
-        LIMIT 1) AS NEXT
-        FROM DUAL;
-    </select>
+    <if test='isAdmin == false'>
+      AND publicAccess = 1
+    </if>
+    ORDER BY ID DESC
+    LIMIT 1), 0) AS PREV
+    , IFNULL((SELECT ID
+    FROM TB_POST
+    WHERE ID > #{id}
+    <if test='isAdmin == false'>
+      AND publicAccess = 1
+    </if>
+    ORDER BY ID ASC
+    LIMIT 1), 0) AS NEXT
+    FROM DUAL;
+  </select>
 
     <select id="findByTempPosts" resultType="Long">
         SELECT ID

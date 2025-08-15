@@ -1,7 +1,5 @@
 package kr.hvy.blog.modules.tag.application.service;
 
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import java.util.List;
 import java.util.Set;
 import kr.hvy.blog.modules.tag.application.dto.TagCreate;
@@ -24,9 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 @RequiredArgsConstructor
 public class TagService {
-
-  @PersistenceContext
-  private EntityManager entityManager; // EntityManager 주입
 
   private final TagDtoMapper tagDtoMapper;
   private final TagRepository tagRepository;
@@ -57,14 +52,14 @@ public class TagService {
         .toList();
   }
 
-  public TagResponse create(TagCreate createDto) {
+  public Tag createIfNotExists(TagCreate createDto) {
     Specification.validate(TagCreateSpecification::new, createDto);
-
-    Tag tag = tagRepository.findByName(createDto.getName())
+    return tagRepository.findByName(createDto.getName())
         .orElseGet(() -> tagRepository.save(tagDtoMapper.toDomain(createDto)));
-//    entityManager.refresh(tag);
+  }
 
-    return tagDtoMapper.toResponse(tag);
+  public TagResponse create(TagCreate createDto) {
+    return tagDtoMapper.toResponse(createIfNotExists(createDto));
   }
 
   public DeleteResponse<Long> delete(Long id) {

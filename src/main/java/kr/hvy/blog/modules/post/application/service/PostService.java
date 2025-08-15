@@ -27,7 +27,6 @@ import kr.hvy.blog.modules.tag.application.dto.TagResponse;
 import kr.hvy.blog.modules.tag.application.service.TagService;
 import kr.hvy.blog.modules.tag.domain.Tag;
 import kr.hvy.blog.modules.tag.mapper.TagDtoMapper;
-import kr.hvy.blog.modules.tag.repository.TagRepository;
 import kr.hvy.common.domain.dto.DeleteResponse;
 import kr.hvy.common.exception.DataNotFoundException;
 import kr.hvy.common.specification.Specification;
@@ -48,11 +47,9 @@ public class PostService {
 
   private final TagService tagService;
   private final FileDtoMapper fileDtoMapper;
-
   private final TagDtoMapper tagDtoMapper;
   private final PostDtoMapper postDtoMapper;
   private final PostRepository postRepository;
-  private final TagRepository tagRepository;
   private final PostMapper postMapper;
   private final CategoryRepository categoryRepository;
 
@@ -125,6 +122,11 @@ public class PostService {
         .orElseThrow(() -> new DataNotFoundException("Not Found Category."));
     post.update(updateDto, category);
 
+    // category의 postCount를 갱힌하고 싶다면
+    Post saved = postRepository.saveAndFlush(post);
+    entityManager.refresh(saved);
+    entityManager.refresh(category);
+
     return postDtoMapper.toResponse(post);
   }
 
@@ -142,20 +144,17 @@ public class PostService {
 
 
   public TagResponse addPostTag(Long postId, TagCreate tagCreate) {
-    // todo 태그 저장하는 부분도 같이 손봐야 함
-    TagResponse tagResponse = tagService.create(tagCreate);
-    Tag tag = tagRepository.findById(tagResponse.getId())
-        .orElseThrow(() -> new DataNotFoundException("Not Found Tag."));
+    Tag tag = tagService.createIfNotExists(tagCreate);
     Post post = postRepository.findById(postId)
         .orElseThrow(() -> new DataNotFoundException("Not Found Post."));
     post.addTag(tag);
     postRepository.saveAndFlush(post);
+    entityManager.refresh(tag);
     return tagDtoMapper.toResponse(tagService.findById(tag.getId()));
   }
 
   public PostResponse deletePostTag(Long postId, Long tagId) {
-    Tag tag = tagRepository.findById(tagId)
-        .orElseThrow(() -> new DataNotFoundException("Not Found Tag."));
+    Tag tag = tagService.findById(tagId);
     Post post = postRepository.findById(postId)
         .orElseThrow(() -> new DataNotFoundException("Not Found Post."));
     post.removeTag(tag);
@@ -177,10 +176,7 @@ public class PostService {
       );
 
       postRepository.saveAndFlush(post);
-      // todo ; check 필요
-//      entityManager.refresh(post);
 
-      // refresh 후 실제로 저장된 파일을 찾아서 응답 생성 (ID가 생성된 상태)
       File savedFile = post.getFiles().stream()
           .filter(f -> f.getPath().equals(relativePath))
           .findFirst()

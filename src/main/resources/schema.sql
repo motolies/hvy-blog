@@ -102,3 +102,48 @@ create or replace table tb_user_authority_map
     constraint fk_user_authority_map_user_id        foreign key (userId) references tb_user (id)
 );
 
+-- 공통코드 관리 테이블들
+
+create or replace table tb_common_class
+(
+    name             varchar(64)   not null        primary key,
+    displayName      varchar(128)  null,
+    description      varchar(512)  null,
+    attribute1Name   varchar(64)   null            comment '동적속성1 이름',
+    attribute2Name   varchar(64)   null            comment '동적속성2 이름',
+    attribute3Name   varchar(64)   null            comment '동적속성3 이름',
+    attribute4Name   varchar(64)   null            comment '동적속성4 이름',
+    attribute5Name   varchar(64)   null            comment '동적속성5 이름',
+    isActive         bit           not null        default 1,
+    createdAt        datetime(6)   not null,
+    createdBy        varchar(32)   null,
+    updatedAt        datetime(6)   null,
+    updatedBy        varchar(32)   null
+) comment '공통코드 클래스 (코드 그룹 정의)';
+
+create or replace table tb_common_code
+(
+    className         varchar(64)  not null        comment '클래스명 (복합키1)',
+    code              varchar(32)  not null        comment '코드값 (복합키2)',
+    name              varchar(64)  not null        comment '코드명',
+    description       varchar(512) null           comment '설명',
+    attribute1Value   varchar(128) null           comment '동적속성1 값',
+    attribute2Value   varchar(128) null           comment '동적속성2 값',
+    attribute3Value   varchar(128) null           comment '동적속성3 값',
+    attribute4Value   varchar(128) null           comment '동적속성4 값',
+    attribute5Value   varchar(128) null           comment '동적속성5 값',
+    childClassName    varchar(64)  null           comment '하위클래스명 (NULL이면 leaf 노드)',
+    sort              int          not null        default 0           comment '정렬순서',
+    isActive          bit          not null        default 1           comment '활성화여부',
+    createdAt         datetime(6)  not null,
+    createdBy         varchar(32)  null,
+    updatedAt         datetime(6)  null,
+    updatedBy         varchar(32)  null,
+
+    primary key (className, code),
+    constraint fk_common_code_class_name        foreign key (className) references tb_common_class (name)
+        on update cascade on delete restrict,
+    constraint fk_common_code_child_class_name  foreign key (childClassName) references tb_common_class (name)
+        on update cascade on delete set null
+) comment '공통코드 (실제 코드값 저장)';
+

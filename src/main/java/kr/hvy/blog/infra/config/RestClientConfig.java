@@ -2,9 +2,9 @@ package kr.hvy.blog.infra.config;
 
 import java.util.Optional;
 import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
-import kr.hvy.common.client.RestApi;
-import kr.hvy.common.config.RestClientConfigurer;
-import kr.hvy.common.notify.Notify;
+import kr.hvy.common.infrastructure.client.config.RestClientConfigurer;
+import kr.hvy.common.infrastructure.client.rest.RestApi;
+import kr.hvy.common.infrastructure.notification.slack.Notify;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;

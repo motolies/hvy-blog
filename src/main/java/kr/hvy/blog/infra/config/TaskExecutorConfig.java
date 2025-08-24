@@ -1,6 +1,6 @@
 package kr.hvy.blog.infra.config;
 
-import kr.hvy.common.config.TaskExecutorConfigurer;
+import kr.hvy.common.config.executor.TaskExecutorConfigurer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;

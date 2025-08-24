@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.auth.application.specification;
 
 import kr.hvy.blog.modules.auth.domain.entity.User;
-import kr.hvy.common.specification.Specification;
+import kr.hvy.common.core.specification.Specification;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 

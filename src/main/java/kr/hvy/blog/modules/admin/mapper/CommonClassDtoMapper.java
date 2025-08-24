@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.admin.mapper;
 
+import java.util.List;
 import kr.hvy.blog.modules.admin.application.dto.CommonClassCreate;
 import kr.hvy.blog.modules.admin.application.dto.CommonClassResponse;
 import kr.hvy.blog.modules.admin.domain.entity.CommonClass;
@@ -7,17 +8,12 @@ import org.mapstruct.IterableMapping;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.Named;
-import org.mapstruct.factory.Mappers;
-
-import java.util.List;
 
 /**
  * CommonClass 엔티티 ↔ DTO 매핑 인터페이스
  */
 @Mapper(componentModel = "spring", uses = {CommonCodeDtoMapper.class})
 public interface CommonClassDtoMapper {
-
-  CommonClassDtoMapper INSTANCE = Mappers.getMapper(CommonClassDtoMapper.class);
 
   /**
    * 생성 DTO → 엔티티 변환

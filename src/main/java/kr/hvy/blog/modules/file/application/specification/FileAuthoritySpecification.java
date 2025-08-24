@@ -2,8 +2,8 @@ package kr.hvy.blog.modules.file.application.specification;
 
 import kr.hvy.blog.modules.file.domain.entity.File;
 import kr.hvy.blog.modules.post.domain.entity.Post;
-import kr.hvy.common.security.SecurityUtils;
-import kr.hvy.common.specification.Specification;
+import kr.hvy.common.core.security.SecurityUtils;
+import kr.hvy.common.core.specification.Specification;
 
 public class FileAuthoritySpecification implements Specification<File> {
 

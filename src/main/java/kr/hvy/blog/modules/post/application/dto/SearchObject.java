@@ -2,12 +2,9 @@ package kr.hvy.blog.modules.post.application.dto;
 
 import java.util.List;
 import kr.hvy.blog.modules.post.domain.code.SearchType;
-import kr.hvy.common.domain.dto.paging.PageRequest;
-import lombok.AllArgsConstructor;
+import kr.hvy.common.application.domain.dto.paging.PageRequest;
 import lombok.Builder;
-import lombok.Data;
 import lombok.EqualsAndHashCode;
-import lombok.NoArgsConstructor;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
 

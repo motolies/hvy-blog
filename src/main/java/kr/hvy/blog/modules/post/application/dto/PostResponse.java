@@ -4,7 +4,7 @@ import java.util.Set;
 import kr.hvy.blog.modules.category.application.dto.CategorySingleResponse;
 import kr.hvy.blog.modules.file.application.dto.FileResponse;
 import kr.hvy.blog.modules.tag.application.dto.TagResponse;
-import kr.hvy.common.domain.vo.EventLog;
+import kr.hvy.common.application.domain.vo.EventLog;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;

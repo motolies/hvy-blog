@@ -1,5 +1,8 @@
 package kr.hvy.blog.modules.admin.mapper;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import kr.hvy.blog.modules.admin.application.dto.CommonCodeCreate;
 import kr.hvy.blog.modules.admin.application.dto.CommonCodeResponse;
 import kr.hvy.blog.modules.admin.application.dto.CommonCodeTreeResponse;
@@ -7,19 +10,12 @@ import kr.hvy.blog.modules.admin.domain.entity.CommonCode;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.Named;
-import org.mapstruct.factory.Mappers;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  * CommonCode 엔티티 ↔ DTO 매핑 인터페이스
  */
 @Mapper(componentModel = "spring", uses = {CommonClassDtoMapper.class})
 public interface CommonCodeDtoMapper {
-
-  CommonCodeDtoMapper INSTANCE = Mappers.getMapper(CommonCodeDtoMapper.class);
 
   /**
    * 생성 DTO → 엔티티 변환

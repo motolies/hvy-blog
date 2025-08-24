@@ -2,10 +2,9 @@ package kr.hvy.blog.modules.file.application.service;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Optional;
 import kr.hvy.blog.modules.file.domain.entity.File;
 import kr.hvy.blog.modules.file.repository.FileRepository;
-import kr.hvy.common.exception.DataNotFoundException;
+import kr.hvy.common.core.exception.DataNotFoundException;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 

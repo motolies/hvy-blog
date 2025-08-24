@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import kr.hvy.blog.modules.category.domain.entity.Category;
 import kr.hvy.blog.modules.category.domain.code.CategoryConstant;
-import kr.hvy.common.specification.Specification;
+import kr.hvy.common.core.specification.Specification;
 import org.apache.commons.collections4.CollectionUtils;
 
 public class CategoryDeleteSpecification implements Specification<Category> {

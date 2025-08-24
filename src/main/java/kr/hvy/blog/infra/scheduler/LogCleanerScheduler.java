@@ -1,9 +1,9 @@
 package kr.hvy.blog.infra.scheduler;
 
 import java.time.LocalDateTime;
-import kr.hvy.common.aop.log.service.ApiLogService;
-import kr.hvy.common.aop.log.service.SystemLogService;
-import kr.hvy.common.scheduler.AbstractScheduler;
+import kr.hvy.common.aop.logging.service.ApiLogService;
+import kr.hvy.common.aop.logging.service.SystemLogService;
+import kr.hvy.common.infrastructure.scheduler.impl.AbstractScheduler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;

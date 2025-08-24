@@ -1,8 +1,8 @@
 package kr.hvy.blog.modules.post.application.specification;
 
 import kr.hvy.blog.modules.post.domain.entity.Post;
-import kr.hvy.common.security.SecurityUtils;
-import kr.hvy.common.specification.Specification;
+import kr.hvy.common.core.security.SecurityUtils;
+import kr.hvy.common.core.specification.Specification;
 
 public class PostAuthoritySpecification implements Specification<Post> {
 

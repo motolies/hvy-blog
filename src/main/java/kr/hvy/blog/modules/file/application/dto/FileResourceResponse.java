@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.file.application.dto;
 
 import java.nio.charset.StandardCharsets;
-import kr.hvy.common.file.MediaUtils;
+import kr.hvy.common.core.file.MediaUtils;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;

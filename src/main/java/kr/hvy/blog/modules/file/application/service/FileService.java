@@ -8,9 +8,9 @@ import kr.hvy.blog.modules.file.application.specification.FileCreateSpecificatio
 import kr.hvy.blog.modules.file.domain.entity.File;
 import kr.hvy.blog.modules.file.repository.FileRepository;
 import kr.hvy.blog.modules.post.application.service.PostService;
-import kr.hvy.common.domain.dto.DeleteResponse;
-import kr.hvy.common.file.FileStoreUtils;
-import kr.hvy.common.specification.Specification;
+import kr.hvy.common.application.domain.dto.DeleteResponse;
+import kr.hvy.common.core.file.FileStoreUtils;
+import kr.hvy.common.core.specification.Specification;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;

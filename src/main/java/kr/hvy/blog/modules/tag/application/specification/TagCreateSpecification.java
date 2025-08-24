@@ -3,7 +3,7 @@ package kr.hvy.blog.modules.tag.application.specification;
 import java.util.ArrayList;
 import java.util.List;
 import kr.hvy.blog.modules.tag.application.dto.TagCreate;
-import kr.hvy.common.specification.Specification;
+import kr.hvy.common.core.specification.Specification;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 

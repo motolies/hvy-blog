@@ -3,7 +3,7 @@ package kr.hvy.blog.modules.file.application.specification;
 import java.util.ArrayList;
 import java.util.List;
 import kr.hvy.blog.modules.file.application.dto.FileCreate;
-import kr.hvy.common.specification.Specification;
+import kr.hvy.common.core.specification.Specification;
 import org.apache.commons.collections4.CollectionUtils;
 
 public class FileCreateSpecification implements Specification<FileCreate> {

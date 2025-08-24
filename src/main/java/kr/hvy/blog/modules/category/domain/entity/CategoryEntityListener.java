@@ -3,7 +3,7 @@ package kr.hvy.blog.modules.category.domain.entity;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.PostUpdate;
 import kr.hvy.blog.modules.category.application.service.CategoryProcedureService;
-import kr.hvy.common.util.ApplicationContextUtils;
+import kr.hvy.common.core.util.ApplicationContextUtils;
 
 public class CategoryEntityListener {
 

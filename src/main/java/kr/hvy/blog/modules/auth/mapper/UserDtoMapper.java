@@ -5,21 +5,16 @@ import java.util.stream.Collectors;
 import kr.hvy.blog.modules.auth.application.dto.UserCreate;
 import kr.hvy.blog.modules.auth.application.dto.UserResponse;
 import kr.hvy.blog.modules.auth.domain.SecurityUser;
-
 import kr.hvy.blog.modules.auth.domain.code.AuthorityName;
 import kr.hvy.blog.modules.auth.domain.entity.Authority;
 import kr.hvy.blog.modules.auth.domain.entity.User;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
-
-import org.mapstruct.factory.Mappers;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 @Mapper(componentModel = "spring")
 public interface UserDtoMapper {
-
-  UserDtoMapper INSTANCE = Mappers.getMapper(UserDtoMapper.class);
 
   // User -> SecurityUser
   @Mapping(target = "authorities", source = "authorities")

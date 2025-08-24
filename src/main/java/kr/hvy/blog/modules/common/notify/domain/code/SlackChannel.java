@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.common.notify.domain.code;
 
-import kr.hvy.common.code.base.EnumCode;
+import kr.hvy.common.core.code.base.EnumCode;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 

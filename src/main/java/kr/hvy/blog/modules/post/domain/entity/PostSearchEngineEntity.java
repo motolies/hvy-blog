@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.post.domain.entity;
 
 import jakarta.persistence.*;
-import kr.hvy.common.domain.embeddable.EventLogEntity;
+import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import lombok.*;
 
 

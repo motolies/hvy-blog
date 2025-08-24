@@ -2,7 +2,7 @@ package kr.hvy.blog.modules.post.domain.code.converter;
 
 import jakarta.persistence.Converter;
 import kr.hvy.blog.modules.post.domain.code.PostStatus;
-import kr.hvy.common.code.base.AbstractEnumCodeConverter;
+import kr.hvy.common.core.code.base.AbstractEnumCodeConverter;
 
 @Converter(autoApply = true)
 public class PostStatusConverter extends AbstractEnumCodeConverter<PostStatus, String> {

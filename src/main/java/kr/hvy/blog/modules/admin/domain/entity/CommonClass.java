@@ -14,7 +14,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import kr.hvy.blog.modules.admin.application.dto.CommonClassUpdate;
-import kr.hvy.common.domain.embeddable.EventLogEntity;
+import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;

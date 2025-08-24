@@ -2,7 +2,7 @@ package kr.hvy.blog.modules.file.domain.entity;
 
 import jakarta.persistence.PostRemove;
 import kr.hvy.blog.modules.file.application.service.FileService;
-import kr.hvy.common.util.ApplicationContextUtils;
+import kr.hvy.common.core.util.ApplicationContextUtils;
 
 public class FileEntityListener {
 

@@ -12,10 +12,10 @@ import org.springframework.context.annotation.Profile;
     basePackages = {"kr.hvy.blog", "kr.hvy.common"}
     , excludeFilters = {
     @ComponentScan.Filter(type = FilterType.REGEX,
-        pattern = "kr\\.hvy\\.common\\.kafka\\..*" // kafka 패키지 및 하위 클래스들 배제
+        pattern = "kr\\.hvy\\.common\\.infrastructure\\.messaging\\..*" // kafka 패키지 및 하위 클래스들 배제
     ),
     @ComponentScan.Filter(type = FilterType.REGEX,
-        pattern = "kr\\.hvy\\.common\\.aop\\.log\\..*" // 해당 패키지 및 하위 클래스들 배제
+        pattern = "kr\\.hvy\\.common\\.aop\\.logging\\..*" // 해당 패키지 및 하위 클래스들 배제
     )
 }
 )

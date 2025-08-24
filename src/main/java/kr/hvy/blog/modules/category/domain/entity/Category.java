@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Set;
 import kr.hvy.blog.modules.category.application.dto.CategoryUpdate;
 import kr.hvy.blog.modules.post.domain.entity.Post;
-import kr.hvy.common.converter.TsidUtils;
+import kr.hvy.common.core.converter.TsidUtils;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;

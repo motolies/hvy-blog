@@ -1,7 +1,7 @@
 package kr.hvy.blog.infra.config;
 
 import javax.sql.DataSource;
-import kr.hvy.common.config.SchedulerConfigurer;
+import kr.hvy.common.infrastructure.scheduler.config.SchedulerConfigurer;
 import net.javacrumbs.shedlock.core.LockProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

@@ -3,7 +3,7 @@ package kr.hvy.blog.modules.file.application;
 import io.hypersistence.tsid.TSID;
 import kr.hvy.blog.modules.file.application.dto.FileCreate;
 import kr.hvy.blog.modules.file.application.service.FileService;
-import kr.hvy.common.domain.dto.DeleteResponse;
+import kr.hvy.common.application.domain.dto.DeleteResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;

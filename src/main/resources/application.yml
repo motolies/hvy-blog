@@ -78,7 +78,7 @@ logging:
         hikari: ERROR
         hikari.HikariConfig: DEBUG
     kr.hvy:
-      common.db.log: DEBUG # sql log
+      common.infrastructure.database.logging: DEBUG
       blog:
         service: TRACE
         controller: TRACE

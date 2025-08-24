@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.file.application.dto;
 
-import kr.hvy.common.domain.vo.EventLog;
+import kr.hvy.common.application.domain.vo.EventLog;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;

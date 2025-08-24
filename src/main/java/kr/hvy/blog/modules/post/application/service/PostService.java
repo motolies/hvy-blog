@@ -27,9 +27,10 @@ import kr.hvy.blog.modules.tag.application.dto.TagResponse;
 import kr.hvy.blog.modules.tag.application.service.TagService;
 import kr.hvy.blog.modules.tag.domain.Tag;
 import kr.hvy.blog.modules.tag.mapper.TagDtoMapper;
-import kr.hvy.common.domain.dto.DeleteResponse;
-import kr.hvy.common.exception.DataNotFoundException;
-import kr.hvy.common.specification.Specification;
+
+import kr.hvy.common.application.domain.dto.DeleteResponse;
+import kr.hvy.common.core.exception.DataNotFoundException;
+import kr.hvy.common.core.specification.Specification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;

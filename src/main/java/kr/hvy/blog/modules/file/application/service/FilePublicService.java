@@ -4,7 +4,7 @@ import kr.hvy.blog.modules.file.application.dto.FileResourceResponse;
 import kr.hvy.blog.modules.file.application.specification.FileAuthoritySpecification;
 import kr.hvy.blog.modules.file.domain.entity.File;
 import kr.hvy.blog.modules.file.repository.FileRepository;
-import kr.hvy.common.specification.Specification;
+import kr.hvy.common.core.specification.Specification;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;

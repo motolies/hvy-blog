@@ -107,6 +107,12 @@ path.upload: ${FILE_PATH:${user.home}/skyscape/file}
 slack:
   token: ${SLACK_BOT_TOKEN:xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx}
 
+# jira
+jira:
+  url: ${JIRA_URL:https://your-company.atlassian.net}
+  username: ${JIRA_USERNAME:your-email@company.com}
+  api-token: ${JIRA_API_TOKEN:your-api-token}
+  project-key: ${JIRA_PROJECT_KEY:PROJECT}
 
 # scheduler
 scheduler:
@@ -119,6 +125,9 @@ scheduler:
   log-cleaner:
     lock-name: LOGCLEANER-TEST
     cron-expression: "*/10 * * * * ?"
+  jira:
+    lock-name: JIRA-SYNC-TEST
+    cron-expression: "0 0 0-14 * * ?"
 
 cookie:
   same-site: LAX
@@ -141,6 +150,9 @@ scheduler:
   log-cleaner:
     lock-name: LOGCLEANER-PROD
     cron-expression: "* * 0 * * ?"
+  jira:
+    lock-name: JIRA-SYNC-PROD
+    cron-expression: "0 0 0-14 * * ?"
 
 cookie:
   same-site: NONE

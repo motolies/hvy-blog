@@ -147,3 +147,51 @@ create or replace table tb_common_code
         on update cascade on delete set null
 ) comment '공통코드 (실제 코드값 저장)';
 
+-- Jira 관련 테이블들
+
+create or replace table tb_jira_issue
+(
+    id           bigint auto_increment     primary key,
+    JiraIssueId  bigint       not null     comment '지라 이슈 Id'
+    issueKey     varchar(32)  not null     comment '지라 이슈 키 (예: PROJ-123)',
+    issueLink    varchar(512) not null     comment '지라 이슈 링크',
+    summary      varchar(512) not null     comment '이슈 요약',
+    issueType    varchar(64)  null         comment '이슈 유형',
+    status       varchar(64)  null         comment '이슈 상태',
+    assignee     varchar(128) null         comment '담당자',
+    components   varchar(512) null         comment '컴포넌트 (쉼표로 구분)',
+    storyPoints  decimal(5,2) null         comment '스토리 포인트',
+    startDate    date         null         comment '시작일',
+    createdAt    datetime(6)  not null     comment '생성일시',
+    createdBy    varchar(32)  null         comment '생성자',
+    updatedAt    datetime(6)  not null     comment '수정일시',
+    updatedBy    varchar(32)  null         comment '수정자',
+    
+    constraint uk_jira_issue_key unique (issueKey)
+) comment 'Jira 이슈 정보';
+
+create or replace table tb_jira_worklog
+(
+    id          bigint auto_increment     primary key,
+    issueId     bigint       not null     comment '이슈 ID (FK)',
+    issueKey    varchar(32)  not null     comment '지라 이슈 키',
+    issueType   varchar(64)  null         comment '이슈 유형',
+    status      varchar(64)  null         comment '이슈 상태',
+    issueLink   varchar(512) not null     comment '지라 이슈 링크',
+    summary     varchar(512) not null     comment '이슈 요약',
+    author      varchar(128) not null     comment '작업자',
+    components  varchar(512) null         comment '컴포넌트 (쉼표로 구분)',
+    timeSpent   varchar(32)  not null     comment '소요 시간 (예: 2h 30m)',
+    timeHours   decimal(5,2) not null     comment '소요 시간(시간)',
+    comment     longtext     null         comment '작업 로그 코멘트',
+    started     datetime(6)  not null     comment '작업 시작 일시',
+    worklogId   varchar(256)  not null    comment 'Jira 워크로그 ID',
+    createdAt   datetime(6)  not null     comment '생성일시',
+    createdBy   varchar(32)  null         comment '생성자',
+    updatedAt   datetime(6)  not null     comment '수정일시',
+    updatedBy   varchar(32)  null         comment '수정자',
+    
+    constraint fk_jira_worklog_issue_id foreign key (issueId) references tb_jira_issue (id),
+    constraint uk_jira_worklog_id unique (worklogId)
+) comment 'Jira 워크로그 정보';
+

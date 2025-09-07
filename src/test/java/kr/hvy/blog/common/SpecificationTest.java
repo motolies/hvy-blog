@@ -1,6 +1,6 @@
 package kr.hvy.blog.common;
 
-import static kr.hvy.common.specification.Specification.not;
+import static kr.hvy.common.core.specification.Specification.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,8 +13,8 @@ import kr.hvy.blog.modules.auth.domain.entity.Authority;
 import kr.hvy.blog.modules.auth.domain.code.AuthorityName;
 import kr.hvy.blog.modules.auth.application.specification.UserCreateSpecification;
 import kr.hvy.blog.modules.auth.application.specification.UserLoginSpecification;
-import kr.hvy.common.exception.SpecificationException;
-import kr.hvy.common.specification.Specification;
+import kr.hvy.common.core.exception.SpecificationException;
+import kr.hvy.common.core.specification.Specification;
 import org.apache.commons.lang3.ObjectUtils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

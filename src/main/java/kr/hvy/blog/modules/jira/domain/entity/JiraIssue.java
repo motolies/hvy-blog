@@ -72,7 +72,7 @@ public class JiraIssue {
   @Column(name = "startDate")
   private LocalDate startDate;
 
-  @Column(name = "sprint", length = 256)
+  @Column(name = "sprint", length = 32)
   private String sprint;
 
   @Embedded

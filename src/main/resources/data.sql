@@ -104,3 +104,19 @@ VALUES
 ('CATEGORY_CLASS', 'DESIGN', '디자인', '디자인 및 창작', '#dc3545', 'fas fa-palette', '3', NULL, 3, 1, NOW(), 'SYSTEM'),
 ('CATEGORY_CLASS', 'EDUCATION', '교육', '교육 및 학습', '#ffc107', 'fas fa-graduation-cap', '4', NULL, 4, 1, NOW(), 'SYSTEM'),
 ('CATEGORY_CLASS', 'LIFESTYLE', '라이프스타일', '일상 및 취미', '#6f42c1', 'fas fa-heart', '5', NULL, 5, 1, NOW(), 'SYSTEM');
+
+
+INSERT INTO blog.tb_common_class (name, displayName, description, attribute1Name, attribute2Name, attribute3Name, attribute4Name, attribute5Name, isActive, createdAt, createdBy, updatedAt, updatedBy)
+VALUES ('JIRA_STATUS', '지라 상태 코드', '지라 상태 코드', 'statusCategory', 'sprintYn', null, null, null, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null);
+
+INSERT INTO blog.tb_common_code (className, code, name, description, attribute1Value, attribute2Value, attribute3Value, attribute4Value, attribute5Value, childClassName, sort, isActive, createdAt, createdBy, updatedAt, updatedBy)
+VALUES ('JIRA_STATUS', '해야 할 일(작업요청)', '해야 할 일(작업요청)', '해야 할 일(작업요청)', 'To Do', 'N', null, null, null, null, 1, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null)
+,('JIRA_STATUS', '작업예정(요청확인)', '작업예정(요청확인)', '작업예정(요청확인)', 'To Do', 'N', null, null, null, null, 2, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null)
+,('JIRA_STATUS', '중지(HOLDING)', '중지(HOLDING)', '중지(HOLDING)', 'To Do', 'N', null, null, null, null, 3, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null)
+,('JIRA_STATUS', '진행 불가(Reject)', '진행 불가(Reject)', '진행 불가(Reject)', 'To Do', 'N', null, null, null, null, 4, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null)
+,('JIRA_STATUS', '진행중', '진행중', '진행중', 'In Progress', 'N', null, null, null, null, 20, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null)
+,('JIRA_STATUS', 'QA요청', 'QA요청', 'QA요청', 'In Progress', 'N', null, null, null, null, 50, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null)
+,('JIRA_STATUS', '취소', '취소', '취소', 'Done', 'N', null, null, null, null, 90, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null)
+,('JIRA_STATUS', '배포준비', '배포준비', '배포준비', 'Done', 'Y', null, null, null, null, 99, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null)
+,('JIRA_STATUS', '작업완료', '작업완료', '작업완료', 'Done', 'Y', null, null, null, null, 100, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null);
+

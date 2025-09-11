@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.jira.application;
 
-import kr.hvy.blog.modules.jira.application.service.JiraSyncService;
+import kr.hvy.blog.modules.jira.application.service.JiraBatchService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -14,14 +14,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class JiraSyncAdminController {
 
-  private final JiraSyncService jiraSyncService;
+  private final JiraBatchService jiraBatchService;
 
   /**
    * 지라 이슈 동기화
    */
   @PostMapping
   public ResponseEntity<?> sync() {
-    jiraSyncService.syncAllIssuesAndWorklogs();
+    jiraBatchService.syncAllIssuesAndWorklogs();
     return ResponseEntity
         .ok().build();
   }

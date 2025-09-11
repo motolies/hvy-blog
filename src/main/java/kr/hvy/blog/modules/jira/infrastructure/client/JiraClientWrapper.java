@@ -6,7 +6,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import kr.hvy.blog.modules.jira.application.dto.JiraIssueDto;
@@ -19,7 +18,6 @@ import kr.hvy.blog.modules.jira.infrastructure.config.JiraProperties;
 import kr.hvy.common.infrastructure.client.rest.RestApi;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -33,14 +31,11 @@ public class JiraClientWrapper {
 
   private final RestApi jiraRestApi;
   private final JiraProperties jiraProperties;
-  private final TaskExecutor taskExecutor;
 
   public JiraClientWrapper(@Qualifier("jiraRestApi") RestApi jiraRestApi,
-                          JiraProperties jiraProperties,
-                          @Qualifier("taskExecutor") TaskExecutor taskExecutor) {
+      JiraProperties jiraProperties) {
     this.jiraRestApi = jiraRestApi;
     this.jiraProperties = jiraProperties;
-    this.taskExecutor = taskExecutor;
   }
 
   /**
@@ -57,37 +52,29 @@ public class JiraClientWrapper {
         return new ArrayList<>();
       }
 
-      log.info("프로젝트 {}에서 총 {}개의 이슈를 병렬로 조회합니다.", jiraProperties.getProjectKey(), totalIssues);
+      log.info("프로젝트 {}에서 총 {}개의 이슈를 순차적으로 조회합니다.", jiraProperties.getProjectKey(), totalIssues);
 
-      // 병렬 처리를 위한 배치 계산
+      // 순차 처리를 위한 배치 계산
       int batchSize = 100;
+      List<JiraIssueDto> allIssues = new ArrayList<>();
+      int totalBatches = (totalIssues + batchSize - 1) / batchSize;
 
-      // Stream을 사용한 배치별 병렬 처리
-      List<CompletableFuture<List<JiraIssueDto>>> futures = IntStream.range(0, (totalIssues + batchSize - 1) / batchSize)
-          .mapToObj(batchIndex -> {
-            final int startAt = batchIndex * batchSize;
-            final int currentBatchSize = Math.min(batchSize, totalIssues - startAt);
+      // 배치별 순차 처리
+      for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        final int startAt = batchIndex * batchSize;
+        final int currentBatchSize = Math.min(batchSize, totalIssues - startAt);
 
-            return CompletableFuture.supplyAsync(() -> fetchIssueBatch(startAt, currentBatchSize), taskExecutor);
-          })
-          .collect(Collectors.toList());
+        log.debug("배치 {}/{}를 처리 중입니다. (startAt: {}, batchSize: {})",
+            batchIndex + 1, totalBatches, startAt, currentBatchSize);
 
-      // 모든 배치 결과를 병렬로 수집
-      List<JiraIssueDto> allIssues = futures.stream()
-          .map(future -> {
-            try {
-              return future.get();
-            } catch (Exception e) {
-              log.error("배치 처리 중 오류 발생: {}", e.getMessage(), e);
-              // 개별 배치 실패해도 다른 배치는 계속 처리
-              return new ArrayList<JiraIssueDto>();
-            }
-          })
-          .flatMap(List::stream)
-          .collect(Collectors.toList());
+        List<JiraIssueDto> batchIssues = fetchIssueBatch(startAt, currentBatchSize);
+        if (batchIssues != null && !batchIssues.isEmpty()) {
+          allIssues.addAll(batchIssues);
+        }
+      }
 
-      log.info("프로젝트 {}에서 {}개의 이슈를 성공적으로 조회했습니다. (병렬 배치: {}개)",
-          jiraProperties.getProjectKey(), allIssues.size(), futures.size());
+      log.info("프로젝트 {}에서 {}개의 이슈를 성공적으로 조회했습니다. (총 배치: {}개)",
+          jiraProperties.getProjectKey(), allIssues.size(), totalBatches);
 
       return allIssues;
 
@@ -139,42 +126,32 @@ public class JiraClientWrapper {
         return new ArrayList<>();
       }
 
-      // 병렬처리 적용: 각 이슈의 워크로그 최적화 조회를 CompletableFuture로 처리
-      List<CompletableFuture<JiraIssueDto>> futures = issues.stream()
-          .map(issue -> CompletableFuture.supplyAsync(() -> {
-            try {
-              // 1. 기본 이슈 정보를 DTO로 변환 (기본 워크로그 제외)
-              JiraIssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
-
-              // 2. Python 최적화 로직: total > 19면 별도 API, 그렇지 않으면 기본 워크로그 사용
-              List<JiraWorklogDto> worklogs = getOptimizedWorklogs(issue);
-              if (worklogs != null && !worklogs.isEmpty()) {
-                issueDto.setWorklogs(worklogs);
-                log.debug("이슈 {}에서 {}개의 워크로그를 병렬 최적화 조회했습니다.", issue.getKey(), worklogs.size());
-              }
-
-              return issueDto;
-
-            } catch (Exception e) {
-              log.error("이슈 {} 병렬 처리 중 오류 발생: {}", issue.getKey(), e.getMessage());
-              // 개별 이슈 실패해도 계속 처리하되, 워크로그 없이 이슈만 반환
-              return convertToApplicationDtoWithoutWorklogs(issue);
-            }
-          }, taskExecutor))
-          .collect(Collectors.toList());
-
-      // 모든 CompletableFuture 결과 수집
+      // 순차처리: 각 이슈의 워크로그 최적화 조회를 순차적으로 처리
       List<JiraIssueDto> batchIssues = new ArrayList<>();
-      for (CompletableFuture<JiraIssueDto> future : futures) {
+
+      for (JiraIssueResponse issue : issues) {
         try {
-          batchIssues.add(future.get());
+          // 1. 기본 이슈 정보를 DTO로 변환 (기본 워크로그 제외)
+          JiraIssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
+
+          // 2. Python 최적화 로직: total > 19면 별도 API, 그렇지 않으면 기본 워크로그 사용
+          List<JiraWorklogDto> worklogs = getOptimizedWorklogs(issue);
+          if (worklogs != null && !worklogs.isEmpty()) {
+            issueDto.setWorklogs(worklogs);
+            log.debug("이슈 {}에서 {}개의 워크로그를 순차 최적화 조회했습니다.", issue.getKey(), worklogs.size());
+          }
+
+          batchIssues.add(issueDto);
+
         } catch (Exception e) {
-          log.error("병렬 처리 결과 수집 중 오류 발생: {}", e.getMessage());
+          log.error("이슈 {} 순차 처리 중 오류 발생: {}", issue.getKey(), e.getMessage());
+          // 개별 이슈 실패해도 계속 처리하되, 워크로그 없이 이슈만 반환
+          batchIssues.add(convertToApplicationDtoWithoutWorklogs(issue));
         }
       }
 
-      log.debug("병렬 배치 처리 완료: {}-{} ({}개 이슈를 {}개 스레드로 병렬 처리)",
-          startAt + 1, startAt + batchIssues.size(), batchIssues.size(), futures.size());
+      log.debug("순차 배치 처리 완료: {}-{} ({}개 이슈를 순차적으로 처리)",
+          startAt + 1, startAt + batchIssues.size(), batchIssues.size());
 
       return batchIssues;
 
@@ -372,42 +349,32 @@ public class JiraClientWrapper {
         return new ArrayList<>();
       }
 
-      // 병렬처리 적용: 필터된 이슈의 워크로그 최적화 조회를 CompletableFuture로 처리
-      List<CompletableFuture<JiraIssueDto>> futures = issues.stream()
-          .map(issue -> CompletableFuture.supplyAsync(() -> {
-            try {
-              // 1. 기본 이슈 정보를 DTO로 변환 (기본 워크로그 제외)
-              JiraIssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
-
-              // 2. Python 최적화 로직: total > 19면 별도 API, 그렇지 않으면 기본 워크로그 사용
-              List<JiraWorklogDto> worklogs = getOptimizedWorklogs(issue);
-              if (worklogs != null && !worklogs.isEmpty()) {
-                issueDto.setWorklogs(worklogs);
-                log.debug("필터된 이슈 {}에서 {}개의 워크로그를 병렬 최적화 조회했습니다.", issue.getKey(), worklogs.size());
-              }
-
-              return issueDto;
-
-            } catch (Exception e) {
-              log.error("필터된 이슈 {} 병렬 처리 중 오류 발생: {}", issue.getKey(), e.getMessage());
-              // 개별 이슈 실패해도 계속 처리하되, 워크로그 없이 이슈만 반환
-              return convertToApplicationDtoWithoutWorklogs(issue);
-            }
-          }, taskExecutor))
-          .collect(Collectors.toList());
-
-      // 모든 CompletableFuture 결과 수집
+      // 순차처리: 필터된 이슈의 워크로그 최적화 조회를 순차적으로 처리
       List<JiraIssueDto> filteredIssues = new ArrayList<>();
-      for (CompletableFuture<JiraIssueDto> future : futures) {
+
+      for (JiraIssueResponse issue : issues) {
         try {
-          filteredIssues.add(future.get());
+          // 1. 기본 이슈 정보를 DTO로 변환 (기본 워크로그 제외)
+          JiraIssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
+
+          // 2. Python 최적화 로직: total > 19면 별도 API, 그렇지 않으면 기본 워크로그 사용
+          List<JiraWorklogDto> worklogs = getOptimizedWorklogs(issue);
+          if (worklogs != null && !worklogs.isEmpty()) {
+            issueDto.setWorklogs(worklogs);
+            log.debug("필터된 이슈 {}에서 {}개의 워크로그를 순차 최적화 조회했습니다.", issue.getKey(), worklogs.size());
+          }
+
+          filteredIssues.add(issueDto);
+
         } catch (Exception e) {
-          log.error("필터된 이슈 병렬 처리 결과 수집 중 오류 발생: {}", e.getMessage());
+          log.error("필터된 이슈 {} 순차 처리 중 오류 발생: {}", issue.getKey(), e.getMessage());
+          // 개별 이슈 실패해도 계속 처리하되, 워크로그 없이 이슈만 반환
+          filteredIssues.add(convertToApplicationDtoWithoutWorklogs(issue));
         }
       }
 
-      log.info("필터된 이슈 병렬 조회 완료: {}개 이슈를 {}개 스레드로 병렬 처리",
-          filteredIssues.size(), futures.size());
+      log.info("필터된 이슈 순차 조회 완료: {}개 이슈를 순차적으로 처리",
+          filteredIssues.size());
 
       return filteredIssues;
 

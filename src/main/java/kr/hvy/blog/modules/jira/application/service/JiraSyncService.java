@@ -11,6 +11,7 @@ import kr.hvy.blog.modules.jira.infrastructure.config.JiraProperties;
 import kr.hvy.common.infrastructure.redis.lock.DistributedLock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,7 +30,9 @@ public class JiraSyncService {
   /**
    * 프로젝트의 모든 이슈와 워크로그를 동기화합니다. DDD 방식으로 이슈 애그리게이트를 통해 워크로그를 함께 처리합니다.
    */
+  @Async
   @DistributedLock(key = "JIRA_SYNC", leaseTime = 600)
+  @Transactional
   public void syncAllIssuesAndWorklogs() {
     log.info("Jira 이슈 및 워크로그 동기화를 시작합니다.");
 
@@ -51,7 +54,6 @@ public class JiraSyncService {
   /**
    * 이슈 리스트와 포함된 워크로그들을 DDD 방식으로 동기화합니다. 이슈 애그리게이트 루트를 통해 워크로그를 관리합니다.
    */
-  @Transactional
   public void syncIssuesWithWorklogsBatch(List<JiraIssueDto> issueDtos) {
     int syncedIssues = 0;
     int syncedWorklogs = 0;

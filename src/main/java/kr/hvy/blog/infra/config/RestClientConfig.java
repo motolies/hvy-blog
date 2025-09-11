@@ -6,15 +6,21 @@ import java.util.Optional;
 import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
 import kr.hvy.blog.modules.jira.infrastructure.config.JiraProperties;
 import kr.hvy.common.infrastructure.client.config.RestClientConfigurer;
+import kr.hvy.common.infrastructure.client.rest.Interceptor.ApiLogInterceptor;
 import kr.hvy.common.infrastructure.client.rest.RestApi;
 import kr.hvy.common.infrastructure.notification.slack.Notify;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 @Component
+@RequiredArgsConstructor
 public class RestClientConfig extends RestClientConfigurer {
+
+  private final ApiLogInterceptor apiLogInterceptor;
+
 
   @Bean("restClient")
   public RestClient RestClient() {
@@ -31,9 +37,10 @@ public class RestClientConfig extends RestClientConfigurer {
     // Basic Authentication 헤더 생성
     String authString = jiraProperties.getUsername() + ":" + jiraProperties.getApiToken();
     String encodedAuth = Base64.getEncoder().encodeToString(authString.getBytes(StandardCharsets.UTF_8));
-    
+
     return RestClient.builder()
         .baseUrl(jiraProperties.getUrl())
+        .requestInterceptor(apiLogInterceptor)
         .defaultHeader("Authorization", "Basic " + encodedAuth)
         .defaultHeader("Accept", "application/json")
         .defaultHeader("Content-Type", "application/json")

@@ -118,7 +118,7 @@ jira:
 scheduler:
   public-ip:
     lock-name: PUBLIC-IP-TEST
-    cron-expression: "* * 0 * * ?"
+    cron-expression: "0 0 0 * * ?"
   ppomppu:
     lock-name: PPOMPPU-TEST
     cron-expression: "*/10 * * * * ?"

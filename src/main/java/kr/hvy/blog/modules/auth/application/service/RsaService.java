@@ -14,7 +14,6 @@ import kr.hvy.common.core.security.encrypt.RSAEncrypt;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -29,8 +28,7 @@ public class RsaService {
   private static final int RSA_KEY_POOL_MINIMUM_SIZE = 100;
   private static final int RSA_KEY_GENERATION_BATCH_SIZE = 10;
 
-  @Qualifier("taskExecutor")
-  private final TaskExecutor taskExecutor;
+  private final TaskExecutor virtualThreadExecutor;
   private final RedisTemplate<String, String> redisTemplate;
   private final RsaRepository rsaRepository;
 
@@ -54,7 +52,7 @@ public class RsaService {
   private void generateRsaKeysAsync(int count) {
     final List<CompletableFuture<Void>> rsaKeyGenerationFutures = IntStream.rangeClosed(1, count)
         .boxed()
-        .map(i -> CompletableFuture.runAsync(this::generateSingleRsaKey, taskExecutor))
+        .map(i -> CompletableFuture.runAsync(this::generateSingleRsaKey, virtualThreadExecutor))
         .toList();
 
     // 모든 비동기 작업 완료 대기

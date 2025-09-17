@@ -127,7 +127,7 @@ scheduler:
     cron-expression: "*/10 * * * * ?"
   jira:
     lock-name: JIRA-SYNC-TEST
-    cron-expression: "0 0 0-14 * * ?"
+    cron-expression: "0 0 0 1 * ?"
 
 cookie:
   same-site: LAX
@@ -152,7 +152,7 @@ scheduler:
     cron-expression: "* * 0 * * ?"
   jira:
     lock-name: JIRA-SYNC-PROD
-    cron-expression: "0 0 0-14 * * ?"
+    cron-expression: "0 0 * * * ?"
 
 cookie:
   same-site: NONE

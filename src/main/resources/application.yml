@@ -13,8 +13,8 @@ spring:
     hikari:
       pool-name: blogHikariCP
       connection-timeout: 30000
-      minimum-idle: 10
-      maximum-pool-size: 20
+      minimum-idle: 20
+      maximum-pool-size: 50
       idle-timeout: 300000
       max-lifetime: 1800000
       auto-commit: true
@@ -113,6 +113,8 @@ jira:
   username: ${JIRA_USERNAME:your-email@company.com}
   api-token: ${JIRA_API_TOKEN:your-api-token}
   project-key: ${JIRA_PROJECT_KEY:PROJECT}
+  sync:
+    batch-size: ${JIRA_SYNC_BATCH_SIZE:50}
 
 # scheduler
 scheduler:

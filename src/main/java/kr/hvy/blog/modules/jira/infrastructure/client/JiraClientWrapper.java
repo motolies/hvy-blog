@@ -5,7 +5,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -45,142 +49,144 @@ public class JiraClientWrapper {
 
   /**
    * 프로젝트의 모든 이슈를 조회합니다.
+   * 새로운 cursor-based pagination을 사용하여 nextPageToken으로 페이지를 순회하며 즉시 병렬 처리합니다.
    */
   public List<JiraIssueDto> getAllIssuesFromProject() {
     try {
-      // 첫 번째 요청으로 총 이슈 수 파악
-      int totalIssues = getTotalIssueCount();
-//      int totalIssues = 100;
+      String jql = String.format("project = %s ORDER BY updated DESC", jiraProperties.getProjectKey());
+      int pageSize = 100;
+      int maxPages = 10000; // 무한 루프 방지를 위한 최대 페이지 수 제한
 
-      if (totalIssues == 0) {
-        log.info("프로젝트 {}에 이슈가 없습니다.", jiraProperties.getProjectKey());
-        return new ArrayList<>();
-      }
+      List<JiraIssueDto> allIssues = new ArrayList<>();
+      String nextPageToken = null;
+      int pageCount = 0;
+      Set<String> seenTokens = new HashSet<>(); // 중복 토큰 체크를 위한 Set
 
-      log.info("프로젝트 {}에서 총 {}개의 이슈를 병렬로 조회합니다.", jiraProperties.getProjectKey(), totalIssues);
+      log.info("프로젝트 {}에서 cursor-based pagination으로 이슈를 조회합니다. (페이지 크기: {})",
+          jiraProperties.getProjectKey(), pageSize);
 
-      // 병렬 처리를 위한 배치 계산
-      int batchSize = 100;
+      do {
+        pageCount++;
+        if (pageCount > maxPages) {
+          log.warn("최대 페이지 수({})에 도달했습니다. 추가 이슈가 있을 수 있습니다.", maxPages);
+          break;
+        }
 
-      // Stream을 사용한 배치별 병렬 처리
-      List<CompletableFuture<List<JiraIssueDto>>> futures = IntStream.range(0, (totalIssues + batchSize - 1) / batchSize)
-          .mapToObj(batchIndex -> {
-            final int startAt = batchIndex * batchSize;
-            final int currentBatchSize = Math.min(batchSize, totalIssues - startAt);
+        log.debug("페이지 {} 조회 중... (nextPageToken: {})", pageCount,
+            nextPageToken != null ? "present" : "null");
 
-            return CompletableFuture.supplyAsync(() -> fetchIssueBatch(startAt, currentBatchSize), virtualThreadExecutor);
-          })
-          .collect(Collectors.toList());
+        // 중복 토큰 체크 (무한 루프 방지)
+        if (nextPageToken != null && seenTokens.contains(nextPageToken)) {
+          log.warn("중복된 nextPageToken이 감지되었습니다. 무한 루프를 방지하기 위해 페이지네이션을 중단합니다. Token: {}", nextPageToken);
+          break;
+        }
+        if (nextPageToken != null) {
+          seenTokens.add(nextPageToken);
+        }
 
-      // 모든 배치 결과를 병렬로 수집
-      List<JiraIssueDto> allIssues = futures.stream()
-          .map(future -> {
-            try {
-              return future.get();
-            } catch (Exception e) {
-              log.error("배치 처리 중 오류 발생: {}", e.getMessage(), e);
-              // 개별 배치 실패해도 다른 배치는 계속 처리
-              return new ArrayList<JiraIssueDto>();
-            }
-          })
-          .flatMap(List::stream)
-          .collect(Collectors.toList());
+        // 현재 페이지 조회
+        JiraSearchResultDto searchResult;
+        try {
+          searchResult = fetchNextPageWithCursor(jql, pageSize, nextPageToken);
+        } catch (Exception e) {
+          log.error("페이지 {} 조회 중 API 오류 발생: {}. 다음 페이지로 건너뜁니다.", pageCount, e.getMessage());
+          break; // API 오류 시 전체 프로세스 중단
+        }
+        List<JiraIssueResponse> issues = searchResult.getIssues();
 
-      log.info("프로젝트 {}에서 {}개의 이슈를 성공적으로 조회했습니다. (병렬 배치: {}개)",
-          jiraProperties.getProjectKey(), allIssues.size(), futures.size());
+        if (issues == null || issues.isEmpty()) {
+          log.debug("페이지 {}에서 조회된 이슈가 없습니다.", pageCount);
+          break;
+        }
+
+        log.debug("페이지 {}에서 {}개 이슈 조회됨", pageCount, issues.size());
+
+        // 현재 페이지의 이슈들을 즉시 병렬로 워크로그 처리
+        final int currentPageCount = pageCount; // effectively final variable for lambda
+        List<CompletableFuture<JiraIssueDto>> futures = issues.stream()
+            .map(issue -> CompletableFuture.supplyAsync(() -> {
+              try {
+                // 1. 기본 이슈 정보를 DTO로 변환 (기본 워크로그 제외)
+                JiraIssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
+
+                // 2. Python 최적화 로직: total > 19면 별도 API, 그렇지 않으면 기본 워크로그 사용
+                List<JiraWorklogDto> worklogs = getOptimizedWorklogs(issue);
+                if (worklogs != null && !worklogs.isEmpty()) {
+                  issueDto.setWorklogs(worklogs);
+                  log.debug("페이지 {} 이슈 {}에서 {}개의 워크로그를 병렬 최적화 조회했습니다.",
+                      currentPageCount, issue.getKey(), worklogs.size());
+                }
+
+                return issueDto;
+
+              } catch (Exception e) {
+                log.error("페이지 {} 이슈 {} 병렬 처리 중 오류 발생: {}",
+                    currentPageCount, issue.getKey(), e.getMessage());
+                // 개별 이슈 실패해도 계속 처리하되, 워크로그 없이 이슈만 반환
+                return convertToApplicationDtoWithoutWorklogs(issue);
+              }
+            }, virtualThreadExecutor))
+            .collect(Collectors.toList());
+
+        // 현재 페이지의 모든 CompletableFuture 결과 수집
+        for (CompletableFuture<JiraIssueDto> future : futures) {
+          try {
+            allIssues.add(future.get());
+          } catch (Exception e) {
+            log.error("페이지 {} 병렬 처리 결과 수집 중 오류 발생: {}", pageCount, e.getMessage());
+          }
+        }
+
+        log.debug("페이지 {} 처리 완료: {}개 이슈를 {}개 스레드로 병렬 처리",
+            pageCount, futures.size(), futures.size());
+
+        // 다음 페이지 토큰 확인
+        nextPageToken = searchResult.getNextPageToken();
+        if (nextPageToken != null && nextPageToken.trim().isEmpty()) {
+          nextPageToken = null; // 빈 문자열은 null로 처리
+        }
+
+      } while (nextPageToken != null);
+
+      log.info("프로젝트 {}에서 {}개의 이슈를 성공적으로 조회했습니다. (총 {}페이지 처리)",
+          jiraProperties.getProjectKey(), allIssues.size(), pageCount);
 
       return allIssues;
 
     } catch (Exception e) {
-      log.error("Jira에서 이슈 조회 중 오류가 발생했습니다: {}", e.getMessage(), e);
-      throw new RuntimeException("Jira 이슈 조회 실패", e);
+      log.error("Jira에서 cursor-based 이슈 조회 중 오류가 발생했습니다: {}", e.getMessage(), e);
+      throw new RuntimeException("Jira cursor-based 이슈 조회 실패", e);
     }
   }
 
   /**
-   * 총 이슈 수를 조회합니다.
+   * 새로운 cursor-based pagination을 사용하여 이슈 페이지를 조회합니다.
    */
-  private int getTotalIssueCount() {
+  private JiraSearchResultDto fetchNextPageWithCursor(String jql, int maxResults, String nextPageToken) {
     try {
-      String jql = String.format("project = %s ORDER BY updated DESC", jiraProperties.getProjectKey());
+      // 새로운 JQL 검색 API 엔드포인트 사용
+      String endpoint = "/rest/api/3/search/jql";
 
-      MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-      params.add("jql", jql);
-      params.add("maxResults", "1");
-      params.add("startAt", "0");
+      // POST 요청을 위한 body 구성
+      Map<String, Object> requestBody = new HashMap<>();
+      requestBody.put("jql", jql);
+      requestBody.put("maxResults", maxResults);
+      requestBody.put("fields", List.of("summary", "issuetype", "assignee", "components",
+          "customfield_10026", "customfield_10015", "customfield_10280", "worklog", "status"));
 
-      JiraSearchResultDto searchResult = jiraRestApi.get("/rest/api/3/search", params, JiraSearchResultDto.class);
-      return searchResult.getTotal();
-
-    } catch (Exception e) {
-      log.error("총 이슈 수 조회 중 오류 발생: {}", e.getMessage(), e);
-      return 0;
-    }
-  }
-
-  /**
-   * 지정된 범위의 이슈 배치를 조회합니다. 워크로그는 별도 bulk API로 완전히 조회합니다.
-   */
-  private List<JiraIssueDto> fetchIssueBatch(int startAt, int batchSize) {
-    try {
-      String jql = String.format("project = %s ORDER BY updated DESC", jiraProperties.getProjectKey());
-
-      MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-      params.add("jql", jql);
-      params.add("maxResults", String.valueOf(batchSize));
-      params.add("startAt", String.valueOf(startAt));
-      params.add("fields", "summary,issuetype,assignee,components,customfield_10026,customfield_10015,customfield_10280,worklog,status"); // worklog 기본 포함 (최대 20개)
-
-      JiraSearchResultDto searchResult = jiraRestApi.get("/rest/api/3/search", params, JiraSearchResultDto.class);
-      List<JiraIssueResponse> issues = searchResult.getIssues();
-
-      if (issues == null || issues.isEmpty()) {
-        log.debug("배치에서 조회된 이슈가 없습니다.");
-        return new ArrayList<>();
+      if (nextPageToken != null && !nextPageToken.trim().isEmpty()) {
+        requestBody.put("nextPageToken", nextPageToken);
       }
 
-      // 병렬처리 적용: 각 이슈의 워크로그 최적화 조회를 CompletableFuture로 처리
-      List<CompletableFuture<JiraIssueDto>> futures = issues.stream()
-          .map(issue -> CompletableFuture.supplyAsync(() -> {
-            try {
-              // 1. 기본 이슈 정보를 DTO로 변환 (기본 워크로그 제외)
-              JiraIssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
+      log.debug("JQL 검색 요청: jql={}, maxResults={}, nextPageToken={}",
+          jql, maxResults, nextPageToken != null ? "present" : "null");
 
-              // 2. Python 최적화 로직: total > 19면 별도 API, 그렇지 않으면 기본 워크로그 사용
-              List<JiraWorklogDto> worklogs = getOptimizedWorklogs(issue);
-              if (worklogs != null && !worklogs.isEmpty()) {
-                issueDto.setWorklogs(worklogs);
-                log.debug("이슈 {}에서 {}개의 워크로그를 병렬 최적화 조회했습니다.", issue.getKey(), worklogs.size());
-              }
-
-              return issueDto;
-
-            } catch (Exception e) {
-              log.error("이슈 {} 병렬 처리 중 오류 발생: {}", issue.getKey(), e.getMessage());
-              // 개별 이슈 실패해도 계속 처리하되, 워크로그 없이 이슈만 반환
-              return convertToApplicationDtoWithoutWorklogs(issue);
-            }
-          }, virtualThreadExecutor))
-          .collect(Collectors.toList());
-
-      // 모든 CompletableFuture 결과 수집
-      List<JiraIssueDto> batchIssues = new ArrayList<>();
-      for (CompletableFuture<JiraIssueDto> future : futures) {
-        try {
-          batchIssues.add(future.get());
-        } catch (Exception e) {
-          log.error("병렬 처리 결과 수집 중 오류 발생: {}", e.getMessage());
-        }
-      }
-
-      log.debug("병렬 배치 처리 완료: {}-{} ({}개 이슈를 {}개 스레드로 병렬 처리)",
-          startAt + 1, startAt + batchIssues.size(), batchIssues.size(), futures.size());
-
-      return batchIssues;
+      return jiraRestApi.post(endpoint, requestBody, JiraSearchResultDto.class);
 
     } catch (Exception e) {
-      log.error("배치 조회 실패 (startAt: {}, batchSize: {}): {}", startAt, batchSize, e.getMessage(), e);
-      return new ArrayList<>();
+      log.error("cursor-based 페이지 조회 중 오류 발생 (nextPageToken: {}): {}",
+          nextPageToken, e.getMessage(), e);
+      throw new RuntimeException("Jira cursor-based 페이지 조회 실패", e);
     }
   }
 
@@ -255,202 +261,6 @@ public class JiraClientWrapper {
       log.error("이슈 {}의 워크로그 조회 중 오류가 발생했습니다: {}", issue.getKey(), e.getMessage(), e);
       throw new RuntimeException("워크로그 조회 실패", e);
     }
-  }
-
-  /**
-   * 특정 이슈의 워크로그를 조회합니다 - 기존 호환성을 위한 메소드
-   */
-  public List<JiraWorklogDto> getWorklogsForIssue(String issueKey) {
-    try {
-      String endpoint = String.format("/rest/api/3/issue/%s/worklog", issueKey);
-
-      MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-      params.add("maxResults", "1000");
-
-      JiraIssueResponse.JiraWorklogContainerDto worklogContainer =
-          jiraRestApi.get(endpoint, params, JiraIssueResponse.JiraWorklogContainerDto.class);
-
-      List<JiraWorklogResponse> worklogs = worklogContainer.getWorklogs();
-      log.debug("이슈 {}에서 {}개의 워크로그를 조회했습니다.", issueKey, worklogs.size());
-
-      // 이슈 정보를 가져와서 워크로그에 추가 정보 설정
-      JiraIssueResponse issue = getIssueInternal(issueKey);
-
-      return worklogs.stream()
-          .map(worklog -> convertToApplicationWorklogDto(worklog, issue))
-          .collect(Collectors.toList());
-
-    } catch (Exception e) {
-      log.error("이슈 {}의 워크로그 조회 중 오류가 발생했습니다: {}", issueKey, e.getMessage(), e);
-      throw new RuntimeException("워크로그 조회 실패", e);
-    }
-  }
-
-  /**
-   * 특정 이슈의 상세 정보를 조회합니다.
-   */
-  public JiraIssueDto getIssue(String issueKey) {
-    JiraIssueResponse infraDto = getIssueInternal(issueKey);
-    return convertToApplicationDto(infraDto);
-  }
-
-  /**
-   * 내부에서 사용하는 이슈 조회 (infrastructure DTO 반환)
-   */
-  private JiraIssueResponse getIssueInternal(String issueKey) {
-    try {
-      String endpoint = String.format("/rest/api/3/issue/%s", issueKey);
-
-      MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-      params.add("expand", "changelog,worklog");
-
-      return jiraRestApi.get(endpoint, params, JiraIssueResponse.class);
-
-    } catch (Exception e) {
-      log.error("이슈 {}의 상세 정보 조회 중 오류가 발생했습니다: {}", issueKey, e.getMessage(), e);
-      throw new RuntimeException("Jira 이슈 상세 조회 실패", e);
-    }
-  }
-
-  /**
-   * 내부에서 사용하는 이슈 조회 (issueId로, infrastructure DTO 반환)
-   */
-  private JiraIssueResponse getIssueByIdInternal(Long issueId) {
-    try {
-      String endpoint = String.format("/rest/api/3/issue/%s", issueId);
-
-      MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-      params.add("expand", "changelog,worklog");
-
-      return jiraRestApi.get(endpoint, params, JiraIssueResponse.class);
-
-    } catch (Exception e) {
-      log.error("이슈 ID {}의 상세 정보 조회 중 오류가 발생했습니다: {}", issueId, e.getMessage(), e);
-      return null; // bulk 조회에서는 null 반환하여 해당 이슈 스킵
-    }
-  }
-
-  /**
-   * Jira 서버와의 연결 상태를 확인합니다.
-   */
-  public boolean testConnection() {
-    try {
-      JiraServerInfoDto serverInfo = jiraRestApi.get("/rest/api/3/serverInfo", JiraServerInfoDto.class);
-
-      log.info("Jira 서버 연결 성공. 버전: {}, 타입: {}",
-          serverInfo.getVersion(), serverInfo.getDeploymentType());
-      return true;
-
-    } catch (Exception e) {
-      log.error("Jira 서버 연결 테스트 실패: {}", e.getMessage(), e);
-      return false;
-    }
-  }
-
-  /**
-   * 특정 조건에 맞는 이슈들을 조회합니다. (Python 코드 로직 반영) 워크로그는 별도 bulk API로 완전히 조회합니다.
-   */
-  public List<JiraIssueDto> getFilteredIssues(String componentYear) {
-    try {
-      // Python 코드 로직: done 상태 또는 QA요청 상태, 특정 컴포넌트로 시작
-      String jql = String.format(
-          "project = %s AND (status in (Done) OR status = 'QA요청') AND component ~ '%s*' ORDER BY updated DESC",
-          jiraProperties.getProjectKey(),
-          componentYear
-      );
-
-      MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-      params.add("jql", jql);
-      params.add("maxResults", "1000");
-      params.add("expand", "changelog,worklog"); // worklog 기본 포함 (최대 20개)
-
-      JiraSearchResultDto searchResult = jiraRestApi.get("/rest/api/3/search", params, JiraSearchResultDto.class);
-      List<JiraIssueResponse> issues = searchResult.getIssues();
-
-      if (issues == null || issues.isEmpty()) {
-        log.info("필터된 이슈가 없습니다.");
-        return new ArrayList<>();
-      }
-
-      // 병렬처리 적용: 필터된 이슈의 워크로그 최적화 조회를 CompletableFuture로 처리
-      List<CompletableFuture<JiraIssueDto>> futures = issues.stream()
-          .map(issue -> CompletableFuture.supplyAsync(() -> {
-            try {
-              // 1. 기본 이슈 정보를 DTO로 변환 (기본 워크로그 제외)
-              JiraIssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
-
-              // 2. Python 최적화 로직: total > 19면 별도 API, 그렇지 않으면 기본 워크로그 사용
-              List<JiraWorklogDto> worklogs = getOptimizedWorklogs(issue);
-              if (worklogs != null && !worklogs.isEmpty()) {
-                issueDto.setWorklogs(worklogs);
-                log.debug("필터된 이슈 {}에서 {}개의 워크로그를 병렬 최적화 조회했습니다.", issue.getKey(), worklogs.size());
-              }
-
-              return issueDto;
-
-            } catch (Exception e) {
-              log.error("필터된 이슈 {} 병렬 처리 중 오류 발생: {}", issue.getKey(), e.getMessage());
-              // 개별 이슈 실패해도 계속 처리하되, 워크로그 없이 이슈만 반환
-              return convertToApplicationDtoWithoutWorklogs(issue);
-            }
-          }, virtualThreadExecutor))
-          .collect(Collectors.toList());
-
-      // 모든 CompletableFuture 결과 수집
-      List<JiraIssueDto> filteredIssues = new ArrayList<>();
-      for (CompletableFuture<JiraIssueDto> future : futures) {
-        try {
-          filteredIssues.add(future.get());
-        } catch (Exception e) {
-          log.error("필터된 이슈 병렬 처리 결과 수집 중 오류 발생: {}", e.getMessage());
-        }
-      }
-
-      log.info("필터된 이슈 병렬 조회 완료: {}개 이슈를 {}개 스레드로 병렬 처리",
-          filteredIssues.size(), futures.size());
-
-      return filteredIssues;
-
-    } catch (Exception e) {
-      log.error("필터된 이슈 조회 중 오류가 발생했습니다: {}", e.getMessage(), e);
-      throw new RuntimeException("필터된 이슈 조회 실패", e);
-    }
-  }
-
-  /**
-   * Infrastructure DTO를 Application DTO로 변환 (완전한 워크로그 포함)
-   *
-   * @deprecated bulk API 제거로 더 이상 사용하지 않음. convertToApplicationDto + getWorklogsForIssue 사용 권장
-   */
-  @Deprecated
-  private JiraIssueDto convertToApplicationDtoWithWorklogs(
-      JiraIssueResponse infraDto,
-      List<JiraWorklogDto> completeWorklogs) {
-
-    if (infraDto == null || infraDto.getFields() == null) {
-      return null;
-    }
-
-    JiraIssueResponse.JiraFieldsDto fields = infraDto.getFields();
-
-    // 완전한 워크로그 사용 (null 체크)
-    List<JiraWorklogDto> worklogDtos =
-        completeWorklogs != null ? completeWorklogs : new ArrayList<>();
-
-    return JiraIssueDto.builder()
-        .issueId(infraDto.getId())
-        .issueKey(infraDto.getKey())
-        .issueLink(infraDto.getSelf())
-        .summary(fields.getSummary())
-        .issueType(fields.getIssueType() != null ? fields.getIssueType().getName() : null)
-        .status(fields.getStatus() != null ? fields.getStatus().getName() : null)
-        .assignee(fields.getAssignee() != null ? fields.getAssignee().getDisplayName() : null)
-        .components(convertComponents(fields.getComponents()))
-        .storyPoints(fields.getStoryPoints() != null ? BigDecimal.valueOf(fields.getStoryPoints()) : null)
-        .startDate(parseDate(fields.getStartDate()))
-        .sprint(fields.getSprint())
-        .worklogs(worklogDtos)
-        .build();
   }
 
   /**
@@ -573,20 +383,4 @@ public class JiraClientWrapper {
     }
   }
 
-  /**
-   * 날짜시간 문자열을 LocalDateTime으로 변환
-   */
-  private LocalDateTime parseDateTime(String dateTimeStr) {
-    if (dateTimeStr == null || dateTimeStr.trim().isEmpty()) {
-      return null;
-    }
-
-    try {
-      // ISO 8601 형식으로 파싱
-      return LocalDateTime.parse(dateTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ"));
-    } catch (Exception e) {
-      log.warn("날짜시간 파싱 실패: {}", dateTimeStr);
-      return null;
-    }
-  }
 }

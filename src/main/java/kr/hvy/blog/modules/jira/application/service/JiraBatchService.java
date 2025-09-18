@@ -4,7 +4,7 @@ import com.google.common.collect.Lists;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
-import kr.hvy.blog.modules.jira.application.dto.JiraIssueDto;
+import kr.hvy.blog.modules.jira.application.dto.IssueDto;
 import kr.hvy.blog.modules.jira.infrastructure.client.JiraClientWrapper;
 import kr.hvy.common.infrastructure.redis.lock.DistributedLock;
 import lombok.RequiredArgsConstructor;
@@ -39,7 +39,7 @@ public class JiraBatchService {
     log.info("Jira 이슈 및 워크로그 동기화를 시작합니다.");
 
     try {
-      List<JiraIssueDto> issues = jiraClientWrapper.getAllIssuesFromProject();
+      List<IssueDto> issues = jiraClientWrapper.getAllIssuesFromProject();
       log.info("{}개의 이슈와 총 {}개의 워크로그를 DDD 방식 배치 동기화 시작합니다.",
           issues.size(),
           issues.stream().mapToInt(issue -> issue.getWorklogs() != null ? issue.getWorklogs().size() : 0).sum());
@@ -56,7 +56,7 @@ public class JiraBatchService {
   /**
    * 이슈 리스트와 포함된 워크로그들을 DDD 방식으로 VirtualThreads를 활용하여 배치 단위로 병렬 동기화합니다. 이슈 애그리게이트 루트를 통해 워크로그를 관리합니다.
    */
-  public void syncIssuesWithWorklogsBatch(List<JiraIssueDto> issueDtos) {
+  public void syncIssuesWithWorklogsBatch(List<IssueDto> issueDtos) {
     AtomicInteger syncedIssues = new AtomicInteger(0);
     AtomicInteger syncedWorklogs = new AtomicInteger(0);
     AtomicInteger failedIssues = new AtomicInteger(0);
@@ -64,7 +64,7 @@ public class JiraBatchService {
     log.info("{}개 이슈의 DDD 방식 VirtualThreads 병렬 배치 동기화를 시작합니다. 배치 크기: {}",
         issueDtos.size(), batchSize);
 
-    List<List<JiraIssueDto>> batches = Lists.partition(issueDtos, batchSize);
+    List<List<IssueDto>> batches = Lists.partition(issueDtos, batchSize);
 
     batches.stream()
         .map(batch -> processBatch(batch, syncedIssues, syncedWorklogs, failedIssues,
@@ -78,7 +78,7 @@ public class JiraBatchService {
   /**
    * 개별 배치를 처리하는 메서드
    */
-  private CompletableFuture<Void> processBatch(List<JiraIssueDto> batchIssues,
+  private CompletableFuture<Void> processBatch(List<IssueDto> batchIssues,
                                                AtomicInteger syncedIssues,
                                                AtomicInteger syncedWorklogs,
                                                AtomicInteger failedIssues,

@@ -13,9 +13,11 @@ import java.util.stream.IntStream;
 import kr.hvy.blog.modules.admin.application.dto.CommonClassResponse;
 import kr.hvy.blog.modules.admin.application.dto.CommonCodeResponse;
 import kr.hvy.blog.modules.admin.application.service.CommonCodePublicService;
-import kr.hvy.blog.modules.jira.application.dto.JiraIssueDto;
-import kr.hvy.blog.modules.jira.application.dto.JiraSprintSummaryResponseDto;
-import kr.hvy.blog.modules.jira.application.dto.JiraWorklogDto;
+import kr.hvy.blog.modules.jira.application.dto.IssueDto;
+import kr.hvy.blog.modules.jira.application.dto.JiraSprintSummaryResponse;
+import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
+import kr.hvy.blog.modules.jira.application.dto.SprintWorkerSummaryResponse;
+import kr.hvy.blog.modules.jira.application.dto.WorklogDetailResponse;
 import kr.hvy.blog.modules.jira.domain.entity.JiraIssue;
 import kr.hvy.blog.modules.jira.domain.entity.JiraWorklog;
 import kr.hvy.blog.modules.jira.domain.repository.JiraIssueRepository;
@@ -44,9 +46,9 @@ public class JiraQueryService {
   /**
    * 모든 이슈를 조회합니다.
    */
-  public Page<JiraIssueDto> getAllIssues(Pageable pageable) {
+  public Page<IssueDto> getAllIssues(Pageable pageable) {
     Page<JiraIssue> issuesPage = jiraIssueRepository.findAll(pageable);
-    List<JiraIssueDto> issueDtos = issuesPage.getContent().stream()
+    List<IssueDto> issueDtos = issuesPage.getContent().stream()
         .map(this::convertToIssueDto)
         .collect(Collectors.toList());
 
@@ -56,7 +58,7 @@ public class JiraQueryService {
   /**
    * 특정 이슈를 조회합니다.
    */
-  public JiraIssueDto getIssueByKey(String issueKey) {
+  public IssueDto getIssueByKey(String issueKey) {
     JiraIssue issue = jiraIssueRepository.findByIssueKey(issueKey)
         .orElseThrow(() -> new RuntimeException("이슈를 찾을 수 없습니다: " + issueKey));
 
@@ -66,7 +68,7 @@ public class JiraQueryService {
   /**
    * 특정 이슈의 워크로그를 조회합니다.
    */
-  public List<JiraWorklogDto> getWorklogsByIssueKey(String issueKey) {
+  public List<WorklogDto> getWorklogsByIssueKey(String issueKey) {
     List<JiraWorklog> worklogs = jiraWorklogRepository.findByIssueKeyOrderByStartedDesc(issueKey);
 
     return worklogs.stream()
@@ -77,7 +79,7 @@ public class JiraQueryService {
   /**
    * 특정 기간의 워크로그를 조회합니다.
    */
-  public List<JiraWorklogDto> getWorklogsByDateRange(LocalDateTime startDate, LocalDateTime endDate) {
+  public List<WorklogDto> getWorklogsByDateRange(LocalDateTime startDate, LocalDateTime endDate) {
     List<JiraWorklog> worklogs = jiraWorklogRepository
         .findByStartedBetweenOrderByStartedDesc(startDate, endDate);
 
@@ -89,7 +91,7 @@ public class JiraQueryService {
   /**
    * 작업자별 워크로그를 조회합니다.
    */
-  public List<JiraWorklogDto> getWorklogsByAuthor(String author) {
+  public List<WorklogDto> getWorklogsByAuthor(String author) {
     List<JiraWorklog> worklogs = jiraWorklogRepository.findByAuthorOrderByStartedDesc(author);
 
     return worklogs.stream()
@@ -100,9 +102,9 @@ public class JiraQueryService {
   /**
    * 워크로그를 페이징으로 조회합니다.
    */
-  public Page<JiraWorklogDto> getAllWorklogs(Pageable pageable) {
+  public Page<WorklogDto> getAllWorklogs(Pageable pageable) {
     Page<JiraWorklog> worklogsPage = jiraWorklogRepository.findAll(pageable);
-    List<JiraWorklogDto> worklogDtos = worklogsPage.getContent().stream()
+    List<WorklogDto> worklogDtos = worklogsPage.getContent().stream()
         .map(this::convertToWorklogDto)
         .collect(Collectors.toList());
 
@@ -112,8 +114,8 @@ public class JiraQueryService {
   /**
    * 이슈 엔티티를 DTO로 변환합니다.
    */
-  private JiraIssueDto convertToIssueDto(JiraIssue issue) {
-    return JiraIssueDto.builder()
+  private IssueDto convertToIssueDto(JiraIssue issue) {
+    return IssueDto.builder()
         .id(issue.getId())
         .issueKey(issue.getIssueKey())
         .issueLink(issue.getIssueLink())
@@ -133,7 +135,7 @@ public class JiraQueryService {
   /**
    * 특정 연도의 스프린트 서머리를 조회합니다.
    */
-  public JiraSprintSummaryResponseDto getSprintSummary(String year) {
+  public JiraSprintSummaryResponse getSprintSummary(String year) {
     // 1. 해당 연도의 26개 스프린트 목록 생성
     List<String> sprints = generateSprints(year);
 
@@ -186,7 +188,7 @@ public class JiraQueryService {
     }
 
     // 4. AssigneeSummary 리스트 생성
-    List<JiraSprintSummaryResponseDto.AssigneeSummary> assigneeSummaries = new ArrayList<>();
+    List<JiraSprintSummaryResponse.AssigneeSummary> assigneeSummaries = new ArrayList<>();
 
     for (Map.Entry<String, Map<String, BigDecimal>> entry : assigneeSprintMap.entrySet()) {
       String assignee = entry.getKey();
@@ -196,8 +198,8 @@ public class JiraQueryService {
       BigDecimal totalStoryPoints = sprintStoryPoints.values().stream()
           .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-      JiraSprintSummaryResponseDto.AssigneeSummary assigneeSummary =
-          JiraSprintSummaryResponseDto.AssigneeSummary.builder()
+      JiraSprintSummaryResponse.AssigneeSummary assigneeSummary =
+          JiraSprintSummaryResponse.AssigneeSummary.builder()
               .assignee(assignee)
               .sprintStoryPoints(sprintStoryPoints)
               .totalStoryPoints(totalStoryPoints)
@@ -210,7 +212,7 @@ public class JiraQueryService {
     assigneeSummaries.sort((a, b) -> a.getAssignee().compareTo(b.getAssignee()));
 
     // 6. 응답 DTO 생성
-    return JiraSprintSummaryResponseDto.builder()
+    return JiraSprintSummaryResponse.builder()
         .year(year)
         .sprints(sprints)
         .assigneeSummaries(assigneeSummaries)
@@ -229,10 +231,75 @@ public class JiraQueryService {
   }
 
   /**
+   * 스프린트별 작업자별 서머리를 조회합니다.
+   */
+  public List<SprintWorkerSummaryResponse> getSprintWorkerSummary(String sprint, String worker) {
+    List<JiraIssue> issues;
+
+    if (worker != null && !worker.trim().isEmpty()) {
+      // 작업자가 지정된 경우
+      issues = jiraIssueRepository.findBySprintAndAssignee(sprint, worker);
+    } else {
+      // 작업자가 지정되지 않은 경우 (스프린트만)
+      issues = jiraIssueRepository.findBySprint(sprint);
+    }
+
+    return issues.stream()
+        .map(this::convertToSprintWorkerSummaryDto)
+        .collect(Collectors.toList());
+  }
+
+  /**
+   * 특정 이슈의 작업로그 상세를 조회합니다.
+   */
+  public List<WorklogDetailResponse> getWorklogDetails(String issueKey) {
+    List<JiraWorklog> worklogs = jiraWorklogRepository.findByIssueKeyOrderByStartedDesc(issueKey);
+
+    return worklogs.stream()
+        .map(this::convertToWorklogDetailDto)
+        .collect(Collectors.toList());
+  }
+
+  /**
+   * 이슈를 SprintWorkerSummaryDto로 변환합니다.
+   */
+  private SprintWorkerSummaryResponse convertToSprintWorkerSummaryDto(JiraIssue issue) {
+    // 해당 이슈의 총 작업시간 계산
+    BigDecimal totalTimeHours = issue.getWorklogs().stream()
+        .map(JiraWorklog::getTimeHours)
+        .filter(timeHours -> timeHours != null)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+    return SprintWorkerSummaryResponse.builder()
+        .sprint(issue.getSprint())
+        .assignee(issue.getAssignee())
+        .issueKey(issue.getIssueKey())
+        .status(issue.getStatus())
+        .summary(issue.getSummary())
+        .startDate(issue.getStartDate())
+        .totalTimeHours(totalTimeHours)
+        .storyPoints(issue.getStoryPoints())
+        .build();
+  }
+
+  /**
+   * 워크로그를 WorklogDetailDto로 변환합니다.
+   */
+  private WorklogDetailResponse convertToWorklogDetailDto(JiraWorklog worklog) {
+    return WorklogDetailResponse.builder()
+        .issueKey(worklog.getIssueKey())
+        .author(worklog.getAuthor())
+        .comment(worklog.getComment())
+        .started(worklog.getStarted())
+        .timeHours(worklog.getTimeHours())
+        .build();
+  }
+
+  /**
    * 워크로그 엔티티를 DTO로 변환합니다.
    */
-  private JiraWorklogDto convertToWorklogDto(JiraWorklog worklog) {
-    return JiraWorklogDto.builder()
+  private WorklogDto convertToWorklogDto(JiraWorklog worklog) {
+    return WorklogDto.builder()
         .id(worklog.getId())
         .issueKey(worklog.getIssueKey())
         .issueType(worklog.getIssueType())

@@ -1,8 +1,8 @@
 package kr.hvy.blog.modules.jira.application.service;
 
 import java.util.Optional;
-import kr.hvy.blog.modules.jira.application.dto.JiraIssueDto;
-import kr.hvy.blog.modules.jira.application.dto.JiraWorklogDto;
+import kr.hvy.blog.modules.jira.application.dto.IssueDto;
+import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
 import kr.hvy.blog.modules.jira.domain.entity.JiraIssue;
 import kr.hvy.blog.modules.jira.domain.repository.JiraIssueRepository;
 import kr.hvy.blog.modules.jira.infrastructure.config.JiraProperties;
@@ -28,7 +28,7 @@ public class JiraSyncService {
    * DDD 방식으로 이슈와 워크로그를 함께 동기화합니다. 이슈 애그리게이트 루트를 통해 워크로그를 관리하므로 cascade로 자동 저장됩니다.
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void syncIssueWithWorklogsDDD(JiraIssueDto issueDto) {
+  public void syncIssueWithWorklogsDDD(IssueDto issueDto) {
     Optional<JiraIssue> existingIssue = jiraIssueRepository.findByIssueKey(issueDto.getIssueKey());
 
     JiraIssue jiraIssue;
@@ -50,7 +50,7 @@ public class JiraSyncService {
 
       // DDD: 새 이슈에 워크로그 추가
       if (issueDto.getWorklogs() != null && !issueDto.getWorklogs().isEmpty()) {
-        for (JiraWorklogDto worklogDto : issueDto.getWorklogs()) {
+        for (WorklogDto worklogDto : issueDto.getWorklogs()) {
           jiraIssue.addWorklog(worklogDto);
         }
         log.debug("신규 이슈 {} - {}개 워크로그 추가됨", issueDto.getIssueKey(),
@@ -69,7 +69,7 @@ public class JiraSyncService {
   /**
    * Jira 이슈 DTO로부터 엔티티를 생성합니다.
    */
-  private JiraIssue createIssueFromJira(JiraIssueDto issueDto) {
+  private JiraIssue createIssueFromJira(IssueDto issueDto) {
     return JiraIssue.builder()
         .jiraIssueId(issueDto.getIssueId())
         .issueKey(issueDto.getIssueKey())
@@ -88,7 +88,7 @@ public class JiraSyncService {
   /**
    * 기존 이슈를 Jira DTO 데이터로 업데이트합니다.
    */
-  private void updateIssueFromJira(JiraIssue jiraIssue, JiraIssueDto issueDto) {
+  private void updateIssueFromJira(JiraIssue jiraIssue, IssueDto issueDto) {
     jiraIssue.updateIssueInfo(
         issueDto.getSummary(),
         issueDto.getIssueType(),

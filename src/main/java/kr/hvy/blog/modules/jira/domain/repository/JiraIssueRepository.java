@@ -40,4 +40,16 @@ public interface JiraIssueRepository extends JpaRepository<JiraIssue, Long> {
         "AND i.storyPoints IS NOT NULL AND i.storyPoints > 0 " +
         "AND i.status IN (:statuses)")
     List<JiraIssue> findCompletedIssuesByYear(@Param("yearPattern") String yearPattern, @Param("statuses") Set<String> statuses);
+
+    /**
+     * 특정 스프린트의 이슈들을 조회 (워크로그와 함께)
+     */
+    @Query("SELECT i FROM JiraIssue i LEFT JOIN FETCH i.worklogs WHERE i.sprint = :sprint")
+    List<JiraIssue> findBySprint(@Param("sprint") String sprint);
+
+    /**
+     * 특정 스프린트와 작업자의 이슈들을 조회 (워크로그와 함께)
+     */
+    @Query("SELECT i FROM JiraIssue i LEFT JOIN FETCH i.worklogs WHERE i.sprint = :sprint AND i.assignee = :assignee")
+    List<JiraIssue> findBySprintAndAssignee(@Param("sprint") String sprint, @Param("assignee") String assignee);
 }

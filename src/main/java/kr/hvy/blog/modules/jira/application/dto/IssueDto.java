@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.jira.application.dto;
 
+import java.time.LocalDate;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -7,30 +8,31 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
- * Jira 워크로그 DTO
+ * Jira 이슈 DTO
  */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class JiraWorklogDto {
+public class IssueDto {
 
     private Long id;
+    private Long issueId;
     private String issueKey;
-    private String issueType;
-    private String status;
     private String issueLink;
     private String summary;
-    private String author;
+    private String issueType;
+    private String status;
+    private String assignee;
     private String components;
-    private String timeSpent;
-    private BigDecimal timeHours;
-    private String comment;
-    private LocalDateTime started;
-    private String worklogId;
+    private BigDecimal storyPoints;
+    private LocalDate startDate;
+    private String sprint;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private List<WorklogDto> worklogs;
 
 }

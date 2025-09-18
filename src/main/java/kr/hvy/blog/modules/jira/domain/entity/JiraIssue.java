@@ -17,7 +17,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import kr.hvy.blog.modules.jira.application.dto.JiraWorklogDto;
+import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -114,7 +114,7 @@ public class JiraIssue {
   /**
    * 워크로그 추가 (DDD)
    */
-  public void addWorklog(JiraWorklogDto worklogDto) {
+  public void addWorklog(WorklogDto worklogDto) {
     JiraWorklog worklog = JiraWorklog.builder()
         .jiraIssue(this)
         .issueKey(worklogDto.getIssueKey())
@@ -146,7 +146,7 @@ public class JiraIssue {
   /**
    * 워크로그 업데이트 (DDD)
    */
-  public boolean updateWorklog(JiraWorklogDto worklogDto) {
+  public boolean updateWorklog(WorklogDto worklogDto) {
     Optional<JiraWorklog> existingWorklog = findWorklogByWorklogId(worklogDto.getWorklogId());
 
     if (existingWorklog.isPresent()) {
@@ -168,7 +168,7 @@ public class JiraIssue {
   /**
    * 워크로그 추가 또는 업데이트 (DDD)
    */
-  public void addOrUpdateWorklog(JiraWorklogDto worklogDto) {
+  public void addOrUpdateWorklog(WorklogDto worklogDto) {
     boolean updated = updateWorklog(worklogDto);
     if (!updated) {
       addWorklog(worklogDto);
@@ -208,12 +208,12 @@ public class JiraIssue {
    * 모든 워크로그 동기화 (DDD)
    * 기존 워크로그는 업데이트, 새로운 워크로그는 추가
    */
-  public void syncWorklogs(List<JiraWorklogDto> worklogDtos) {
+  public void syncWorklogs(List<WorklogDto> worklogDtos) {
     if (worklogDtos == null || worklogDtos.isEmpty()) {
       return;
     }
 
-    for (JiraWorklogDto worklogDto : worklogDtos) {
+    for (WorklogDto worklogDto : worklogDtos) {
       addOrUpdateWorklog(worklogDto);
     }
   }

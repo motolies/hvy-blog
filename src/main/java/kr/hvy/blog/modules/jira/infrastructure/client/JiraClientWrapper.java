@@ -2,7 +2,6 @@ package kr.hvy.blog.modules.jira.infrastructure.client;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -12,12 +11,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import kr.hvy.blog.modules.jira.application.dto.JiraIssueDto;
-import kr.hvy.blog.modules.jira.application.dto.JiraWorklogDto;
+import kr.hvy.blog.modules.jira.application.dto.IssueDto;
+import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
+
 import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraIssueResponse;
-import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraSearchResultDto;
-import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraServerInfoDto;
+import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraSearchResultResponse;
 import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraWorklogResponse;
 import kr.hvy.blog.modules.jira.infrastructure.config.JiraProperties;
 import kr.hvy.common.infrastructure.client.rest.RestApi;
@@ -51,13 +49,13 @@ public class JiraClientWrapper {
    * 프로젝트의 모든 이슈를 조회합니다.
    * 새로운 cursor-based pagination을 사용하여 nextPageToken으로 페이지를 순회하며 즉시 병렬 처리합니다.
    */
-  public List<JiraIssueDto> getAllIssuesFromProject() {
+  public List<IssueDto> getAllIssuesFromProject() {
     try {
       String jql = String.format("project = %s ORDER BY updated DESC", jiraProperties.getProjectKey());
       int pageSize = 100;
       int maxPages = 10000; // 무한 루프 방지를 위한 최대 페이지 수 제한
 
-      List<JiraIssueDto> allIssues = new ArrayList<>();
+      List<IssueDto> allIssues = new ArrayList<>();
       String nextPageToken = null;
       int pageCount = 0;
       Set<String> seenTokens = new HashSet<>(); // 중복 토큰 체크를 위한 Set
@@ -85,7 +83,7 @@ public class JiraClientWrapper {
         }
 
         // 현재 페이지 조회
-        JiraSearchResultDto searchResult;
+        JiraSearchResultResponse searchResult;
         try {
           searchResult = fetchNextPageWithCursor(jql, pageSize, nextPageToken);
         } catch (Exception e) {
@@ -103,14 +101,14 @@ public class JiraClientWrapper {
 
         // 현재 페이지의 이슈들을 즉시 병렬로 워크로그 처리
         final int currentPageCount = pageCount; // effectively final variable for lambda
-        List<CompletableFuture<JiraIssueDto>> futures = issues.stream()
+        List<CompletableFuture<IssueDto>> futures = issues.stream()
             .map(issue -> CompletableFuture.supplyAsync(() -> {
               try {
                 // 1. 기본 이슈 정보를 DTO로 변환 (기본 워크로그 제외)
-                JiraIssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
+                IssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
 
                 // 2. Python 최적화 로직: total > 19면 별도 API, 그렇지 않으면 기본 워크로그 사용
-                List<JiraWorklogDto> worklogs = getOptimizedWorklogs(issue);
+                List<WorklogDto> worklogs = getOptimizedWorklogs(issue);
                 if (worklogs != null && !worklogs.isEmpty()) {
                   issueDto.setWorklogs(worklogs);
                   log.debug("페이지 {} 이슈 {}에서 {}개의 워크로그를 병렬 최적화 조회했습니다.",
@@ -129,7 +127,7 @@ public class JiraClientWrapper {
             .collect(Collectors.toList());
 
         // 현재 페이지의 모든 CompletableFuture 결과 수집
-        for (CompletableFuture<JiraIssueDto> future : futures) {
+        for (CompletableFuture<IssueDto> future : futures) {
           try {
             allIssues.add(future.get());
           } catch (Exception e) {
@@ -162,7 +160,7 @@ public class JiraClientWrapper {
   /**
    * 새로운 cursor-based pagination을 사용하여 이슈 페이지를 조회합니다.
    */
-  private JiraSearchResultDto fetchNextPageWithCursor(String jql, int maxResults, String nextPageToken) {
+  private JiraSearchResultResponse fetchNextPageWithCursor(String jql, int maxResults, String nextPageToken) {
     try {
       // 새로운 JQL 검색 API 엔드포인트 사용
       String endpoint = "/rest/api/3/search/jql";
@@ -181,7 +179,7 @@ public class JiraClientWrapper {
       log.debug("JQL 검색 요청: jql={}, maxResults={}, nextPageToken={}",
           jql, maxResults, nextPageToken != null ? "present" : "null");
 
-      return jiraRestApi.post(endpoint, requestBody, JiraSearchResultDto.class);
+      return jiraRestApi.post(endpoint, requestBody, JiraSearchResultResponse.class);
 
     } catch (Exception e) {
       log.error("cursor-based 페이지 조회 중 오류 발생 (nextPageToken: {}): {}",
@@ -194,7 +192,7 @@ public class JiraClientWrapper {
   /**
    * Python 로직을 적용한 워크로그 최적화 조회 - worklog.total <= 19: 기본 워크로그 사용 - worklog.total > 19: 별도 API로 전체 조회
    */
-  public List<JiraWorklogDto> getOptimizedWorklogs(JiraIssueResponse issue) {
+  public List<WorklogDto> getOptimizedWorklogs(JiraIssueResponse issue) {
     try {
       JiraIssueResponse.JiraFieldsDto fields = issue.getFields();
 
@@ -239,7 +237,7 @@ public class JiraClientWrapper {
   /**
    * 특정 이슈의 워크로그를 조회합니다 (이슈 정보 포함) - 최적화 버전 이미 가진 JiraIssueResponse 객체를 활용하여 불필요한 API 호출 제거
    */
-  public List<JiraWorklogDto> getWorklogsForIssue(JiraIssueResponse issue) {
+  public List<WorklogDto> getWorklogsForIssue(JiraIssueResponse issue) {
     try {
       String endpoint = String.format("/rest/api/3/issue/%s/worklog", issue.getKey());
 
@@ -266,14 +264,14 @@ public class JiraClientWrapper {
   /**
    * Infrastructure DTO를 Application DTO로 변환 (워크로그 제외)
    */
-  private JiraIssueDto convertToApplicationDtoWithoutWorklogs(JiraIssueResponse infraDto) {
+  private IssueDto convertToApplicationDtoWithoutWorklogs(JiraIssueResponse infraDto) {
     if (infraDto == null || infraDto.getFields() == null) {
       return null;
     }
 
     JiraIssueResponse.JiraFieldsDto fields = infraDto.getFields();
 
-    return JiraIssueDto.builder()
+    return IssueDto.builder()
         .issueId(infraDto.getId())
         .issueKey(infraDto.getKey())
         .issueLink(infraDto.getSelf())
@@ -292,7 +290,7 @@ public class JiraClientWrapper {
   /**
    * Infrastructure DTO를 Application DTO로 변환
    */
-  private JiraIssueDto convertToApplicationDto(JiraIssueResponse infraDto) {
+  private IssueDto convertToApplicationDto(JiraIssueResponse infraDto) {
     if (infraDto == null || infraDto.getFields() == null) {
       return null;
     }
@@ -300,14 +298,14 @@ public class JiraClientWrapper {
     JiraIssueResponse.JiraFieldsDto fields = infraDto.getFields();
 
     // worklog 정보 변환
-    List<JiraWorklogDto> worklogDtos = new ArrayList<>();
+    List<WorklogDto> worklogDtos = new ArrayList<>();
     if (fields.getWorklog() != null && fields.getWorklog().getWorklogs() != null) {
       worklogDtos = fields.getWorklog().getWorklogs().stream()
           .map(worklog -> convertToApplicationWorklogDto(worklog, infraDto))
           .collect(Collectors.toList());
     }
 
-    return JiraIssueDto.builder()
+    return IssueDto.builder()
         .issueId(infraDto.getId())
         .issueKey(infraDto.getKey())
         .issueLink(infraDto.getSelf())
@@ -326,7 +324,7 @@ public class JiraClientWrapper {
   /**
    * Infrastructure 워크로그 DTO를 Application DTO로 변환
    */
-  private JiraWorklogDto convertToApplicationWorklogDto(JiraWorklogResponse infraWorklogDto, JiraIssueResponse issue) {
+  private WorklogDto convertToApplicationWorklogDto(JiraWorklogResponse infraWorklogDto, JiraIssueResponse issue) {
 
     if (infraWorklogDto == null) {
       return null;
@@ -334,7 +332,7 @@ public class JiraClientWrapper {
 
     JiraIssueResponse.JiraFieldsDto fields = issue.getFields();
 
-    return JiraWorklogDto.builder()
+    return WorklogDto.builder()
         .id(infraWorklogDto.getId())
         .issueKey(issue.getKey())
         .issueType(fields.getIssueType() != null ? fields.getIssueType().getName() : null)

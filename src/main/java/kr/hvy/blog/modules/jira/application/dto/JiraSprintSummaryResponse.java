@@ -17,7 +17,7 @@ import java.util.Map;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
 @Builder
-public class JiraSprintSummaryResponseDto {
+public class JiraSprintSummaryResponse {
 
   /**
    * 조회 연도

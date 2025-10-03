@@ -57,6 +57,7 @@ hvy:
       slow-query-threshold: 500
       data-source-names:
         - "dataSource"
+      enable-result-set-logging: true  # ResultSet 테이블 로깅 활성화
 
 #Configure Mybatis
 mybatis:

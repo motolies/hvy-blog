@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="kr.hvy.blog.modules.log.repository.mapper.ApiLogMapper">
+
+    <select id="findBySearchRequest" parameterType="kr.hvy.blog.modules.log.application.dto.ApiLogSearchRequest"
+            resultType="kr.hvy.blog.modules.log.application.dto.ApiLogSearchResponse">
+        SELECT
+            id,
+            traceId,
+            spanId,
+            requestUri,
+            httpMethodType,
+            requestHeader,
+            requestParam,
+            requestBody,
+            responseStatus,
+            responseBody,
+            processTime,
+            createdAt,
+            createdBy
+        FROM tb_api_log
+        <where>
+            <if test="id != null">
+                AND id = #{id}
+            </if>
+            <if test="traceId != null and traceId != ''">
+                AND traceId = #{traceId}
+            </if>
+            <if test="spanId != null and spanId != ''">
+                AND spanId = #{spanId}
+            </if>
+            <if test="requestUri != null and requestUri != ''">
+                AND requestUri LIKE CONCAT('%', #{requestUri}, '%')
+            </if>
+            <if test="httpMethodType != null and httpMethodType != ''">
+                AND httpMethodType = #{httpMethodType}
+            </if>
+            <if test="requestHeader != null and requestHeader != ''">
+                AND requestHeader LIKE CONCAT('%', #{requestHeader}, '%')
+            </if>
+            <if test="requestParam != null and requestParam != ''">
+                AND requestParam LIKE CONCAT('%', #{requestParam}, '%')
+            </if>
+            <if test="requestBody != null and requestBody != ''">
+                AND requestBody LIKE CONCAT('%', #{requestBody}, '%')
+            </if>
+            <if test="responseStatus != null and responseStatus != ''">
+                AND responseStatus = #{responseStatus}
+            </if>
+            <if test="createdAtFrom != null">
+                AND createdAt &gt;= #{createdAtFrom}
+            </if>
+            <if test="createdAtTo != null">
+                AND createdAt &lt;= #{createdAtTo}
+            </if>
+        </where>
+        <!-- PageInterceptor가 자동으로 ORDER BY와 LIMIT 추가 -->
+    </select>
+
+</mapper>

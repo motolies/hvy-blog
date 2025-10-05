@@ -41,7 +41,7 @@ dependencies {
 
     // Library
     if (env == "prod") {
-        implementation('io.github.motolies:hvy-common:0.1.7') {
+        implementation('io.github.motolies:hvy-common:0.1.8') {
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream'
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream-binder-kafka'
         }

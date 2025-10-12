@@ -33,6 +33,7 @@ public interface CommonCodeDtoMapper {
   @Mapping(source = "created.by", target = "createdBy")
   @Mapping(source = "updated.at", target = "updatedAt")
   @Mapping(source = "updated.by", target = "updatedBy")
+  @Mapping(source = "commonClass.code", target = "classCode")
   @Mapping(target = "attributes", source = ".", qualifiedByName = "mapAttributes")
   @Mapping(target = "children", ignore = true)
   @Mapping(target = "commonClass", ignore = true)

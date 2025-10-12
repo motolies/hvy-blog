@@ -17,11 +17,11 @@ import jakarta.validation.constraints.Min;
 public class CommonCodeCreate {
 
   /**
-   * 클래스명
+   * 클래스 코드
    */
-  @NotBlank(message = "클래스명은 필수입니다")
-  @Size(max = 64, message = "클래스명은 64자 이하여야 합니다")
-  String className;
+  @NotBlank(message = "클래스 코드는 필수입니다")
+  @Size(max = 64, message = "클래스 코드는 64자 이하여야 합니다")
+  String classCode;
 
   /**
    * 코드값
@@ -62,10 +62,10 @@ public class CommonCodeCreate {
   String attribute5Value;
 
   /**
-   * 하위 클래스명 (NULL이면 leaf 노드)
+   * 하위 클래스 코드 (NULL이면 leaf 노드)
    */
-  @Size(max = 64, message = "하위 클래스명은 64자 이하여야 합니다")
-  String childClassName;
+  @Size(max = 64, message = "하위 클래스 코드는 64자 이하여야 합니다")
+  String childClassCode;
 
   /**
    * 정렬순서 (기본값: 0)

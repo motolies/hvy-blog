@@ -12,9 +12,10 @@ import java.util.Optional;
 /**
  * CommonClass Repository
  * 공통코드 클래스에 대한 데이터 접근 인터페이스
+ * PK: Long (Surrogate Key)
  */
 @Repository
-public interface CommonClassRepository extends JpaRepository<CommonClass, String> {
+public interface CommonClassRepository extends JpaRepository<CommonClass, Long> {
 
   /**
    * 활성화된 클래스만 조회
@@ -22,20 +23,20 @@ public interface CommonClassRepository extends JpaRepository<CommonClass, String
   List<CommonClass> findByIsActiveTrue();
 
   /**
-   * 이름으로 활성화된 클래스 조회
+   * 코드로 활성화된 클래스 조회
    */
-  Optional<CommonClass> findByNameAndIsActiveTrue(String name);
+  Optional<CommonClass> findByCodeAndIsActiveTrue(String code);
 
   /**
-   * 표시명으로 검색
+   * 클래스명으로 검색
    */
-  List<CommonClass> findByDisplayNameContainingAndIsActiveTrue(String displayName);
+  List<CommonClass> findByNameContainingAndIsActiveTrue(String name);
 
   /**
-   * 활성화된 클래스들을 이름순으로 조회
+   * 활성화된 클래스들을 코드순으로 조회
    */
-  @Query("SELECT c FROM CommonClass c WHERE c.isActive = true ORDER BY c.name ASC")
-  List<CommonClass> findActiveClassesOrderByName();
+  @Query("SELECT c FROM CommonClass c WHERE c.isActive = true ORDER BY c.code ASC")
+  List<CommonClass> findActiveClassesOrderByCode();
 
   /**
    * 특정 속성명을 가진 클래스들 조회
@@ -49,12 +50,13 @@ public interface CommonClassRepository extends JpaRepository<CommonClass, String
   List<CommonClass> findByAttributeName(@Param("attributeName") String attributeName);
 
   /**
-   * 이름 존재 여부 확인
+   * 코드 존재 여부 확인
    */
-  boolean existsByName(String name);
+  boolean existsByCode(String code);
 
   /**
-   * 이름 존재 여부 확인 (활성화된 것만)
+   * 코드 존재 여부 확인 (활성화된 것만)
    */
-  boolean existsByNameAndIsActiveTrue(String name);
+  boolean existsByCodeAndIsActiveTrue(String code);
+
 }

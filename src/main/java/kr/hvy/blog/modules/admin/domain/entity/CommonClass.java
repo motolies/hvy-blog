@@ -6,6 +6,8 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
@@ -13,6 +15,8 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import java.util.ArrayList;
+import java.util.List;
 import kr.hvy.blog.modules.admin.application.dto.CommonClassUpdate;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import lombok.AllArgsConstructor;
@@ -22,15 +26,11 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.With;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
- * 공통코드 클래스 엔티티
- * 코드 그룹을 정의하는 상위 개념
+ * 공통코드 클래스 엔티티 코드 그룹을 정의하는 상위 개념
  */
 @Entity
-@Table(name = "common_class", uniqueConstraints = @UniqueConstraint(name = "uk_common_class_name", columnNames = "name"))
+@Table(name = "common_class", uniqueConstraints = @UniqueConstraint(name = "uk_common_class_code", columnNames = "code"))
 @Getter
 @Setter
 @Builder
@@ -40,19 +40,23 @@ import java.util.List;
 public class CommonClass {
 
   /**
-   * 클래스명 (PK)
-   * 예: REGION_CLASS, SEOUL_DISTRICT_CLASS
+   * 내부 ID (PK, Surrogate Key)
    */
   @Id
-  @Column(nullable = false, length = 64)
-  private String name;
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  private Long id;
 
   /**
-   * 표시명
-   * 예: "지역분류", "서울구분류"
+   * 클래스 코드 (Unique, Natural Key) 예: REGION_CLASS, SEOUL_DISTRICT_CLASS
    */
-  @Column(length = 128)
-  private String displayName;
+  @Column(name = "code", nullable = false, unique = true, length = 64)
+  private String code;
+
+  /**
+   * 클래스명 예: "지역분류", "서울구분류"
+   */
+  @Column(name = "name", length = 128)
+  private String name;
 
   /**
    * 설명
@@ -139,7 +143,11 @@ public class CommonClass {
    * 업데이트 메서드
    */
   public void update(CommonClassUpdate updateDto) {
-    this.displayName = updateDto.getDisplayName();
+    // code 필드도 업데이트 가능 (Surrogate Key 패턴)
+    if (updateDto.getCode() != null && !updateDto.getCode().trim().isEmpty()) {
+      this.code = updateDto.getCode();
+    }
+    this.name = updateDto.getName();
     this.description = updateDto.getDescription();
     this.attribute1Name = updateDto.getAttribute1Name();
     this.attribute2Name = updateDto.getAttribute2Name();

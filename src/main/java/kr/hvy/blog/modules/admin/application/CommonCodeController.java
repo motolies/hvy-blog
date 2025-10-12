@@ -37,9 +37,9 @@ public class CommonCodeController {
   /**
    * 특정 클래스 조회
    */
-  @GetMapping("/class/{className}")
-  public ResponseEntity<?> getClass(@PathVariable String className) {
-    CommonClassResponse response = commonCodePublicService.getClass(className);
+  @GetMapping("/class/{classCode}")
+  public ResponseEntity<?> getClass(@PathVariable String classCode) {
+    CommonClassResponse response = commonCodePublicService.getClass(classCode);
     return ResponseEntity.ok(response);
   }
 
@@ -48,31 +48,31 @@ public class CommonCodeController {
   /**
    * 클래스별 코드 목록 조회
    */
-  @GetMapping("/class/{className}/codes")
-  public ResponseEntity<?> getCodesByClass(@PathVariable String className) {
-    List<CommonCodeResponse> response = commonCodePublicService.getCodesByClass(className);
+  @GetMapping("/class/{classCode}/codes")
+  public ResponseEntity<?> getCodesByClass(@PathVariable String classCode) {
+    List<CommonCodeResponse> response = commonCodePublicService.getCodesByClass(classCode);
     return ResponseEntity.ok(response);
   }
 
   /**
    * 특정 코드 조회
    */
-  @GetMapping("/code/{className}/{code}")
+  @GetMapping("/code/{classCode}/{code}")
   public ResponseEntity<?> getCode(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @PathVariable String code) {
-    CommonCodeResponse response = commonCodePublicService.getCode(className, code);
+    CommonCodeResponse response = commonCodePublicService.getCode(classCode, code);
     return ResponseEntity.ok(response);
   }
 
   /**
    * 하위 코드 조회
    */
-  @GetMapping("/code/{className}/{code}/children")
+  @GetMapping("/code/{classCode}/{code}/children")
   public ResponseEntity<?> getChildCodes(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @PathVariable String code) {
-    List<CommonCodeResponse> response = commonCodePublicService.getChildCodes(className, code);
+    List<CommonCodeResponse> response = commonCodePublicService.getChildCodes(classCode, code);
     return ResponseEntity.ok(response);
   }
 
@@ -81,19 +81,19 @@ public class CommonCodeController {
   /**
    * 계층 구조 트리 조회
    */
-  @GetMapping("/class/{className}/tree")
-  public ResponseEntity<?> getCodesWithTree(@PathVariable String className) {
-    CommonCodeTreeResponse response = commonCodePublicService.getCodesWithTree(className);
+  @GetMapping("/class/{classCode}/tree")
+  public ResponseEntity<?> getCodesWithTree(@PathVariable String classCode) {
+    CommonCodeTreeResponse response = commonCodePublicService.getCodesWithTree(classCode);
     return ResponseEntity.ok(response);
   }
 
   /**
    * 평면 구조 조회 (select box용)
    */
-  @GetMapping("/class/{className}/flat")
-  public ResponseEntity<?> getFlatCodes(@PathVariable String className) {
+  @GetMapping("/class/{classCode}/flat")
+  public ResponseEntity<?> getFlatCodes(@PathVariable String classCode) {
     List<CommonCodeTreeResponse.CommonCodeFlatResponse> response =
-        commonCodePublicService.getFlatCodes(className);
+        commonCodePublicService.getFlatCodes(classCode);
     return ResponseEntity.ok(response);
   }
 
@@ -102,11 +102,11 @@ public class CommonCodeController {
   /**
    * 클래스 내 코드명 검색
    */
-  @GetMapping("/class/{className}/search")
+  @GetMapping("/class/{classCode}/search")
   public ResponseEntity<?> searchCodesInClass(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @RequestParam String q) {
-    List<CommonCodeResponse> response = commonCodePublicService.searchCodesInClass(className, q);
+    List<CommonCodeResponse> response = commonCodePublicService.searchCodesInClass(classCode, q);
     return ResponseEntity.ok(response);
   }
 
@@ -122,12 +122,12 @@ public class CommonCodeController {
   /**
    * 속성값으로 코드 검색
    */
-  @GetMapping("/class/{className}/search-by-attribute")
+  @GetMapping("/class/{classCode}/search-by-attribute")
   public ResponseEntity<?> searchCodesByAttribute(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @RequestParam String attributeValue) {
     List<CommonCodeResponse> response =
-        commonCodePublicService.searchCodesByAttribute(className, attributeValue);
+        commonCodePublicService.searchCodesByAttribute(classCode, attributeValue);
     return ResponseEntity.ok(response);
   }
 
@@ -148,16 +148,16 @@ public class CommonCodeController {
    * 여러 클래스의 코드를 한번에 조회
    */
   @PostMapping("/codes/batch")
-  public ResponseEntity<?> getBatchCodes(@RequestBody List<String> classNames) {
+  public ResponseEntity<?> getBatchCodes(@RequestBody List<String> classCodes) {
     Map<String, List<CommonCodeResponse>> result = new HashMap<>();
 
-    for (String className : classNames) {
+    for (String classCode : classCodes) {
       try {
-        List<CommonCodeResponse> codes = commonCodePublicService.getCodesByClass(className);
-        result.put(className, codes);
+        List<CommonCodeResponse> codes = commonCodePublicService.getCodesByClass(classCode);
+        result.put(classCode, codes);
       } catch (Exception e) {
-        log.warn("Failed to get codes for class: {}", className, e);
-        result.put(className, List.of());
+        log.warn("Failed to get codes for class: {}", classCode, e);
+        result.put(classCode, List.of());
       }
     }
 
@@ -167,12 +167,12 @@ public class CommonCodeController {
   /**
    * 코드 값 유효성 검증
    */
-  @GetMapping("/validate/{className}/{code}")
+  @GetMapping("/validate/{classCode}/{code}")
   public ResponseEntity<?> validateCode(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @PathVariable String code) {
     try {
-      CommonCodeResponse response = commonCodePublicService.getCode(className, code);
+      CommonCodeResponse response = commonCodePublicService.getCode(classCode, code);
       return ResponseEntity.ok(Map.of(
           "valid", true,
           "code", response
@@ -180,7 +180,7 @@ public class CommonCodeController {
     } catch (Exception e) {
       return ResponseEntity.ok(Map.of(
           "valid", false,
-          "message", "유효하지 않은 코드입니다: " + className + "." + code
+          "message", "유효하지 않은 코드입니다: " + classCode + "." + code
       ));
     }
   }

@@ -16,6 +16,12 @@ import jakarta.validation.constraints.Min;
 public class CommonCodeUpdate {
 
   /**
+   * 코드값 (선택사항 - 제공 시 코드 변경)
+   */
+  @Size(max = 32, message = "코드값은 32자 이하여야 합니다")
+  String code;
+
+  /**
    * 코드명
    */
   @Size(max = 64, message = "코드명은 64자 이하여야 합니다")
@@ -46,10 +52,10 @@ public class CommonCodeUpdate {
   String attribute5Value;
 
   /**
-   * 하위 클래스명 (NULL이면 leaf 노드)
+   * 하위 클래스 코드 (NULL이면 leaf 노드)
    */
-  @Size(max = 64, message = "하위 클래스명은 64자 이하여야 합니다")
-  String childClassName;
+  @Size(max = 64, message = "하위 클래스 코드는 64자 이하여야 합니다")
+  String childClassCode;
 
   /**
    * 정렬순서

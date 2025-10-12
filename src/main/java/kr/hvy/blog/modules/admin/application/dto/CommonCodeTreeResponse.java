@@ -21,10 +21,6 @@ public class CommonCodeTreeResponse {
    */
   String className;
 
-  /**
-   * 클래스 표시명
-   */
-  String displayName;
 
   /**
    * 이 클래스에 속한 코드들
@@ -65,15 +61,15 @@ public class CommonCodeTreeResponse {
     Map<String, String> attributes;
 
     /**
-     * 하위 클래스명
+     * 하위 클래스 코드
      */
-    String childClassName;
+    String childClassCode;
 
     /**
      * 하위 코드 존재 여부 (계산된 필드)
      */
     public Boolean getHasChildren() {
-      return childClassName != null && !childClassName.trim().isEmpty();
+      return childClassCode != null && !childClassCode.trim().isEmpty();
     }
 
     /**
@@ -107,9 +103,9 @@ public class CommonCodeTreeResponse {
     String fullPath;
 
     /**
-     * 클래스명
+     * 클래스 코드
      */
-    String className;
+    String classCode;
 
     /**
      * 코드값

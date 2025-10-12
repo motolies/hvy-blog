@@ -32,7 +32,7 @@ public class AdminCommonCodeController {
    */
   @PostMapping("/class")
   public ResponseEntity<?> createClass(@Valid @RequestBody CommonClassCreate createDto) {
-    log.info("Creating CommonClass: {}", createDto.getName());
+    log.info("Creating CommonClass: {}", createDto.getCode());
     CommonClassResponse response = commonCodeService.createClass(createDto);
     return ResponseEntity.ok(response);
   }
@@ -40,30 +40,30 @@ public class AdminCommonCodeController {
   /**
    * 클래스 수정
    */
-  @PutMapping("/class/{className}")
+  @PutMapping("/class/{classCode}")
   public ResponseEntity<?> updateClass(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @Valid @RequestBody CommonClassUpdate updateDto) {
-    log.info("Updating CommonClass: {}", className);
-    CommonClassResponse response = commonCodeService.updateClass(className, updateDto);
+    log.info("Updating CommonClass: {}", classCode);
+    CommonClassResponse response = commonCodeService.updateClass(classCode, updateDto);
     return ResponseEntity.ok(response);
   }
 
   /**
    * 클래스 삭제
    */
-  @DeleteMapping("/class/{className}")
-  public ResponseEntity<?> deleteClass(@PathVariable String className) {
-    log.info("Deleting CommonClass: {}", className);
-    return ResponseEntity.ok(commonCodeService.deleteClass(className));
+  @DeleteMapping("/class/{classCode}")
+  public ResponseEntity<?> deleteClass(@PathVariable String classCode) {
+    log.info("Deleting CommonClass: {}", classCode);
+    return ResponseEntity.ok(commonCodeService.deleteClass(classCode));
   }
 
   /**
    * 클래스 상세 조회 (관리자용)
    */
-  @GetMapping("/class/{className}")
-  public ResponseEntity<?> getClass(@PathVariable String className) {
-    CommonClassResponse response = commonCodeService.getClass(className);
+  @GetMapping("/class/{classCode}")
+  public ResponseEntity<?> getClass(@PathVariable String classCode) {
+    CommonClassResponse response = commonCodeService.getClass(classCode);
     return ResponseEntity.ok(response);
   }
 
@@ -83,7 +83,7 @@ public class AdminCommonCodeController {
    */
   @PostMapping("/code")
   public ResponseEntity<?> createCode(@Valid @RequestBody CommonCodeCreate createDto) {
-    log.info("Creating CommonCode: {}.{}", createDto.getClassName(), createDto.getCode());
+    log.info("Creating CommonCode: {}.{}", createDto.getClassCode(), createDto.getCode());
     CommonCodeResponse response = commonCodeService.createCode(createDto);
     return ResponseEntity.ok(response);
   }
@@ -91,48 +91,48 @@ public class AdminCommonCodeController {
   /**
    * 코드 수정
    */
-  @PutMapping("/code/{className}/{code}")
+  @PutMapping("/code/{classCode}/{code}")
   public ResponseEntity<?> updateCode(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @PathVariable String code,
       @Valid @RequestBody CommonCodeUpdate updateDto) {
-    log.info("Updating CommonCode: {}.{}", className, code);
-    CommonCodeResponse response = commonCodeService.updateCode(className, code, updateDto);
+    log.info("Updating CommonCode: {}.{}", classCode, code);
+    CommonCodeResponse response = commonCodeService.updateCode(classCode, code, updateDto);
     return ResponseEntity.ok(response);
   }
 
   /**
    * 코드 삭제
    */
-  @DeleteMapping("/code/{className}/{code}")
+  @DeleteMapping("/code/{classCode}/{code}")
   public ResponseEntity<?> deleteCode(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @PathVariable String code) {
-    log.info("Deleting CommonCode: {}.{}", className, code);
-    return ResponseEntity.ok(commonCodeService.deleteCode(className, code));
+    log.info("Deleting CommonCode: {}.{}", classCode, code);
+    return ResponseEntity.ok(commonCodeService.deleteCode(classCode, code));
   }
 
   /**
    * 배치 코드 생성
    */
-  @PostMapping("/class/{className}/codes/batch")
+  @PostMapping("/class/{classCode}/codes/batch")
   public ResponseEntity<?> batchCreateCodes(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @Valid @RequestBody List<CommonCodeCreate> createDtos) {
-    log.info("Batch creating CommonCodes for class: {}, count: {}", className, createDtos.size());
-    List<CommonCodeResponse> response = commonCodeService.batchCreateCodes(className, createDtos);
+    log.info("Batch creating CommonCodes for class: {}, count: {}", classCode, createDtos.size());
+    List<CommonCodeResponse> response = commonCodeService.batchCreateCodes(classCode, createDtos);
     return ResponseEntity.ok(response);
   }
 
   // ========== 유틸리티 API ==========
 
   /**
-   * 클래스명 중복 확인
+   * 클래스 코드 중복 확인
    */
-  @GetMapping("/class/{className}/exists")
-  public ResponseEntity<?> checkClassExists(@PathVariable String className) {
+  @GetMapping("/class/{classCode}/exists")
+  public ResponseEntity<?> checkClassExists(@PathVariable String classCode) {
     try {
-      commonCodeService.getClass(className);
+      commonCodeService.getClass(classCode);
       return ResponseEntity.ok(Map.of("exists", true));
     } catch (Exception e) {
       return ResponseEntity.ok(Map.of("exists", false));
@@ -142,12 +142,23 @@ public class AdminCommonCodeController {
   /**
    * 클래스 내 코드명 중복 확인
    */
-  @GetMapping("/code/{className}/{code}/exists")
+  @GetMapping("/code/{classCode}/{code}/exists")
   public ResponseEntity<?> checkCodeExists(
-      @PathVariable String className,
+      @PathVariable String classCode,
       @PathVariable String code) {
     Map<String, Boolean> result = Map.of("exists",
-        commonCodeRepository.existsByClassNameAndCodeAndIsActiveTrue(className, code));
+        commonCodeRepository.existsByCommonClass_CodeAndCode(classCode, code));
     return ResponseEntity.ok(result);
+  }
+
+  /**
+   * 공통코드 트리 구조 조회
+   * CLASS → CODE → CLASS → CODE 재귀 구조
+   */
+  @GetMapping("/tree")
+  public ResponseEntity<?> getTreeStructure() {
+    log.info("Fetching common code tree structure");
+    List<CommonCodeTreeNodeResponse> treeStructure = commonCodeService.getTreeStructure();
+    return ResponseEntity.ok(treeStructure);
   }
 }

@@ -7,13 +7,16 @@ import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.ForeignKey;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.IdClass;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import java.util.Objects;
 import kr.hvy.blog.modules.admin.application.dto.CommonCodeUpdate;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import lombok.AllArgsConstructor;
@@ -23,15 +26,12 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.With;
 
-import java.util.Objects;
-
 /**
- * 공통코드 엔티티
- * 실제 코드값을 저장하는 엔티티
+ * 공통코드 엔티티 실제 코드값을 저장하는 엔티티
  */
 @Entity
-@Table(name = "common_code")
-@IdClass(CommonCodeId.class)
+@Table(name = "common_code",
+    uniqueConstraints = @UniqueConstraint(name = "uk_common_code_class_code", columnNames = {"classId", "code"}))
 @Getter
 @Setter
 @Builder
@@ -41,16 +41,15 @@ import java.util.Objects;
 public class CommonCode {
 
   /**
-   * 클래스명 (복합키 1)
+   * 내부 ID (PK, Surrogate Key)
    */
   @Id
-  @Column(name = "className", nullable = false, length = 64)
-  private String className;
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  private Long id;
 
   /**
-   * 코드값 (복합키 2)
+   * 코드값 (Natural Key)
    */
-  @Id
   @Column(nullable = false, length = 32)
   private String code;
 
@@ -84,11 +83,6 @@ public class CommonCode {
   @Column(length = 128)
   private String attribute5Value; // 예: "03000" (우편번호)
 
-  /**
-   * 계층 구조 지원: 하위 클래스명 참조 (NULL이면 leaf 노드)
-   */
-  @Column(length = 64)
-  private String childClassName;
 
   /**
    * 정렬순서
@@ -126,19 +120,19 @@ public class CommonCode {
   private EventLogEntity updated;
 
   /**
-   * 관계: 소속 클래스
+   * 관계: 소속 클래스 (ID 기반 FK)
    */
   @ManyToOne(fetch = FetchType.LAZY)
-  @JoinColumn(name = "className", referencedColumnName = "name", insertable = false, updatable = false,
-      foreignKey = @ForeignKey(name = "fk_common_code_class_name"))
+  @JoinColumn(name = "classId", nullable = false,
+      foreignKey = @ForeignKey(name = "fk_common_code_class_id"))
   private CommonClass commonClass;
 
   /**
-   * 관계: 하위 클래스 참조 (지연로딩)
+   * 관계: 하위 클래스 참조 (ID 기반 FK)
    */
   @ManyToOne(fetch = FetchType.LAZY)
-  @JoinColumn(name = "childClassName", referencedColumnName = "name", insertable = false, updatable = false,
-      foreignKey = @ForeignKey(name = "fk_common_code_child_class_name"))
+  @JoinColumn(name = "childClassId",
+      foreignKey = @ForeignKey(name = "fk_common_code_child_class_id"))
   private CommonClass childClass;
 
   /**
@@ -172,22 +166,27 @@ public class CommonCode {
    * 하위 코드 존재 여부 판단 (계산된 필드)
    */
   public boolean hasChildren() {
-    return this.childClassName != null && !this.childClassName.trim().isEmpty();
+    return this.childClass != null;
   }
 
   /**
    * 순환 참조 방지 검증
    */
   private void validateHierarchy() {
-    if (Objects.equals(this.className, this.childClassName)) {
-      throw new IllegalArgumentException("Self reference not allowed: " + this.className);
+    if (this.commonClass != null && this.childClass != null &&
+        Objects.equals(this.commonClass.getId(), this.childClass.getId())) {
+      throw new IllegalArgumentException("Self reference not allowed: class ID " + this.commonClass.getId());
     }
   }
 
   /**
-   * 업데이트 메서드
+   * 업데이트 메서드 Note: commonClass와 childClass는 Service 레이어에서 설정
    */
   public void update(CommonCodeUpdate updateDto) {
+    // code 필드도 업데이트 가능 (Surrogate Key 패턴)
+    if (updateDto.getCode() != null && !updateDto.getCode().trim().isEmpty()) {
+      this.code = updateDto.getCode();
+    }
     this.name = updateDto.getName();
     this.description = updateDto.getDescription();
     this.attribute1Value = updateDto.getAttribute1Value();
@@ -196,8 +195,8 @@ public class CommonCode {
     this.attribute4Value = updateDto.getAttribute4Value();
     this.attribute5Value = updateDto.getAttribute5Value();
 
-    this.childClassName = updateDto.getChildClassName();
     this.sort = updateDto.getSort();
     this.isActive = updateDto.getIsActive();
+    // childClass는 Service에서 별도로 설정
   }
 }

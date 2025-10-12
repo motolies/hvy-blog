@@ -23,8 +23,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 공통코드 공개 조회 서비스
- * 읽기 전용 작업 및 캐시 적용 담당
+ * 공통코드 공개 조회 서비스 읽기 전용 작업 및 캐시 적용 담당
  */
 @Slf4j
 @Service
@@ -44,16 +43,16 @@ public class CommonCodePublicService {
    */
   @Cacheable(cacheNames = "commonCodeClass", key = "'all'")
   public List<CommonClassResponse> getAllClasses() {
-    List<CommonClass> entities = commonClassRepository.findActiveClassesOrderByName();
+    List<CommonClass> entities = commonClassRepository.findActiveClassesOrderByCode();
     return commonClassDtoMapper.toResponseList(entities);
   }
 
   /**
    * 특정 클래스 조회 (캐시됨)
    */
-  @Cacheable(cacheNames = "commonCodeClass", key = "#className")
-  public CommonClassResponse getClass(String className) {
-    CommonClass entity = findClassByName(className);
+  @Cacheable(cacheNames = "commonCodeClass", key = "#classCode")
+  public CommonClassResponse getClass(String classCode) {
+    CommonClass entity = findClassByCode(classCode);
     return commonClassDtoMapper.toResponse(entity);
   }
 
@@ -62,35 +61,35 @@ public class CommonCodePublicService {
   /**
    * 클래스별 코드 목록 조회 (캐시됨)
    */
-  @Cacheable(cacheNames = "commonCodeData", key = "#className")
-  public List<CommonCodeResponse> getCodesByClass(String className) {
+  @Cacheable(cacheNames = "commonCodeData", key = "#classCode")
+  public List<CommonCodeResponse> getCodesByClass(String classCode) {
     // 클래스 존재 확인
-    findClassByName(className);
+    findClassByCode(classCode);
 
-    List<CommonCode> entities = commonCodeRepository.findByClassNameAndIsActiveTrueOrderBySortAscCodeAsc(className);
+    List<CommonCode> entities = commonCodeRepository.findByCommonClass_CodeAndIsActiveTrueOrderBySortAscCodeAsc(classCode);
     return commonCodeDtoMapper.toResponseList(entities);
   }
 
   /**
    * 특정 코드 조회 (캐시됨)
    */
-  @Cacheable(cacheNames = "commonCodeData", key = "'single:'+#className+':'+#code")
-  public CommonCodeResponse getCode(String className, String code) {
-    CommonCode entity = findCodeByClassNameAndCode(className, code);
+  @Cacheable(cacheNames = "commonCodeData", key = "'single:'+#classCode+':'+#code")
+  public CommonCodeResponse getCode(String classCode, String code) {
+    CommonCode entity = findCodeByClassCodeAndCode(classCode, code);
     return commonCodeDtoMapper.toResponse(entity);
   }
 
   /**
    * 하위 코드 조회
    */
-  public List<CommonCodeResponse> getChildCodes(String parentClassName, String parentCode) {
-    CommonCode parentCodeEntity = findCodeByClassNameAndCode(parentClassName, parentCode);
+  public List<CommonCodeResponse> getChildCodes(String parentClassCode, String parentCode) {
+    CommonCode parentCodeEntity = findCodeByClassCodeAndCode(parentClassCode, parentCode);
 
-    if (!parentCodeEntity.hasChildren() || parentCodeEntity.getChildClassName() == null) {
+    if (!parentCodeEntity.hasChildren()) {
       return new ArrayList<>();
     }
 
-    List<CommonCode> childEntities = commonCodeRepository.findChildCodes(parentClassName, parentCode);
+    List<CommonCode> childEntities = commonCodeRepository.findChildCodes(parentClassCode, parentCode);
     return commonCodeDtoMapper.toResponseList(childEntities);
   }
 
@@ -99,16 +98,15 @@ public class CommonCodePublicService {
   /**
    * 계층 구조 트리 조회 (캐시됨)
    */
-  @Cacheable(cacheNames = "commonCodeTree", key = "#className")
-  public CommonCodeTreeResponse getCodesWithTree(String className) {
-    CommonClass classEntity = findClassByName(className);
-    List<CommonCode> rootCodes = commonCodeRepository.findByClassNameAndIsActiveTrueOrderBySortAscCodeAsc(className);
+  @Cacheable(cacheNames = "commonCodeTree", key = "#classCode")
+  public CommonCodeTreeResponse getCodesWithTree(String classCode) {
+    CommonClass classEntity = findClassByCode(classCode);
+    List<CommonCode> rootCodes = commonCodeRepository.findByCommonClass_CodeAndIsActiveTrueOrderBySortAscCodeAsc(classCode);
 
     List<CommonCodeTreeResponse.CommonCodeItemResponse> treeItems = buildTreeStructure(rootCodes);
 
     return CommonCodeTreeResponse.builder()
         .className(classEntity.getName())
-        .displayName(classEntity.getDisplayName())
         .codes(treeItems)
         .totalCount(treeItems.size())
         .build();
@@ -117,9 +115,9 @@ public class CommonCodePublicService {
   /**
    * 평면 구조 조회 (select box용)
    */
-  public List<CommonCodeTreeResponse.CommonCodeFlatResponse> getFlatCodes(String className) {
+  public List<CommonCodeTreeResponse.CommonCodeFlatResponse> getFlatCodes(String classCode) {
     List<CommonCodeTreeResponse.CommonCodeFlatResponse> result = new ArrayList<>();
-    buildFlatStructure(className, "", 0, result);
+    buildFlatStructure(classCode, "", 0, result);
     return result;
   }
 
@@ -128,11 +126,11 @@ public class CommonCodePublicService {
   /**
    * 클래스 내 코드명 검색
    */
-  public List<CommonCodeResponse> searchCodesInClass(String className, String searchTerm) {
+  public List<CommonCodeResponse> searchCodesInClass(String classCode, String searchTerm) {
     // 클래스 존재 확인
-    findClassByName(className);
+    findClassByCode(classCode);
 
-    List<CommonCode> entities = commonCodeRepository.searchByNameInClass(className, searchTerm);
+    List<CommonCode> entities = commonCodeRepository.searchByNameInClass(classCode, searchTerm);
     return commonCodeDtoMapper.toResponseList(entities);
   }
 
@@ -147,11 +145,11 @@ public class CommonCodePublicService {
   /**
    * 속성값으로 코드 검색
    */
-  public List<CommonCodeResponse> searchCodesByAttribute(String className, String attributeValue) {
+  public List<CommonCodeResponse> searchCodesByAttribute(String classCode, String attributeValue) {
     // 클래스 존재 확인
-    findClassByName(className);
+    findClassByCode(classCode);
 
-    List<CommonCode> entities = commonCodeRepository.findByAttributeValue(className, attributeValue);
+    List<CommonCode> entities = commonCodeRepository.findByAttributeValue(classCode, attributeValue);
     return commonCodeDtoMapper.toResponseList(entities);
   }
 
@@ -164,22 +162,22 @@ public class CommonCodePublicService {
     List<Object[]> results = commonCodeRepository.getCodeCountByClass();
     return results.stream()
         .collect(Collectors.toMap(
-            result -> (String) result[0],  // className
+            result -> (String) result[0],  // classCode
             result -> (Long) result[1]     // count
         ));
   }
 
   // ========== 헬퍼 메서드 ==========
 
-  private CommonClass findClassByName(String className) {
-    return commonClassRepository.findByNameAndIsActiveTrue(className)
-        .orElseThrow(() -> new DataNotFoundException("클래스를 찾을 수 없습니다: " + className));
+  private CommonClass findClassByCode(String classCode) {
+    return commonClassRepository.findByCodeAndIsActiveTrue(classCode)
+        .orElseThrow(() -> new DataNotFoundException("클래스를 찾을 수 없습니다: " + classCode));
   }
 
-  private CommonCode findCodeByClassNameAndCode(String className, String code) {
-    return commonCodeRepository.findByClassNameAndCodeAndIsActiveTrue(className, code)
+  private CommonCode findCodeByClassCodeAndCode(String classCode, String code) {
+    return commonCodeRepository.findByCommonClass_CodeAndCodeAndIsActiveTrue(classCode, code)
         .orElseThrow(() -> new DataNotFoundException(
-            String.format("코드를 찾을 수 없습니다: %s.%s", className, code)));
+            String.format("코드를 찾을 수 없습니다: %s.%s", classCode, code)));
   }
 
   /**
@@ -195,7 +193,7 @@ public class CommonCodePublicService {
               .name(code.getName())
               .description(code.getDescription())
 
-              .childClassName(code.getChildClassName())
+              .childClassCode(code.getChildClass().getCode())
               .sort(code.getSort())
               .isActive(code.getIsActive());
 
@@ -221,9 +219,8 @@ public class CommonCodePublicService {
       }
 
       // 하위 코드가 있는 경우 재귀적으로 로드
-      if (code.hasChildren() && code.getChildClassName() != null) {
-        List<CommonCode> childCodes = commonCodeRepository.findByClassNameAndIsActiveTrueOrderBySortAscCodeAsc(
-            code.getChildClassName());
+      if (code.hasChildren()) {
+        List<CommonCode> childCodes = commonCodeRepository.findByCommonClass_CodeAndIsActiveTrueOrderBySortAscCodeAsc(code.getChildClass().getCode());
         List<CommonCodeTreeResponse.CommonCodeItemResponse> children = buildTreeStructure(childCodes);
         builder.children(children);
       }
@@ -237,24 +234,34 @@ public class CommonCodePublicService {
   /**
    * 평면 구조 빌드 (재귀)
    */
-  private void buildFlatStructure(String className, String pathPrefix, int level,
-                                  List<CommonCodeTreeResponse.CommonCodeFlatResponse> result) {
-    List<CommonCode> codes = commonCodeRepository.findByClassNameAndIsActiveTrueOrderBySortAscCodeAsc(className);
+  private void buildFlatStructure(String classCode, String pathPrefix, int level,
+      List<CommonCodeTreeResponse.CommonCodeFlatResponse> result) {
+    List<CommonCode> codes = commonCodeRepository.findByCommonClass_CodeAndIsActiveTrueOrderBySortAscCodeAsc(classCode);
 
     for (CommonCode code : codes) {
       String currentPath = pathPrefix.isEmpty() ? code.getName() : pathPrefix + " > " + code.getName();
 
       // 동적 속성 맵 생성
       Map<String, String> attributes = new HashMap<>();
-      if (code.getAttribute1Value() != null) attributes.put("attribute1", code.getAttribute1Value());
-      if (code.getAttribute2Value() != null) attributes.put("attribute2", code.getAttribute2Value());
-      if (code.getAttribute3Value() != null) attributes.put("attribute3", code.getAttribute3Value());
-      if (code.getAttribute4Value() != null) attributes.put("attribute4", code.getAttribute4Value());
-      if (code.getAttribute5Value() != null) attributes.put("attribute5", code.getAttribute5Value());
+      if (code.getAttribute1Value() != null) {
+        attributes.put("attribute1", code.getAttribute1Value());
+      }
+      if (code.getAttribute2Value() != null) {
+        attributes.put("attribute2", code.getAttribute2Value());
+      }
+      if (code.getAttribute3Value() != null) {
+        attributes.put("attribute3", code.getAttribute3Value());
+      }
+      if (code.getAttribute4Value() != null) {
+        attributes.put("attribute4", code.getAttribute4Value());
+      }
+      if (code.getAttribute5Value() != null) {
+        attributes.put("attribute5", code.getAttribute5Value());
+      }
 
       CommonCodeTreeResponse.CommonCodeFlatResponse flatItem = CommonCodeTreeResponse.CommonCodeFlatResponse.builder()
           .fullPath(currentPath)
-          .className(code.getClassName())
+          .classCode(code.getCommonClass().getCode())
           .code(code.getCode())
           .name(code.getName())
           .level(level)
@@ -265,8 +272,8 @@ public class CommonCodePublicService {
       result.add(flatItem);
 
       // 하위 코드가 있는 경우 재귀 호출
-      if (code.hasChildren() && code.getChildClassName() != null) {
-        buildFlatStructure(code.getChildClassName(), currentPath, level + 1, result);
+      if (code.hasChildren()) {
+        buildFlatStructure(code.getChildClass().getCode(), currentPath, level + 1, result);
       }
     }
   }

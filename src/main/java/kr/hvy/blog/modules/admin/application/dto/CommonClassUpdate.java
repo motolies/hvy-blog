@@ -15,10 +15,16 @@ import jakarta.validation.constraints.Size;
 public class CommonClassUpdate {
 
   /**
-   * 표시명
+   * 클래스 코드 (선택사항 - 제공 시 코드 변경)
    */
-  @Size(max = 128, message = "표시명은 128자 이하여야 합니다")
-  String displayName;
+  @Size(max = 64, message = "클래스 코드는 64자 이하여야 합니다")
+  String code;
+
+  /**
+   * 클래스명
+   */
+  @Size(max = 128, message = "클래스명은 128자 이하여야 합니다")
+  String name;
 
   /**
    * 설명

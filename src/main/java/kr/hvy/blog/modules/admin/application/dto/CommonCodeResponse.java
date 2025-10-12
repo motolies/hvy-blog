@@ -17,9 +17,15 @@ import java.util.Map;
 public class CommonCodeResponse {
 
   /**
-   * 클래스명
+   * 노드 타입 (고정값: CODE)
    */
-  String className;
+  @Builder.Default
+  String type = "CODE";
+
+  /**
+   * 클래스 코드
+   */
+  String classCode;
 
   /**
    * 코드값
@@ -51,16 +57,16 @@ public class CommonCodeResponse {
   String attribute5Value;
 
   /**
-   * 하위 클래스명 (NULL이면 leaf 노드)
+   * 하위 클래스 코드 (NULL이면 leaf 노드)
    */
-  String childClassName;
+  String childClassCode;
 
   /**
    * 하위 코드 존재 여부 (계산된 필드)
    * API 호환성을 위해 제공
    */
   public Boolean getHasChildren() {
-    return childClassName != null && !childClassName.trim().isEmpty();
+    return childClassCode != null && !childClassCode.trim().isEmpty();
   }
 
   /**

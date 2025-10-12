@@ -16,14 +16,20 @@ import java.util.List;
 public class CommonClassResponse {
 
   /**
-   * 클래스명 (PK)
+   * 노드 타입 (고정값: CLASS)
    */
-  String name;
+  @Builder.Default
+  String type = "CLASS";
 
   /**
-   * 표시명
+   * 클래스 코드 (PK)
    */
-  String displayName;
+  String code;
+
+  /**
+   * 클래스명
+   */
+  String name;
 
   /**
    * 설명

@@ -120,3 +120,87 @@ VALUES ('JIRA_STATUS', '해야 할 일(작업요청)', '해야 할 일(작업요
 ,('JIRA_STATUS', '배포준비', '배포준비', '배포준비', 'Done', 'Y', null, null, null, null, 99, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null)
 ,('JIRA_STATUS', '작업완료', '작업완료', '작업완료', 'Done', 'Y', null, null, null, null, 100, true, '2025-08-24 04:01:40.000000', 'SYSTEM', null, null);
 
+-- 즐겨찾기 관리 공통코드
+
+-- 1. 즐겨찾기 공통코드 클래스 생성
+INSERT INTO tb_common_class (code, name, description, attribute1Name, isActive, createdAt, createdBy)
+VALUES
+('FAVORITE_ROOT', '즐겨찾기 루트', '즐겨찾기 최상위 분류', 'url', 1, NOW(), 'SYSTEM'),
+('FAVORITE_CATEGORY', '즐겨찾기 카테고리', '즐겨찾기 카테고리 분류', 'url', 1, NOW(), 'SYSTEM'),
+('FAVORITE_SITE', '즐겨찾기 사이트', '즐겨찾기 사이트 링크', 'url', 1, NOW(), 'SYSTEM');
+
+-- 2. 즐겨찾기 루트 코드 (1단계)
+INSERT INTO tb_common_code (classId, code, name, description, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_ROOT'), 'ROOT', '즐겨찾기', '즐겨찾기 루트', (SELECT id FROM tb_common_class WHERE code = 'FAVORITE_CATEGORY'), 1, 1, NOW(), 'SYSTEM');
+
+-- 3. 즐겨찾기 카테고리 코드 (2단계)
+INSERT INTO tb_common_code (classId, code, name, description, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_CATEGORY'), 'COMMUNITY', 'Community', '커뮤니티 사이트', (SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 1, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_CATEGORY'), 'MEMBERSHIP', 'Membership', '멤버십 관련', (SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 2, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_CATEGORY'), 'DEVTOOLS', '<devTools>', '개발 도구', (SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 3, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_CATEGORY'), 'WEBTOOLS', 'WebTools', '웹 도구', (SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 4, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_CATEGORY'), 'GEOSERVICE', 'GeoService', '위치 서비스', (SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 5, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_CATEGORY'), 'ETC', 'etc', '기타', (SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 6, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_CATEGORY'), 'HARDWARE', '철물점', '철물점', (SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 7, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_CATEGORY'), 'STREAMING', 'Streaming', '스트리밍', (SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 8, 1, NOW(), 'SYSTEM');
+
+-- 4. 즐겨찾기 사이트 코드 (3단계) - Community
+INSERT INTO tb_common_code (classId, code, name, description, attribute1Value, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'CLIEN', 'clien', '클리앙', 'http://www.clien.net/', NULL, 1, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'OKKY', 'okky', 'OKKY', 'https://okky.kr/', NULL, 2, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'GORANI', 'gorani', '고라니', 'https://gorani.kr/', NULL, 3, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'AAGAG', 'AAGAG', 'AAGAG', 'https://aagag.com/mirror/?target=_blank&time=12', NULL, 4, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'PPOMPPU', '뽐뿌', '뽐뿌', 'http://www.ppomppu.co.kr/', NULL, 5, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'PPOMPPU_CAMPING', '뽐뿌 - 캠핑포럼', '뽐뿌 캠핑포럼', 'http://m.ppomppu.co.kr/new/bbs_list.php?id=camping', NULL, 6, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'PPOMPPU_FISHING', '뽐뿌 - 낚시포럼', '뽐뿌 낚시포럼', 'http://m.ppomppu.co.kr/new/bbs_list.php?id=fishing', NULL, 7, 1, NOW(), 'SYSTEM');
+
+-- 5. 즐겨찾기 사이트 코드 (3단계) - Membership
+INSERT INTO tb_common_code (classId, code, name, description, attribute1Value, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'NAVER_PLUS_LGU', '네이버플러스 X Lgu+', '네이버플러스 LGU+', 'https://nid.naver.com/membership/partner/uplus', NULL, 1, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'NAVER_PLUS', '네이버플러스', '네이버플러스', 'https://nid.naver.com/membership/my?m=viewSaving', NULL, 2, 1, NOW(), 'SYSTEM');
+
+-- 6. 즐겨찾기 사이트 코드 (3단계) - devTools
+INSERT INTO tb_common_code (classId, code, name, description, attribute1Value, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'MAKEREADME', 'Make readme.md', 'README 생성기', 'https://www.makeareadme.com/', NULL, 1, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'CODESANDBOX', 'Code Sandbox', '코드 샌드박스', 'https://codesandbox.io', NULL, 2, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'JSFIDDLE', 'Js Fiddle', 'JS Fiddle', 'https://jsfiddle.net/user/fiddles/all/', NULL, 3, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'ENCODING', 'Encoding', '인코딩 도구', 'https://coderstoolbox.net/', NULL, 4, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'JSON2JAVA', 'Json to JavaClass', 'JSON to Java 변환', 'https://codebeautify.org/json-to-java-converter', NULL, 5, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'EPOCH', 'Epoch & Unix Timestamp', 'Epoch 시간 변환', 'https://www.epochconverter.com/', NULL, 6, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'REGEX101', 'regex101(정규식 검색)', '정규식 라이브러리', 'https://regex101.com/library', NULL, 7, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'REGEXR', '정규식 테스트', '정규식 테스터', 'https://regexr.com', NULL, 8, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'REGEXSTORM', '정규식 테스트(.net)', '.NET 정규식 테스터', 'http://regexstorm.net/tester', NULL, 9, 1, NOW(), 'SYSTEM');
+
+-- 7. 즐겨찾기 사이트 코드 (3단계) - WebTools
+INSERT INTO tb_common_code (classId, code, name, description, attribute1Value, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'PHOTOPEA', '웹용 포토샵', '웹 포토샵', 'https://www.photopea.com', NULL, 1, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'CIDR', 'Calc Cidr(IP대역계산)', 'CIDR 계산기', 'https://www.ipaddressguide.com/cidr', NULL, 2, 1, NOW(), 'SYSTEM');
+
+-- 8. 즐겨찾기 사이트 코드 (3단계) - GeoService
+INSERT INTO tb_common_code (classId, code, name, description, attribute1Value, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'NAVER_MYPLACE', '네이버 마이플레이스', '네이버 마이플레이스', 'https://m.store.naver.com/myplace/home', NULL, 1, 1, NOW(), 'SYSTEM');
+
+-- 9. 즐겨찾기 사이트 코드 (3단계) - etc
+INSERT INTO tb_common_code (classId, code, name, description, attribute1Value, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'VPNGATE', 'VPN Gate', 'VPN Gate', 'http://www.vpngate.net/en/', NULL, 1, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'DOSGAMES', 'Almost 2,400 DOS GAMES using PC Browsers', 'DOS 게임 아카이브', 'https://archive.org/details/softwarelibrary_msdos_games/v2', NULL, 2, 1, NOW(), 'SYSTEM'),
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'ARCADE', 'Internet Arcade', '인터넷 아케이드', 'https://archive.org/details/internetarcade', NULL, 3, 1, NOW(), 'SYSTEM');
+
+-- 10. 즐겨찾기 사이트 코드 (3단계) - 철물점
+INSERT INTO tb_common_code (classId, code, name, description, attribute1Value, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'IVERANDA', '아이베란다', '아이베란다', 'http://www.iveranda.com/', NULL, 1, 1, NOW(), 'SYSTEM');
+
+-- 11. 즐겨찾기 사이트 코드 (3단계) - Streaming
+INSERT INTO tb_common_code (classId, code, name, description, attribute1Value, childClassId, sort, isActive, createdAt, createdBy)
+VALUES
+((SELECT id FROM tb_common_class WHERE code = 'FAVORITE_SITE'), 'NUNUTV', '누누.tv', '누누TV', 'https://nunutv1.me/', NULL, 1, 1, NOW(), 'SYSTEM');
+

@@ -193,7 +193,7 @@ public class CommonCodePublicService {
               .name(code.getName())
               .description(code.getDescription())
 
-              .childClassCode(code.getChildClass().getCode())
+              .childClassCode(code.hasChildren() ? code.getChildClass().getCode() : null)
               .sort(code.getSort())
               .isActive(code.getIsActive());
 

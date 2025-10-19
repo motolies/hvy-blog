@@ -79,7 +79,9 @@ logging:
         hikari: ERROR
         hikari.HikariConfig: DEBUG
     kr.hvy:
-      common.infrastructure.database.logging: DEBUG
+      common:
+        infrastructure.database.logging: DEBUG
+        aop.cache: DEBUG
       blog:
         service: TRACE
         controller: TRACE
@@ -136,12 +138,23 @@ cookie:
   same-site: LAX
   secure: false
 
+# cache
+cache:
+  logging:
+    enabled: true           # 캐시 로깅 활성화 여부
+    log-hits: true
+    log-misses: true
+    log-evictions: true
 
 ---
 spring:
   config:
     activate:
       on-profile: prod
+# cache
+cache:
+  logging:
+    enabled: false
 # scheduler
 scheduler:
   public-ip:

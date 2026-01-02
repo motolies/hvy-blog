@@ -29,7 +29,7 @@ public class IPCheckScheduler extends AbstractScheduler {
 
   private final PublicIpService publicIpService;
 
-  @Scheduled(cron = "${scheduler.public-ip.cron-expression}")    // 10분마다
+  @Scheduled(cron = "${scheduler.public-ip.cron-expression}")    // 1분마다
   @SchedulerLock(name = "${scheduler.public-ip.lock-name}", lockAtLeastFor = "PT30S", lockAtMostFor = "PT50S")
   public void monitoring() {
     proceedScheduler("PUBLIC-IP-CHANGE")

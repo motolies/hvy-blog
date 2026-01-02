@@ -1,0 +1,1 @@
+ALTER TABLE tb_api_log MODIFY COLUMN responseBody MEDIUMTEXT;

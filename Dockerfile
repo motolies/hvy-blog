@@ -26,14 +26,14 @@ RUN echo BuildEnd: $(date +%F_%T)
 
 
 ### STAGE 2: Production Environment ###
-FROM openjdk:21-jdk-slim
+FROM amazoncorretto:21-al2023
 
 # 필요시 비루트 사용자 생성 (원래 Dockerfile의 주석 부분 참조)
 # RUN addgroup -g 1001 -S spring
 # RUN adduser -S boot -u 1001
 
 ARG JAR_FILE=build/libs/*.jar
-COPY --from=builder --chown=gradle:gradle /home/gradle/project/${JAR_FILE} ./app.jar
+COPY --from=builder /home/gradle/project/${JAR_FILE} ./app.jar
 
 # USER boot
 

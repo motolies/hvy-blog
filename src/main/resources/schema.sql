@@ -162,7 +162,8 @@ create or replace table tb_jira_issue
     components   varchar(512) null         comment '컴포넌트 (쉼표로 구분)',
     storyPoints  decimal(5,2) null         comment '스토리 포인트',
     startDate    date         null         comment '시작일',
-    sprint       varchar(32)  null         comment '스프린트명'
+    endDate      date         null         comment '완료일 (Done 상태가 된 날짜)',
+    sprint       varchar(32)  null         comment '스프린트명',
     createdAt    datetime(6)  not null     comment '생성일시',
     createdBy    varchar(32)  null         comment '생성자',
     updatedAt    datetime(6)  not null     comment '수정일시',

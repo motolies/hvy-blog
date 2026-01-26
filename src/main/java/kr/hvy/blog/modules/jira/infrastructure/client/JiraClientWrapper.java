@@ -381,4 +381,40 @@ public class JiraClientWrapper {
     }
   }
 
+  /**
+   * 이슈의 changelog를 조회하여 Done 상태로 변경된 가장 최근 날짜를 반환합니다.
+   * changelog의 histories를 시간 역순으로 정렬하여 Done 상태로 변경된 첫 번째 날짜를 찾습니다.
+   *
+   * @param issueKey     이슈 키
+   * @param doneStatuses Done 상태로 간주되는 상태명 Set
+   * @return Done 상태로 변경된 날짜 (없으면 null)
+   */
+  public LocalDate getEndDateFromChangelog(String issueKey, Set<String> doneStatuses) {
+    try {
+      String endpoint = String.format("/rest/api/3/issue/%s?expand=changelog", issueKey);
+
+      JiraIssueResponse response = jiraRestApi.get(endpoint, null, JiraIssueResponse.class);
+
+      if (response.getChangelog() == null || response.getChangelog().getHistories() == null) {
+        log.debug("이슈 {} changelog가 없습니다.", issueKey);
+        return null;
+      }
+
+      // 시간 역순으로 정렬하여 가장 최근의 Done 상태 변경 날짜를 찾음
+      return response.getChangelog().getHistories().stream()
+          .filter(history -> history.getCreated() != null && history.getItems() != null)
+          .sorted((h1, h2) -> h2.getCreated().compareTo(h1.getCreated()))
+          .flatMap(history -> history.getItems().stream()
+              .filter(item -> "status".equals(item.getField()))
+              .filter(item -> doneStatuses.contains(item.getToString()))
+              .map(item -> history.getCreated().toLocalDate()))
+          .findFirst()
+          .orElse(null);
+
+    } catch (Exception e) {
+      log.warn("이슈 {} changelog 조회 중 오류 발생: {}", issueKey, e.getMessage());
+      return null;
+    }
+  }
+
 }

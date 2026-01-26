@@ -72,6 +72,9 @@ public class JiraIssue {
   @Column(name = "startDate")
   private LocalDate startDate;
 
+  @Column(name = "endDate")
+  private LocalDate endDate;
+
   @Column(name = "sprint", length = 32)
   private String sprint;
 
@@ -100,7 +103,7 @@ public class JiraIssue {
    */
   public void updateIssueInfo(String summary, String issueType, String status,
       String assignee, String components, BigDecimal storyPoints,
-      LocalDate startDate, String sprint) {
+      LocalDate startDate, LocalDate endDate, String sprint) {
     this.summary = summary;
     this.issueType = issueType;
     this.status = status;
@@ -108,7 +111,15 @@ public class JiraIssue {
     this.components = components;
     this.storyPoints = storyPoints;
     this.startDate = startDate;
+    this.endDate = endDate;
     this.sprint = sprint;
+  }
+
+  /**
+   * 이슈가 완료 상태인지 확인 (endDate가 설정되어 있으면 완료)
+   */
+  public boolean isCompleted() {
+    return this.endDate != null;
   }
 
   /**

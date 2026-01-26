@@ -52,4 +52,10 @@ public interface JiraIssueRepository extends JpaRepository<JiraIssue, Long> {
      */
     @Query("SELECT i FROM JiraIssue i LEFT JOIN FETCH i.worklogs WHERE i.sprint = :sprint AND i.assignee = :assignee")
     List<JiraIssue> findBySprintAndAssignee(@Param("sprint") String sprint, @Param("assignee") String assignee);
+
+    /**
+     * 완료된 이슈 키 목록 조회 (endDate가 있는 이슈)
+     */
+    @Query("SELECT i.issueKey FROM JiraIssue i WHERE i.endDate IS NOT NULL")
+    Set<String> findCompletedIssueKeys();
 }

@@ -16,6 +16,7 @@ public class JiraIssueResponse {
   private String key;
   private String self; // link URL
   private JiraFieldsDto fields;
+  private JiraChangelogResponse changelog; // changelog expand 시 포함
 
   @Data
   @JsonIgnoreProperties(ignoreUnknown = true)

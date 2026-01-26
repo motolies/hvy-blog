@@ -30,6 +30,7 @@ public class IssueDto {
     private String components;
     private BigDecimal storyPoints;
     private LocalDate startDate;
+    private LocalDate endDate;
     private String sprint;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

@@ -126,6 +126,7 @@ public class JiraQueryService {
         .components(issue.getComponents())
         .storyPoints(issue.getStoryPoints())
         .startDate(issue.getStartDate())
+        .endDate(issue.getEndDate())
         .worklogs(issue.getWorklogs().stream()
             .map(this::convertToWorklogDto)
             .collect(Collectors.toList()))

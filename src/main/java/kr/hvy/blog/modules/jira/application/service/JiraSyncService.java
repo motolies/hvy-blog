@@ -81,6 +81,7 @@ public class JiraSyncService {
         .components(issueDto.getComponents())
         .storyPoints(issueDto.getStoryPoints())
         .startDate(issueDto.getStartDate())
+        .endDate(issueDto.getEndDate())
         .sprint(issueDto.getSprint())
         .build();
   }
@@ -97,6 +98,7 @@ public class JiraSyncService {
         issueDto.getComponents(),
         issueDto.getStoryPoints(),
         issueDto.getStartDate(),
+        issueDto.getEndDate(),
         issueDto.getSprint()
     );
   }

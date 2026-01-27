@@ -1,5 +1,7 @@
 package kr.hvy.blog.modules.jira.domain.repository;
 
+import java.time.LocalDate;
+import java.util.Map;
 import java.util.Set;
 import kr.hvy.blog.modules.jira.domain.entity.JiraIssue;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -58,4 +60,12 @@ public interface JiraIssueRepository extends JpaRepository<JiraIssue, Long> {
      */
     @Query("SELECT i.issueKey FROM JiraIssue i WHERE i.endDate IS NOT NULL")
     Set<String> findCompletedIssueKeys();
+
+    /**
+     * 주어진 이슈 키들 중 endDate가 있는 이슈들의 endDate 조회
+     * @param issueKeys 조회할 이슈 키 목록
+     * @return 이슈 키와 endDate 쌍의 리스트 (Object[0]=issueKey, Object[1]=endDate)
+     */
+    @Query("SELECT i.issueKey, i.endDate FROM JiraIssue i WHERE i.issueKey IN :issueKeys AND i.endDate IS NOT NULL")
+    List<Object[]> findEndDatesByIssueKeys(@Param("issueKeys") Set<String> issueKeys);
 }

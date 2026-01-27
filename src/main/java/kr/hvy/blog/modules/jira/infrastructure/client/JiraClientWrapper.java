@@ -10,9 +10,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import kr.hvy.blog.modules.jira.application.dto.IssueDto;
 import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 
 import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraChangelogPageResponse;
 import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraChangelogResponse.ChangelogHistoryDto;
@@ -157,6 +160,117 @@ public class JiraClientWrapper {
     } catch (Exception e) {
       log.error("Jira에서 cursor-based 이슈 조회 중 오류가 발생했습니다: {}", e.getMessage(), e);
       throw new RuntimeException("Jira cursor-based 이슈 조회 실패", e);
+    }
+  }
+
+  /**
+   * 페이지 처리 결과를 담는 클래스
+   */
+  @Data
+  @AllArgsConstructor
+  public static class PageResult {
+    private int pageNumber;
+    private List<IssueDto> issues;
+    private boolean lastPage;
+  }
+
+  /**
+   * 프로젝트의 모든 이슈를 페이지 단위로 스트리밍 처리합니다.
+   * 메모리 효율을 위해 각 페이지 처리 후 즉시 Consumer에 전달하여 GC 가능하게 합니다.
+   *
+   * @param pageConsumer 페이지 처리 Consumer
+   */
+  public void streamAllIssuesFromProject(Consumer<PageResult> pageConsumer) {
+    try {
+      String jql = String.format("project = %s ORDER BY updated DESC", jiraProperties.getProjectKey());
+      int pageSize = 100;
+      int maxPages = 10000;
+
+      String nextPageToken = null;
+      int pageCount = 0;
+      Set<String> seenTokens = new HashSet<>();
+
+      log.info("프로젝트 {}에서 스트리밍 방식으로 이슈를 조회합니다. (페이지 크기: {})",
+          jiraProperties.getProjectKey(), pageSize);
+
+      do {
+        pageCount++;
+        if (pageCount > maxPages) {
+          log.warn("최대 페이지 수({})에 도달했습니다.", maxPages);
+          break;
+        }
+
+        // 중복 토큰 체크
+        if (nextPageToken != null && seenTokens.contains(nextPageToken)) {
+          log.warn("중복된 nextPageToken이 감지되었습니다. 페이지네이션을 중단합니다.");
+          break;
+        }
+        if (nextPageToken != null) {
+          seenTokens.add(nextPageToken);
+        }
+
+        // 현재 페이지 조회
+        JiraSearchResultResponse searchResult;
+        try {
+          searchResult = fetchNextPageWithCursor(jql, pageSize, nextPageToken);
+        } catch (Exception e) {
+          log.error("페이지 {} 조회 중 API 오류 발생: {}", pageCount, e.getMessage());
+          break;
+        }
+
+        List<JiraIssueResponse> issues = searchResult.getIssues();
+        if (issues == null || issues.isEmpty()) {
+          break;
+        }
+
+        // 현재 페이지의 이슈들을 병렬로 워크로그 처리
+        final int currentPageCount = pageCount;
+        List<CompletableFuture<IssueDto>> futures = issues.stream()
+            .map(issue -> CompletableFuture.supplyAsync(() -> {
+              try {
+                IssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
+                List<WorklogDto> worklogs = getOptimizedWorklogs(issue);
+                if (worklogs != null && !worklogs.isEmpty()) {
+                  issueDto.setWorklogs(worklogs);
+                }
+                return issueDto;
+              } catch (Exception e) {
+                log.error("페이지 {} 이슈 {} 처리 중 오류: {}", currentPageCount, issue.getKey(), e.getMessage());
+                return convertToApplicationDtoWithoutWorklogs(issue);
+              }
+            }, virtualThreadExecutor))
+            .collect(Collectors.toList());
+
+        // 현재 페이지 결과 수집
+        List<IssueDto> pageIssues = new ArrayList<>();
+        for (CompletableFuture<IssueDto> future : futures) {
+          try {
+            pageIssues.add(future.get());
+          } catch (Exception e) {
+            log.error("페이지 {} 결과 수집 중 오류: {}", pageCount, e.getMessage());
+          }
+        }
+
+        // 다음 페이지 토큰 확인
+        nextPageToken = searchResult.getNextPageToken();
+        if (nextPageToken != null && nextPageToken.trim().isEmpty()) {
+          nextPageToken = null;
+        }
+
+        boolean isLastPage = nextPageToken == null;
+
+        // Consumer에 페이지 결과 전달 (처리 후 메모리 해제 가능)
+        pageConsumer.accept(new PageResult(pageCount, pageIssues, isLastPage));
+
+        log.debug("페이지 {} 스트리밍 완료: {}개 이슈", pageCount, pageIssues.size());
+
+      } while (nextPageToken != null);
+
+      log.info("프로젝트 {} 스트리밍 조회 완료. (총 {}페이지)", jiraProperties.getProjectKey(), pageCount);
+
+    } catch (Exception e) {
+      log.error("Jira 스트리밍 조회 중 오류가 발생했습니다: {}", e.getMessage(), e);
+      throw new RuntimeException("Jira 스트리밍 조회 실패", e);
     }
   }
 

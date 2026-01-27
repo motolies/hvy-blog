@@ -2,7 +2,9 @@ package kr.hvy.blog.modules.jira.application.service;
 
 import com.google.common.collect.Lists;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -13,6 +15,7 @@ import kr.hvy.blog.modules.admin.application.service.CommonCodePublicService;
 import kr.hvy.blog.modules.jira.application.dto.IssueDto;
 import kr.hvy.blog.modules.jira.domain.repository.JiraIssueRepository;
 import kr.hvy.blog.modules.jira.infrastructure.client.JiraClientWrapper;
+import kr.hvy.blog.modules.jira.infrastructure.client.JiraClientWrapper.PageResult;
 import kr.hvy.common.infrastructure.redis.lock.DistributedLock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,12 +44,13 @@ public class JiraBatchService {
 
   /**
    * 프로젝트의 모든 이슈와 워크로그를 동기화합니다. DDD 방식으로 이슈 애그리게이트를 통해 워크로그를 함께 처리합니다.
+   * 스트리밍 방식으로 페이지 단위 처리하여 메모리 효율을 높입니다.
    * endDate가 설정된 완료된 이슈는 동기화 대상에서 제외됩니다.
    */
   @Async
   @DistributedLock(key = "JIRA_SYNC", leaseTime = 600)
   public void syncAllIssuesAndWorklogs() {
-    log.info("Jira 이슈 및 워크로그 동기화를 시작합니다.");
+    log.info("Jira 이슈 및 워크로그 동기화를 시작합니다. (스트리밍 방식)");
 
     try {
       // Done 상태 목록 조회 (JIRA_STATUS 공통코드에서 attribute2Value='Y'인 상태)
@@ -57,25 +61,116 @@ public class JiraBatchService {
       Set<String> completedIssueKeys = jiraIssueRepository.findCompletedIssueKeys();
       log.info("이미 완료된 이슈 수: {}개", completedIssueKeys.size());
 
-      List<IssueDto> allIssues = jiraClientWrapper.getAllIssuesFromProject();
+      // 동기화 통계
+      AtomicInteger totalSynced = new AtomicInteger(0);
+      AtomicInteger totalSkipped = new AtomicInteger(0);
+      AtomicInteger totalWorklogs = new AtomicInteger(0);
 
-      // 완료된 이슈 제외
-      List<IssueDto> issuesToSync = allIssues.stream()
-          .filter(issue -> !completedIssueKeys.contains(issue.getIssueKey()))
-          .collect(Collectors.toList());
+      // 스트리밍 방식으로 페이지 단위 처리 (메모리 효율 향상)
+      jiraClientWrapper.streamAllIssuesFromProject(pageResult -> {
+        // 완료된 이슈 제외
+        List<IssueDto> issuesToSync = pageResult.getIssues().stream()
+            .filter(issue -> !completedIssueKeys.contains(issue.getIssueKey()))
+            .collect(Collectors.toList());
 
-      log.info("{}개 이슈 중 {}개를 동기화 대상으로 필터링했습니다 (완료된 이슈 {}개 제외).",
-          allIssues.size(), issuesToSync.size(), allIssues.size() - issuesToSync.size());
-      log.info("총 {}개의 워크로그를 DDD 방식 배치 동기화 시작합니다.",
-          issuesToSync.stream().mapToInt(issue -> issue.getWorklogs() != null ? issue.getWorklogs().size() : 0).sum());
+        int skipped = pageResult.getIssues().size() - issuesToSync.size();
+        totalSkipped.addAndGet(skipped);
 
-      // DDD 방식으로 배치 처리 (doneStatuses 전달)
-      syncIssuesWithWorklogsBatch(issuesToSync, doneStatuses);
+        if (issuesToSync.isEmpty()) {
+          log.debug("페이지 {}: 동기화 대상 없음 ({}개 스킵)", pageResult.getPageNumber(), skipped);
+          return;
+        }
+
+        // 페이지 단위 배치 처리 (DB 기반 changelog 필터링 적용)
+        int worklogCount = syncPageWithChangelogOptimization(issuesToSync, doneStatuses);
+
+        totalSynced.addAndGet(issuesToSync.size());
+        totalWorklogs.addAndGet(worklogCount);
+
+        log.info("페이지 {} 처리 완료: {}개 동기화, {}개 스킵, {}개 워크로그",
+            pageResult.getPageNumber(), issuesToSync.size(), skipped, worklogCount);
+      });
+
+      log.info("Jira 동기화 완료. 총 {}개 이슈, {}개 워크로그 처리 ({}개 스킵)",
+          totalSynced.get(), totalWorklogs.get(), totalSkipped.get());
 
     } catch (Exception e) {
       log.error("Jira 동기화 중 오류가 발생했습니다: {}", e.getMessage(), e);
       throw new RuntimeException("Jira 동기화 실패", e);
     }
+  }
+
+  /**
+   * 페이지 단위로 이슈를 동기화합니다.
+   * DB에서 endDate를 조회하여 changelog API 호출을 최소화합니다.
+   *
+   * @param issues       동기화할 이슈 목록
+   * @param doneStatuses Done 상태 목록
+   * @return 처리된 워크로그 수
+   */
+  private int syncPageWithChangelogOptimization(List<IssueDto> issues, Set<String> doneStatuses) {
+    // 현재 페이지 이슈 키 목록
+    Set<String> issueKeys = issues.stream()
+        .map(IssueDto::getIssueKey)
+        .collect(Collectors.toSet());
+
+    // DB에서 endDate가 있는 이슈들 조회 (Map으로 변환)
+    Map<String, LocalDate> existingEndDates = new HashMap<>();
+    List<Object[]> endDateResults = jiraIssueRepository.findEndDatesByIssueKeys(issueKeys);
+    for (Object[] result : endDateResults) {
+      existingEndDates.put((String) result[0], (LocalDate) result[1]);
+    }
+
+    log.debug("페이지 {}개 이슈 중 DB에 endDate 있는 이슈: {}개",
+        issues.size(), existingEndDates.size());
+
+    AtomicInteger worklogCount = new AtomicInteger(0);
+    AtomicInteger changelogApiCalls = new AtomicInteger(0);
+
+    // 병렬 처리
+    List<CompletableFuture<Void>> futures = issues.stream()
+        .map(issueDto -> CompletableFuture.runAsync(() -> {
+          try {
+            // Done 상태이고 DB에도 Jira에도 endDate가 없는 경우에만 changelog API 호출
+            if (doneStatuses.contains(issueDto.getStatus()) && issueDto.getEndDate() == null) {
+              // DB에서 endDate 확인
+              LocalDate existingEndDate = existingEndDates.get(issueDto.getIssueKey());
+              if (existingEndDate != null) {
+                // DB에 이미 있으면 API 호출 없이 사용
+                issueDto.setEndDate(existingEndDate);
+                log.debug("이슈 {} endDate DB에서 조회: {}", issueDto.getIssueKey(), existingEndDate);
+              } else {
+                // DB에도 없으면 changelog API 호출
+                LocalDate endDate = jiraClientWrapper.getEndDateFromChangelog(issueDto.getIssueKey(), doneStatuses);
+                issueDto.setEndDate(endDate);
+                changelogApiCalls.incrementAndGet();
+                if (endDate != null) {
+                  log.debug("이슈 {} endDate changelog에서 조회: {}", issueDto.getIssueKey(), endDate);
+                }
+              }
+            }
+
+            // DDD 방식 동기화
+            jiraSyncService.syncIssueWithWorklogsDDD(issueDto);
+
+            int wc = issueDto.getWorklogs() != null ? issueDto.getWorklogs().size() : 0;
+            worklogCount.addAndGet(wc);
+
+          } catch (Exception e) {
+            log.error("이슈 {} 동기화 중 오류: {}", issueDto.getIssueKey(), e.getMessage(), e);
+          }
+        }, virtualThreadExecutor))
+        .toList();
+
+    // 모든 작업 완료 대기
+    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+    if (changelogApiCalls.get() > 0) {
+      log.debug("changelog API 호출 수: {}개 (DB 조회로 {}개 절약)",
+          changelogApiCalls.get(), existingEndDates.size());
+    }
+
+    return worklogCount.get();
   }
 
   /**

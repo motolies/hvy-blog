@@ -14,6 +14,9 @@ import java.util.stream.Collectors;
 import kr.hvy.blog.modules.jira.application.dto.IssueDto;
 import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
 
+import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraChangelogPageResponse;
+import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraChangelogResponse.ChangelogHistoryDto;
+import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraChangelogResponse.ChangelogItemDto;
 import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraIssueResponse;
 import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraSearchResultResponse;
 import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraWorklogResponse;
@@ -383,7 +386,7 @@ public class JiraClientWrapper {
 
   /**
    * 이슈의 changelog를 조회하여 Done 상태로 변경된 가장 최근 날짜를 반환합니다.
-   * changelog의 histories를 시간 역순으로 정렬하여 Done 상태로 변경된 첫 번째 날짜를 찾습니다.
+   * 전용 changelog API를 사용하여 페이징을 지원하고, 마지막 페이지부터 역순으로 조회합니다.
    *
    * @param issueKey     이슈 키
    * @param doneStatuses Done 상태로 간주되는 상태명 Set
@@ -391,25 +394,57 @@ public class JiraClientWrapper {
    */
   public LocalDate getEndDateFromChangelog(String issueKey, Set<String> doneStatuses) {
     try {
-      String endpoint = String.format("/rest/api/3/issue/%s?expand=changelog", issueKey);
+      String baseEndpoint = String.format("/rest/api/3/issue/%s/changelog", issueKey);
+      int maxResults = 100;
 
-      JiraIssueResponse response = jiraRestApi.get(endpoint, null, JiraIssueResponse.class);
+      // 1. 먼저 total 개수 확인
+      MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+      params.add("maxResults", "0");
+      JiraChangelogPageResponse firstPage = jiraRestApi.get(baseEndpoint, params, JiraChangelogPageResponse.class);
 
-      if (response.getChangelog() == null || response.getChangelog().getHistories() == null) {
+      int total = firstPage.getTotal() != null ? firstPage.getTotal() : 0;
+      if (total == 0) {
         log.debug("이슈 {} changelog가 없습니다.", issueKey);
         return null;
       }
 
-      // 시간 역순으로 정렬하여 가장 최근의 Done 상태 변경 날짜를 찾음
-      return response.getChangelog().getHistories().stream()
-          .filter(history -> history.getCreated() != null && history.getItems() != null)
-          .sorted((h1, h2) -> h2.getCreated().compareTo(h1.getCreated()))
-          .flatMap(history -> history.getItems().stream()
-              .filter(item -> "status".equals(item.getField()))
-              .filter(item -> doneStatuses.contains(item.getToString()))
-              .map(item -> history.getCreated().toLocalDate()))
-          .findFirst()
-          .orElse(null);
+      log.debug("이슈 {} changelog 총 {}개 이력 확인", issueKey, total);
+
+      // 2. 마지막 페이지부터 역순으로 조회 (최신 이력 우선)
+      int startAt = Math.max(0, total - maxResults);
+
+      while (startAt >= 0) {
+        params = new LinkedMultiValueMap<>();
+        params.add("startAt", String.valueOf(startAt));
+        params.add("maxResults", String.valueOf(maxResults));
+
+        JiraChangelogPageResponse page = jiraRestApi.get(baseEndpoint, params, JiraChangelogPageResponse.class);
+
+        if (page.getValues() == null || page.getValues().isEmpty()) {
+          startAt -= maxResults;
+          continue;
+        }
+
+        // 페이지 내에서도 최신 것부터 확인 (역순 정렬)
+        List<ChangelogHistoryDto> histories = new ArrayList<>(page.getValues());
+        histories.sort((h1, h2) -> h2.getCreated().compareTo(h1.getCreated()));
+
+        for (ChangelogHistoryDto history : histories) {
+          if (history.getItems() == null) continue;
+          for (ChangelogItemDto item : history.getItems()) {
+            if ("status".equals(item.getField()) && doneStatuses.contains(item.getToString())) {
+              log.debug("이슈 {} Done 상태 변경일 발견: {}", issueKey, history.getCreated().toLocalDate());
+              return history.getCreated().toLocalDate();
+            }
+          }
+        }
+
+        // 이전 페이지로 (더 오래된 이력)
+        startAt -= maxResults;
+      }
+
+      log.debug("이슈 {} changelog에서 Done 상태 변경 이력을 찾지 못했습니다.", issueKey);
+      return null;
 
     } catch (Exception e) {
       log.warn("이슈 {} changelog 조회 중 오류 발생: {}", issueKey, e.getMessage());

@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.log.application.dto;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import kr.hvy.common.application.domain.dto.paging.PageRequest;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -24,7 +24,7 @@ public class ApiLogSearchRequest extends PageRequest {
   private String requestParam;
   private String requestBody;
   private String responseStatus;
-  private LocalDateTime createdAtFrom;
-  private LocalDateTime createdAtTo;
+  private LocalDate createdAtFrom;
+  private LocalDate createdAtTo;
 
 }

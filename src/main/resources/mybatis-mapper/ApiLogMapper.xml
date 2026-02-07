@@ -53,7 +53,7 @@
                 AND createdAt &gt;= #{createdAtFrom}
             </if>
             <if test="createdAtTo != null">
-                AND createdAt &lt;= #{createdAtTo}
+                AND createdAt &lt; DATE_ADD(#{createdAtTo}, INTERVAL 1 DAY)
             </if>
         </where>
         <!-- PageInterceptor가 자동으로 ORDER BY와 LIMIT 추가 -->

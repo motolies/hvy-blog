@@ -11,13 +11,15 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
-import jakarta.persistence.Table;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
+import kr.hvy.blog.modules.jira.domain.WorklogInfo;
+import org.apache.commons.lang3.ObjectUtils;
+import org.springframework.util.CollectionUtils;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -30,7 +32,6 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
  * Jira 이슈 엔티티
  */
 @Entity
-@Table(name = "jira_issue")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
@@ -42,40 +43,38 @@ public class JiraIssue {
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
-  @Column(name = "jiraIssueId", nullable = false)
+  @Column(nullable = false)
   private Long jiraIssueId;
 
-  @Column(name = "issueKey", unique = true, nullable = false, length = 32)
+  @Column(unique = true, nullable = false, length = 32)
   private String issueKey;
 
-  @Column(name = "issueLink", nullable = false, length = 512)
+  @Column(nullable = false, length = 512)
   private String issueLink;
 
-  @Column(name = "summary", nullable = false, length = 512)
+  @Column(nullable = false, length = 512)
   private String summary;
 
-  @Column(name = "issueType", length = 64)
+  @Column(length = 64)
   private String issueType;
 
-  @Column(name = "status", length = 64)
+  @Column(length = 64)
   private String status;
 
-  @Column(name = "assignee", length = 128)
+  @Column(length = 128)
   private String assignee;
 
-  @Column(name = "components", length = 512)
+  @Column(length = 512)
   private String components;
 
-  @Column(name = "storyPoints", precision = 5, scale = 2)
+  @Column(precision = 5, scale = 2)
   private BigDecimal storyPoints;
 
-  @Column(name = "startDate")
   private LocalDate startDate;
 
-  @Column(name = "endDate")
   private LocalDate endDate;
 
-  @Column(name = "sprint", length = 32)
+  @Column(length = 32)
   private String sprint;
 
   @Embedded
@@ -119,13 +118,13 @@ public class JiraIssue {
    * 이슈가 완료 상태인지 확인 (endDate가 설정되어 있으면 완료)
    */
   public boolean isCompleted() {
-    return this.endDate != null;
+    return ObjectUtils.isNotEmpty(this.endDate);
   }
 
   /**
    * 워크로그 추가 (DDD)
    */
-  public void addWorklog(WorklogDto worklogDto) {
+  public void addWorklog(WorklogInfo worklogDto) {
     JiraWorklog worklog = JiraWorklog.builder()
         .jiraIssue(this)
         .issueKey(worklogDto.getIssueKey())
@@ -157,7 +156,7 @@ public class JiraIssue {
   /**
    * 워크로그 업데이트 (DDD)
    */
-  public boolean updateWorklog(WorklogDto worklogDto) {
+  public boolean updateWorklog(WorklogInfo worklogDto) {
     Optional<JiraWorklog> existingWorklog = findWorklogByWorklogId(worklogDto.getWorklogId());
 
     if (existingWorklog.isPresent()) {
@@ -179,7 +178,7 @@ public class JiraIssue {
   /**
    * 워크로그 추가 또는 업데이트 (DDD)
    */
-  public void addOrUpdateWorklog(WorklogDto worklogDto) {
+  public void addOrUpdateWorklog(WorklogInfo worklogDto) {
     boolean updated = updateWorklog(worklogDto);
     if (!updated) {
       addWorklog(worklogDto);
@@ -219,12 +218,12 @@ public class JiraIssue {
    * 모든 워크로그 동기화 (DDD)
    * 기존 워크로그는 업데이트, 새로운 워크로그는 추가
    */
-  public void syncWorklogs(List<WorklogDto> worklogDtos) {
-    if (worklogDtos == null || worklogDtos.isEmpty()) {
+  public void syncWorklogs(List<WorklogInfo> worklogDtos) {
+    if (CollectionUtils.isEmpty(worklogDtos)) {
       return;
     }
 
-    for (WorklogDto worklogDto : worklogDtos) {
+    for (WorklogInfo worklogDto : worklogDtos) {
       addOrUpdateWorklog(worklogDto);
     }
   }

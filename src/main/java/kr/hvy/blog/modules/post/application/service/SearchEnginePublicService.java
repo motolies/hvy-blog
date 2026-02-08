@@ -2,8 +2,8 @@ package kr.hvy.blog.modules.post.application.service;
 
 import java.util.List;
 import kr.hvy.blog.modules.common.cache.domain.code.CacheConstant;
-import kr.hvy.blog.modules.post.application.dto.PostSearchEngineResponse;
-import kr.hvy.blog.modules.post.mapper.PostSearchEngineDtoMapper;
+import kr.hvy.blog.modules.post.application.dto.SearchEngineResponse;
+import kr.hvy.blog.modules.post.mapper.SearchEngineDtoMapper;
 import kr.hvy.blog.modules.post.repository.SearchEngineRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,15 +15,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional
 @RequiredArgsConstructor
-public class PostSearchEnginePublicService {
+public class SearchEnginePublicService {
 
   private final SearchEngineRepository searchEngineRepository;
-  private final PostSearchEngineDtoMapper postSearchEngineDtoMapper;
+  private final SearchEngineDtoMapper searchEngineDtoMapper;
 
   @Cacheable(cacheNames = CacheConstant.SEARCH_ENGINE)
-  public List<PostSearchEngineResponse> findAll() {
+  public List<SearchEngineResponse> findAll() {
     return searchEngineRepository.findAll().stream()
-        .map(postSearchEngineDtoMapper::toResponse)
+        .map(searchEngineDtoMapper::toResponse)
         .toList();
   }
 

@@ -1,13 +1,10 @@
-package kr.hvy.blog.modules.jira.domain.repository;
+package kr.hvy.blog.modules.jira.repository;
 
-import java.time.LocalDate;
-import java.util.Map;
 import java.util.Set;
 import kr.hvy.blog.modules.jira.domain.entity.JiraIssue;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
@@ -15,7 +12,6 @@ import java.util.Optional;
 /**
  * Jira 이슈 리포지토리
  */
-@Repository
 public interface JiraIssueRepository extends JpaRepository<JiraIssue, Long> {
 
     /**

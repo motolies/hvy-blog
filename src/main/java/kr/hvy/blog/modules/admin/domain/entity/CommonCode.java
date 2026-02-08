@@ -17,8 +17,8 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.util.Objects;
-import kr.hvy.blog.modules.admin.application.dto.CommonCodeUpdate;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
+import org.apache.commons.lang3.ObjectUtils;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -30,8 +30,7 @@ import lombok.With;
  * 공통코드 엔티티 실제 코드값을 저장하는 엔티티
  */
 @Entity
-@Table(name = "common_code",
-    uniqueConstraints = @UniqueConstraint(name = "uk_common_code_class_code", columnNames = {"classId", "code"}))
+@Table(uniqueConstraints = @UniqueConstraint(name = "uk_common_code_class_code", columnNames = {"classId", "code"}))
 @Getter
 @Setter
 @Builder
@@ -140,14 +139,14 @@ public class CommonCode {
    */
   @PrePersist
   private void prePersist() {
-    if (this.created == null) {
+    if (ObjectUtils.isEmpty(this.created)) {
       this.created = EventLogEntity.defaultValues();
     }
 
-    if (this.sort == null) {
+    if (ObjectUtils.isEmpty(this.sort)) {
       this.sort = 0;
     }
-    if (this.isActive == null) {
+    if (ObjectUtils.isEmpty(this.isActive)) {
       this.isActive = true;
     }
     validateHierarchy();
@@ -166,14 +165,14 @@ public class CommonCode {
    * 하위 코드 존재 여부 판단 (계산된 필드)
    */
   public boolean hasChildren() {
-    return this.childClass != null;
+    return ObjectUtils.isNotEmpty(this.childClass);
   }
 
   /**
    * 순환 참조 방지 검증
    */
   private void validateHierarchy() {
-    if (this.commonClass != null && this.childClass != null &&
+    if (ObjectUtils.isNotEmpty(this.commonClass) && ObjectUtils.isNotEmpty(this.childClass) &&
         Objects.equals(this.commonClass.getId(), this.childClass.getId())) {
       throw new IllegalArgumentException("Self reference not allowed: class ID " + this.commonClass.getId());
     }
@@ -182,21 +181,24 @@ public class CommonCode {
   /**
    * 업데이트 메서드 Note: commonClass와 childClass는 Service 레이어에서 설정
    */
-  public void update(CommonCodeUpdate updateDto) {
+  public void update(String code, String name, String description,
+      String attribute1Value, String attribute2Value, String attribute3Value,
+      String attribute4Value, String attribute5Value,
+      Integer sort, Boolean isActive) {
     // code 필드도 업데이트 가능 (Surrogate Key 패턴)
-    if (updateDto.getCode() != null && !updateDto.getCode().trim().isEmpty()) {
-      this.code = updateDto.getCode();
+    if (ObjectUtils.isNotEmpty(code) && !code.trim().isEmpty()) {
+      this.code = code;
     }
-    this.name = updateDto.getName();
-    this.description = updateDto.getDescription();
-    this.attribute1Value = updateDto.getAttribute1Value();
-    this.attribute2Value = updateDto.getAttribute2Value();
-    this.attribute3Value = updateDto.getAttribute3Value();
-    this.attribute4Value = updateDto.getAttribute4Value();
-    this.attribute5Value = updateDto.getAttribute5Value();
+    this.name = name;
+    this.description = description;
+    this.attribute1Value = attribute1Value;
+    this.attribute2Value = attribute2Value;
+    this.attribute3Value = attribute3Value;
+    this.attribute4Value = attribute4Value;
+    this.attribute5Value = attribute5Value;
 
-    this.sort = updateDto.getSort();
-    this.isActive = updateDto.getIsActive();
+    this.sort = sort;
+    this.isActive = isActive;
     // childClass는 Service에서 별도로 설정
   }
 }

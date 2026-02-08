@@ -3,9 +3,10 @@ package kr.hvy.blog.modules.admin.application;
 import kr.hvy.blog.modules.admin.application.dto.*;
 import kr.hvy.blog.modules.admin.application.service.CommonCodeService;
 import kr.hvy.blog.modules.admin.repository.CommonCodeRepository;
+import kr.hvy.common.application.domain.dto.DeleteResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -31,49 +32,46 @@ public class AdminCommonCodeController {
    * 클래스 생성
    */
   @PostMapping("/class")
-  public ResponseEntity<?> createClass(@Valid @RequestBody CommonClassCreate createDto) {
+  @ResponseStatus(HttpStatus.CREATED)
+  public CommonClassResponse createClass(@Valid @RequestBody CommonClassCreate createDto) {
     log.info("Creating CommonClass: {}", createDto.getCode());
-    CommonClassResponse response = commonCodeService.createClass(createDto);
-    return ResponseEntity.ok(response);
+    return commonCodeService.createClass(createDto);
   }
 
   /**
    * 클래스 수정
    */
   @PutMapping("/class/{classCode}")
-  public ResponseEntity<?> updateClass(
+  public CommonClassResponse updateClass(
       @PathVariable String classCode,
       @Valid @RequestBody CommonClassUpdate updateDto) {
     log.info("Updating CommonClass: {}", classCode);
-    CommonClassResponse response = commonCodeService.updateClass(classCode, updateDto);
-    return ResponseEntity.ok(response);
+    return commonCodeService.updateClass(classCode, updateDto);
   }
 
   /**
    * 클래스 삭제
    */
   @DeleteMapping("/class/{classCode}")
-  public ResponseEntity<?> deleteClass(@PathVariable String classCode) {
+  public DeleteResponse<Long> deleteClass(@PathVariable String classCode) {
     log.info("Deleting CommonClass: {}", classCode);
-    return ResponseEntity.ok(commonCodeService.deleteClass(classCode));
+    return commonCodeService.deleteClass(classCode);
   }
 
   /**
    * 클래스 상세 조회 (관리자용)
    */
   @GetMapping("/class/{classCode}")
-  public ResponseEntity<?> getClass(@PathVariable String classCode) {
-    CommonClassResponse response = commonCodeService.getClass(classCode);
-    return ResponseEntity.ok(response);
+  public CommonClassResponse getClass(@PathVariable String classCode) {
+    return commonCodeService.getClass(classCode);
   }
 
   /**
    * 모든 클래스 조회 (관리자용)
    */
   @GetMapping("/class")
-  public ResponseEntity<?> getAllClasses() {
-    List<CommonClassResponse> response = commonCodeService.getAllClasses();
-    return ResponseEntity.ok(response);
+  public List<CommonClassResponse> getAllClasses() {
+    return commonCodeService.getAllClasses();
   }
 
   // ========== CommonCode 관리 API ==========
@@ -82,46 +80,45 @@ public class AdminCommonCodeController {
    * 코드 생성
    */
   @PostMapping("/code")
-  public ResponseEntity<?> createCode(@Valid @RequestBody CommonCodeCreate createDto) {
+  @ResponseStatus(HttpStatus.CREATED)
+  public CommonCodeResponse createCode(@Valid @RequestBody CommonCodeCreate createDto) {
     log.info("Creating CommonCode: {}.{}", createDto.getClassCode(), createDto.getCode());
-    CommonCodeResponse response = commonCodeService.createCode(createDto);
-    return ResponseEntity.ok(response);
+    return commonCodeService.createCode(createDto);
   }
 
   /**
    * 코드 수정
    */
   @PutMapping("/code/{classCode}/{code}")
-  public ResponseEntity<?> updateCode(
+  public CommonCodeResponse updateCode(
       @PathVariable String classCode,
       @PathVariable String code,
       @Valid @RequestBody CommonCodeUpdate updateDto) {
     log.info("Updating CommonCode: {}.{}", classCode, code);
-    CommonCodeResponse response = commonCodeService.updateCode(classCode, code, updateDto);
-    return ResponseEntity.ok(response);
+    return commonCodeService.updateCode(classCode, code, updateDto);
   }
 
   /**
    * 코드 삭제
    */
   @DeleteMapping("/code/{classCode}/{code}")
-  public ResponseEntity<?> deleteCode(
+  public DeleteResponse<Long> deleteCode(
       @PathVariable String classCode,
       @PathVariable String code) {
     log.info("Deleting CommonCode: {}.{}", classCode, code);
-    return ResponseEntity.ok(commonCodeService.deleteCode(classCode, code));
+    return commonCodeService.deleteCode(classCode, code);
   }
 
   /**
    * 배치 코드 생성
    */
   @PostMapping("/class/{classCode}/codes/batch")
-  public ResponseEntity<?> batchCreateCodes(
+  @ResponseStatus(HttpStatus.CREATED)
+  public List<CommonCodeResponse> batchCreateCodes(
       @PathVariable String classCode,
       @Valid @RequestBody List<CommonCodeCreate> createDtos) {
     log.info("Batch creating CommonCodes for class: {}, count: {}", classCode, createDtos.size());
-    List<CommonCodeResponse> response = commonCodeService.batchCreateCodes(classCode, createDtos);
-    return ResponseEntity.ok(response);
+    return commonCodeService.batchCreateCodes(classCode, createDtos);
   }
 
   // ========== 유틸리티 API ==========
@@ -130,12 +127,12 @@ public class AdminCommonCodeController {
    * 클래스 코드 중복 확인
    */
   @GetMapping("/class/{classCode}/exists")
-  public ResponseEntity<?> checkClassExists(@PathVariable String classCode) {
+  public Map<String, Boolean> checkClassExists(@PathVariable String classCode) {
     try {
       commonCodeService.getClass(classCode);
-      return ResponseEntity.ok(Map.of("exists", true));
+      return Map.of("exists", true);
     } catch (Exception e) {
-      return ResponseEntity.ok(Map.of("exists", false));
+      return Map.of("exists", false);
     }
   }
 
@@ -143,12 +140,11 @@ public class AdminCommonCodeController {
    * 클래스 내 코드명 중복 확인
    */
   @GetMapping("/code/{classCode}/{code}/exists")
-  public ResponseEntity<?> checkCodeExists(
+  public Map<String, Boolean> checkCodeExists(
       @PathVariable String classCode,
       @PathVariable String code) {
-    Map<String, Boolean> result = Map.of("exists",
+    return Map.of("exists",
         commonCodeRepository.existsByCommonClass_CodeAndCode(classCode, code));
-    return ResponseEntity.ok(result);
   }
 
   /**
@@ -156,9 +152,8 @@ public class AdminCommonCodeController {
    * CLASS → CODE → CLASS → CODE 재귀 구조
    */
   @GetMapping("/tree")
-  public ResponseEntity<?> getTreeStructure() {
+  public List<CommonCodeTreeNodeResponse> getTreeStructure() {
     log.info("Fetching common code tree structure");
-    List<CommonCodeTreeNodeResponse> treeStructure = commonCodeService.getTreeStructure();
-    return ResponseEntity.ok(treeStructure);
+    return commonCodeService.getTreeStructure();
   }
 }

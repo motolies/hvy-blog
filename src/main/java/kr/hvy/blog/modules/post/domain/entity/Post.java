@@ -20,13 +20,12 @@ import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreRemove;
 import jakarta.persistence.PreUpdate;
-import jakarta.persistence.Table;
+
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
 import kr.hvy.blog.modules.category.domain.entity.Category;
 import kr.hvy.blog.modules.file.domain.entity.File;
-import kr.hvy.blog.modules.post.application.dto.PostUpdate;
 import kr.hvy.blog.modules.tag.domain.Tag;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import kr.hvy.common.core.security.SecurityUtils;
@@ -39,7 +38,6 @@ import lombok.With;
 import org.apache.commons.lang3.StringUtils;
 
 @Entity
-@Table(name = "post")
 @Getter
 @Setter
 @Builder
@@ -124,11 +122,11 @@ public class Post {
    * 비즈니스 로직
    *****************************************************************************/
 
-  public void update(PostUpdate update, Category category) {
-    this.subject = update.getSubject();
-    this.body = update.getBody();
-    this.publicAccess = update.isPublic();
-    this.mainPage = update.isMain();
+  public void update(String subject, String body, boolean publicAccess, boolean mainPage, Category category) {
+    this.subject = subject;
+    this.body = body;
+    this.publicAccess = publicAccess;
+    this.mainPage = mainPage;
     this.updated = EventLogEntity.builder()
         .at(LocalDateTime.now())
         .by(SecurityUtils.getUsername())

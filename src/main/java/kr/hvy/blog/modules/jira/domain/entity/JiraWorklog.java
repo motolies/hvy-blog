@@ -12,7 +12,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
@@ -28,7 +28,6 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
  * Jira 워크로그 엔티티
  */
 @Entity
-@Table(name = "jira_worklog")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
@@ -45,40 +44,40 @@ public class JiraWorklog {
   @Setter
   private JiraIssue jiraIssue;
 
-  @Column(name = "issueKey", nullable = false, length = 32)
+  @Column(nullable = false, length = 32)
   private String issueKey;
 
-  @Column(name = "issueType", length = 64)
+  @Column(length = 64)
   private String issueType;
 
-  @Column(name = "status", length = 64)
+  @Column(length = 64)
   private String status;
 
-  @Column(name = "issueLink", nullable = false, length = 512)
+  @Column(nullable = false, length = 512)
   private String issueLink;
 
-  @Column(name = "summary", nullable = false, length = 512)
+  @Column(nullable = false, length = 512)
   private String summary;
 
-  @Column(name = "author", nullable = false, length = 128)
+  @Column(nullable = false, length = 128)
   private String author;
 
-  @Column(name = "components", length = 512)
+  @Column(length = 512)
   private String components;
 
-  @Column(name = "timeSpent", nullable = false, length = 32)
+  @Column(nullable = false, length = 32)
   private String timeSpent;
 
-  @Column(name = "timeHours", nullable = false, precision = 5, scale = 2)
+  @Column(nullable = false, precision = 5, scale = 2)
   private BigDecimal timeHours;
 
-  @Column(name = "comment", columnDefinition = "LONGTEXT")
+  @Column(columnDefinition = "LONGTEXT")
   private String comment;
 
-  @Column(name = "started", nullable = false)
+  @Column(nullable = false)
   private LocalDateTime started;
 
-  @Column(name = "worklogId", unique = true, nullable = false, length = 256)
+  @Column(unique = true, nullable = false, length = 256)
   private String worklogId;
 
   @Embedded

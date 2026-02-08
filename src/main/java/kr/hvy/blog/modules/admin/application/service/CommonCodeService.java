@@ -14,6 +14,8 @@ import kr.hvy.common.application.domain.dto.DeleteResponse;
 import kr.hvy.common.core.exception.DataNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.ObjectUtils;
+import org.springframework.util.CollectionUtils;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Caching;
@@ -74,14 +76,18 @@ public class CommonCodeService {
     CommonClass entity = findClassByCode(classCode);
 
     // code 변경 시 중복 검증
-    if (updateDto.getCode() != null && !updateDto.getCode().trim().isEmpty()
+    if (ObjectUtils.isNotEmpty(updateDto.getCode()) && !updateDto.getCode().trim().isEmpty()
         && !classCode.equals(updateDto.getCode())) {
       if (commonClassRepository.existsByCodeAndIsActiveTrue(updateDto.getCode())) {
         throw new IllegalArgumentException("이미 존재하는 클래스 코드입니다: " + updateDto.getCode());
       }
     }
 
-    entity.update(updateDto);
+    entity.update(
+        updateDto.getCode(), updateDto.getName(), updateDto.getDescription(),
+        updateDto.getAttribute1Name(), updateDto.getAttribute2Name(), updateDto.getAttribute3Name(),
+        updateDto.getAttribute4Name(), updateDto.getAttribute5Name(), updateDto.getIsActive()
+    );
 
     CommonClass savedEntity = commonClassRepository.save(entity);
     entityManager.flush();
@@ -156,14 +162,14 @@ public class CommonCodeService {
 
     // 하위 클래스 존재 확인
     CommonClass childClass = null;
-    if (createDto.getChildClassCode() != null && !createDto.getChildClassCode().trim().isEmpty()) {
+    if (ObjectUtils.isNotEmpty(createDto.getChildClassCode()) && !createDto.getChildClassCode().trim().isEmpty()) {
       childClass = commonClassRepository.findByCodeAndIsActiveTrue(createDto.getChildClassCode())
           .orElseThrow(() -> new DataNotFoundException("하위 클래스를 찾을 수 없습니다: " + createDto.getChildClassCode()));
     }
 
     // 정렬 순서 자동 설정 (지정되지 않은 경우)
     Integer sort = createDto.getSort();
-    if (sort == null || sort == 0) {
+    if (ObjectUtils.isEmpty(sort) || sort == 0) {
       Integer maxSort = commonCodeRepository.findMaxSortByClassCode(createDto.getClassCode());
       sort = maxSort + 1;
     }
@@ -181,7 +187,7 @@ public class CommonCodeService {
         .commonClass(commonClass)  // FK 설정
         .childClass(childClass)     // FK 설정
         .sort(sort)
-        .isActive(createDto.getIsActive() != null ? createDto.getIsActive() : true)
+        .isActive(ObjectUtils.isNotEmpty(createDto.getIsActive()) ? createDto.getIsActive() : true)
         .build();
 
     CommonCode savedEntity = commonCodeRepository.save(entity);
@@ -204,7 +210,7 @@ public class CommonCodeService {
     CommonCode entity = findCodeByClassCodeAndCode(classCode, code);
 
     // code 변경 시 중복 검증
-    if (updateDto.getCode() != null && !updateDto.getCode().trim().isEmpty()
+    if (ObjectUtils.isNotEmpty(updateDto.getCode()) && !updateDto.getCode().trim().isEmpty()
         && !code.equals(updateDto.getCode())) {
       if (commonCodeRepository.existsByCommonClass_CodeAndCodeAndIsActiveTrue(classCode, updateDto.getCode())) {
         throw new IllegalArgumentException(
@@ -214,7 +220,7 @@ public class CommonCodeService {
     }
 
     // 하위 클래스 존재 확인 및 설정
-    if (updateDto.getChildClassCode() != null && !updateDto.getChildClassCode().trim().isEmpty()) {
+    if (ObjectUtils.isNotEmpty(updateDto.getChildClassCode()) && !updateDto.getChildClassCode().trim().isEmpty()) {
       CommonClass childClass = commonClassRepository.findByCodeAndIsActiveTrue(updateDto.getChildClassCode())
           .orElseThrow(() -> new DataNotFoundException("하위 클래스를 찾을 수 없습니다: " + updateDto.getChildClassCode()));
       entity.setChildClass(childClass);
@@ -223,7 +229,12 @@ public class CommonCodeService {
     }
 
     // 엔티티 업데이트 (단순 update, delete + create 불필요)
-    entity.update(updateDto);
+    entity.update(
+        updateDto.getCode(), updateDto.getName(), updateDto.getDescription(),
+        updateDto.getAttribute1Value(), updateDto.getAttribute2Value(), updateDto.getAttribute3Value(),
+        updateDto.getAttribute4Value(), updateDto.getAttribute5Value(),
+        updateDto.getSort(), updateDto.getIsActive()
+    );
     CommonCode savedEntity = commonCodeRepository.save(entity);
     entityManager.flush();
     entityManager.refresh(savedEntity);
@@ -244,7 +255,7 @@ public class CommonCodeService {
     CommonCode entity = findCodeByClassCodeAndCode(classCode, code);
 
     // 하위 코드 참조 확인
-    if (entity.hasChildren() && entity.getChildClass() != null) {
+    if (entity.hasChildren() && ObjectUtils.isNotEmpty(entity.getChildClass())) {
       long childCount = commonCodeRepository.countByCommonClass_CodeAndIsActiveTrue(entity.getChildClass().getCode());
       if (childCount > 0) {
         throw new IllegalArgumentException("하위 코드가 존재하여 삭제할 수 없습니다. 하위 코드 수: " + childCount);
@@ -340,9 +351,9 @@ public class CommonCodeService {
   private Set<String> collectChildClassCodes(List<CommonClass> classes) {
     Set<String> childClassCodes = new HashSet<>();
     for (CommonClass cls : classes) {
-      if (cls.getCodes() != null) {
+      if (ObjectUtils.isNotEmpty(cls.getCodes())) {
         for (CommonCode code : cls.getCodes()) {
-          if (code.getChildClass() != null) {
+          if (ObjectUtils.isNotEmpty(code.getChildClass())) {
             childClassCodes.add(code.getChildClass().getCode());
           }
         }
@@ -376,7 +387,7 @@ public class CommonCodeService {
 
     // 코드 노드들 생성
     List<CommonCodeTreeNodeResponse> codeNodes = new ArrayList<>();
-    if (classData.getCodes() != null && !classData.getCodes().isEmpty()) {
+    if (!CollectionUtils.isEmpty(classData.getCodes())) {
       // 정렬 순서 적용
       List<CommonCode> sortedCodes = classData.getCodes().stream()
           .sorted(Comparator.comparing(CommonCode::getSort, Comparator.nullsLast(Comparator.naturalOrder())))
@@ -385,14 +396,14 @@ public class CommonCodeService {
       for (CommonCode code : sortedCodes) {
         // 새로운 Set을 생성하여 각 코드 브랜치에서 독립적인 추적
         CommonCodeTreeNodeResponse codeNode = buildCodeTreeNode(code, allClasses, new HashSet<>(processedClasses));
-        if (codeNode != null) {
+        if (ObjectUtils.isNotEmpty(codeNode)) {
           codeNodes.add(codeNode);
         }
       }
     }
 
     // CLASS 노드 생성
-    return CommonCodeTreeNodeResponse.fromClass(classResponse, codeNodes.isEmpty() ? null : codeNodes);
+    return CommonCodeTreeNodeResponse.fromClass(classResponse, CollectionUtils.isEmpty(codeNodes) ? null : codeNodes);
   }
 
   /**
@@ -418,7 +429,7 @@ public class CommonCodeService {
           .findFirst()
           .orElse(null);
 
-      if (childClass != null) {
+      if (ObjectUtils.isNotEmpty(childClass)) {
         childClassNode = buildClassTreeNode(childClass, allClasses, processedClasses);
       } else {
         log.warn("하위 클래스를 찾을 수 없음: {}", codeData.getChildClass().getCode());

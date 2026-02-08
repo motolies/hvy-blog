@@ -13,9 +13,10 @@ import kr.hvy.blog.modules.admin.application.dto.CommonClassResponse;
 import kr.hvy.blog.modules.admin.application.dto.CommonCodeResponse;
 import kr.hvy.blog.modules.admin.application.service.CommonCodePublicService;
 import kr.hvy.blog.modules.jira.application.dto.IssueDto;
-import kr.hvy.blog.modules.jira.domain.repository.JiraIssueRepository;
-import kr.hvy.blog.modules.jira.infrastructure.client.JiraClientWrapper;
-import kr.hvy.blog.modules.jira.infrastructure.client.JiraClientWrapper.PageResult;
+import kr.hvy.blog.modules.jira.repository.JiraIssueRepository;
+import kr.hvy.blog.modules.jira.client.JiraClientWrapper;
+import kr.hvy.blog.modules.jira.client.JiraClientWrapper.PageResult;
+import kr.hvy.common.core.exception.RestApiException;
 import kr.hvy.common.infrastructure.redis.lock.DistributedLock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -96,7 +97,7 @@ public class JiraBatchService {
 
     } catch (Exception e) {
       log.error("Jira 동기화 중 오류가 발생했습니다: {}", e.getMessage(), e);
-      throw new RuntimeException("Jira 동기화 실패", e);
+      throw new RestApiException("Jira 동기화 실패", e);
     }
   }
 

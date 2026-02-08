@@ -1,11 +1,14 @@
 package kr.hvy.blog.modules.jira.application.service;
 
+import java.util.List;
 import java.util.Optional;
 import kr.hvy.blog.modules.jira.application.dto.IssueDto;
 import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
+import org.springframework.util.CollectionUtils;
+import kr.hvy.blog.modules.jira.domain.WorklogInfo;
 import kr.hvy.blog.modules.jira.domain.entity.JiraIssue;
-import kr.hvy.blog.modules.jira.domain.repository.JiraIssueRepository;
-import kr.hvy.blog.modules.jira.infrastructure.config.JiraProperties;
+import kr.hvy.blog.modules.jira.repository.JiraIssueRepository;
+import kr.hvy.blog.modules.jira.client.JiraProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,8 +42,9 @@ public class JiraSyncService {
       updateIssueFromJira(jiraIssue, issueDto);
 
       // DDD: 이슈 애그리게이트를 통한 워크로그 동기화
-      if (issueDto.getWorklogs() != null && !issueDto.getWorklogs().isEmpty()) {
-        jiraIssue.syncWorklogs(issueDto.getWorklogs());
+      if (!CollectionUtils.isEmpty(issueDto.getWorklogs())) {
+        List<WorklogInfo> worklogInfos = toWorklogInfoList(issueDto.getWorklogs());
+        jiraIssue.syncWorklogs(worklogInfos);
         log.debug("이슈 {} - {}개 워크로그 동기화됨", issueDto.getIssueKey(),
             issueDto.getWorklogs().size());
       }
@@ -49,9 +53,10 @@ public class JiraSyncService {
       jiraIssue = createIssueFromJira(issueDto);
 
       // DDD: 새 이슈에 워크로그 추가
-      if (issueDto.getWorklogs() != null && !issueDto.getWorklogs().isEmpty()) {
-        for (WorklogDto worklogDto : issueDto.getWorklogs()) {
-          jiraIssue.addWorklog(worklogDto);
+      if (!CollectionUtils.isEmpty(issueDto.getWorklogs())) {
+        List<WorklogInfo> worklogInfos = toWorklogInfoList(issueDto.getWorklogs());
+        for (WorklogInfo worklogInfo : worklogInfos) {
+          jiraIssue.addWorklog(worklogInfo);
         }
         log.debug("신규 이슈 {} - {}개 워크로그 추가됨", issueDto.getIssueKey(),
             issueDto.getWorklogs().size());
@@ -108,6 +113,35 @@ public class JiraSyncService {
    */
   private String buildIssueLink(String issueKey) {
     return String.format("%s/browse/%s", jiraProperties.getUrl(), issueKey);
+  }
+
+  /**
+   * WorklogDto 리스트를 도메인 값 객체 WorklogInfo 리스트로 변환합니다.
+   */
+  private List<WorklogInfo> toWorklogInfoList(List<WorklogDto> worklogDtos) {
+    return worklogDtos.stream()
+        .map(this::toWorklogInfo)
+        .toList();
+  }
+
+  /**
+   * WorklogDto를 도메인 값 객체 WorklogInfo로 변환합니다.
+   */
+  private WorklogInfo toWorklogInfo(WorklogDto dto) {
+    return WorklogInfo.builder()
+        .issueKey(dto.getIssueKey())
+        .issueType(dto.getIssueType())
+        .status(dto.getStatus())
+        .issueLink(dto.getIssueLink())
+        .summary(dto.getSummary())
+        .author(dto.getAuthor())
+        .components(dto.getComponents())
+        .timeSpent(dto.getTimeSpent())
+        .timeHours(dto.getTimeHours())
+        .comment(dto.getComment())
+        .started(dto.getStarted())
+        .worklogId(dto.getWorklogId())
+        .build();
   }
 
 }

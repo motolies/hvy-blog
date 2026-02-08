@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.common.publicip.domain;
 
 import jakarta.persistence.PrePersist;
 import java.sql.Timestamp;
+import org.apache.commons.lang3.ObjectUtils;
 import kr.hvy.blog.modules.common.cache.domain.code.RedisConstant;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -27,7 +28,7 @@ public class RedisPublicIp {
 
   @PrePersist
   public void prePersist() {
-    if (this.created == null) {
+    if (ObjectUtils.isEmpty(this.created)) {
       this.created = new Timestamp(System.currentTimeMillis());
     }
   }

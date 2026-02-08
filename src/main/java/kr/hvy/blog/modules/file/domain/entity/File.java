@@ -20,7 +20,7 @@ import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
+
 import kr.hvy.blog.modules.post.domain.entity.Post;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import lombok.AllArgsConstructor;
@@ -32,7 +32,6 @@ import lombok.With;
 
 @Entity
 @EntityListeners(FileEntityListener.class)
-@Table(name = "`file`")
 @Getter
 @Setter
 @Builder

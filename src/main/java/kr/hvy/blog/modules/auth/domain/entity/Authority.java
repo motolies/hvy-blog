@@ -24,7 +24,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "authority", uniqueConstraints = @UniqueConstraint(name = "uk_authority_name", columnNames = "name"))
+@Table(uniqueConstraints = @UniqueConstraint(name = "uk_authority_name", columnNames = "name"))
 @Getter
 @Builder
 @AllArgsConstructor
@@ -35,7 +35,7 @@ public class Authority {
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
-  @Column(name = "name", length = 50, unique = true)
+  @Column(length = 50, unique = true)
   @Convert(converter = AuthorityNameConverter.class)
   private AuthorityName name;
 

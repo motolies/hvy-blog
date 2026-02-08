@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.jira.infrastructure.client;
+package kr.hvy.blog.modules.jira.client;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -17,18 +17,20 @@ import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
-import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraChangelogPageResponse;
-import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraChangelogResponse.ChangelogHistoryDto;
-import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraChangelogResponse.ChangelogItemDto;
-import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraIssueResponse;
-import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraSearchResultResponse;
-import kr.hvy.blog.modules.jira.infrastructure.client.dto.JiraWorklogResponse;
-import kr.hvy.blog.modules.jira.infrastructure.config.JiraProperties;
+import kr.hvy.blog.modules.jira.client.dto.JiraChangelogPageResponse;
+import kr.hvy.blog.modules.jira.client.dto.JiraChangelogResponse.ChangelogHistoryDto;
+import kr.hvy.blog.modules.jira.client.dto.JiraChangelogResponse.ChangelogItemDto;
+import kr.hvy.blog.modules.jira.client.dto.JiraIssueResponse;
+import kr.hvy.blog.modules.jira.client.dto.JiraSearchResultResponse;
+import kr.hvy.blog.modules.jira.client.dto.JiraWorklogResponse;
+import kr.hvy.common.core.exception.RestApiException;
 import kr.hvy.common.infrastructure.client.rest.RestApi;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.ObjectUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
@@ -77,14 +79,14 @@ public class JiraClientWrapper {
         }
 
         log.debug("페이지 {} 조회 중... (nextPageToken: {})", pageCount,
-            nextPageToken != null ? "present" : "null");
+            ObjectUtils.isNotEmpty(nextPageToken) ? "present" : "null");
 
         // 중복 토큰 체크 (무한 루프 방지)
-        if (nextPageToken != null && seenTokens.contains(nextPageToken)) {
+        if (ObjectUtils.isNotEmpty(nextPageToken) && seenTokens.contains(nextPageToken)) {
           log.warn("중복된 nextPageToken이 감지되었습니다. 무한 루프를 방지하기 위해 페이지네이션을 중단합니다. Token: {}", nextPageToken);
           break;
         }
-        if (nextPageToken != null) {
+        if (ObjectUtils.isNotEmpty(nextPageToken)) {
           seenTokens.add(nextPageToken);
         }
 
@@ -98,7 +100,7 @@ public class JiraClientWrapper {
         }
         List<JiraIssueResponse> issues = searchResult.getIssues();
 
-        if (issues == null || issues.isEmpty()) {
+        if (CollectionUtils.isEmpty(issues)) {
           log.debug("페이지 {}에서 조회된 이슈가 없습니다.", pageCount);
           break;
         }
@@ -115,7 +117,7 @@ public class JiraClientWrapper {
 
                 // 2. Python 최적화 로직: total > 19면 별도 API, 그렇지 않으면 기본 워크로그 사용
                 List<WorklogDto> worklogs = getOptimizedWorklogs(issue);
-                if (worklogs != null && !worklogs.isEmpty()) {
+                if (!CollectionUtils.isEmpty(worklogs)) {
                   issueDto.setWorklogs(worklogs);
                   log.debug("페이지 {} 이슈 {}에서 {}개의 워크로그를 병렬 최적화 조회했습니다.",
                       currentPageCount, issue.getKey(), worklogs.size());
@@ -146,11 +148,11 @@ public class JiraClientWrapper {
 
         // 다음 페이지 토큰 확인
         nextPageToken = searchResult.getNextPageToken();
-        if (nextPageToken != null && nextPageToken.trim().isEmpty()) {
+        if (ObjectUtils.isNotEmpty(nextPageToken) && nextPageToken.trim().isEmpty()) {
           nextPageToken = null; // 빈 문자열은 null로 처리
         }
 
-      } while (nextPageToken != null);
+      } while (ObjectUtils.isNotEmpty(nextPageToken));
 
       log.info("프로젝트 {}에서 {}개의 이슈를 성공적으로 조회했습니다. (총 {}페이지 처리)",
           jiraProperties.getProjectKey(), allIssues.size(), pageCount);
@@ -159,7 +161,7 @@ public class JiraClientWrapper {
 
     } catch (Exception e) {
       log.error("Jira에서 cursor-based 이슈 조회 중 오류가 발생했습니다: {}", e.getMessage(), e);
-      throw new RuntimeException("Jira cursor-based 이슈 조회 실패", e);
+      throw new RestApiException("Jira cursor-based 이슈 조회 실패", e);
     }
   }
 
@@ -201,11 +203,11 @@ public class JiraClientWrapper {
         }
 
         // 중복 토큰 체크
-        if (nextPageToken != null && seenTokens.contains(nextPageToken)) {
+        if (ObjectUtils.isNotEmpty(nextPageToken) && seenTokens.contains(nextPageToken)) {
           log.warn("중복된 nextPageToken이 감지되었습니다. 페이지네이션을 중단합니다.");
           break;
         }
-        if (nextPageToken != null) {
+        if (ObjectUtils.isNotEmpty(nextPageToken)) {
           seenTokens.add(nextPageToken);
         }
 
@@ -219,7 +221,7 @@ public class JiraClientWrapper {
         }
 
         List<JiraIssueResponse> issues = searchResult.getIssues();
-        if (issues == null || issues.isEmpty()) {
+        if (CollectionUtils.isEmpty(issues)) {
           break;
         }
 
@@ -230,7 +232,7 @@ public class JiraClientWrapper {
               try {
                 IssueDto issueDto = convertToApplicationDtoWithoutWorklogs(issue);
                 List<WorklogDto> worklogs = getOptimizedWorklogs(issue);
-                if (worklogs != null && !worklogs.isEmpty()) {
+                if (!CollectionUtils.isEmpty(worklogs)) {
                   issueDto.setWorklogs(worklogs);
                 }
                 return issueDto;
@@ -253,24 +255,24 @@ public class JiraClientWrapper {
 
         // 다음 페이지 토큰 확인
         nextPageToken = searchResult.getNextPageToken();
-        if (nextPageToken != null && nextPageToken.trim().isEmpty()) {
+        if (ObjectUtils.isNotEmpty(nextPageToken) && nextPageToken.trim().isEmpty()) {
           nextPageToken = null;
         }
 
-        boolean isLastPage = nextPageToken == null;
+        boolean isLastPage = ObjectUtils.isEmpty(nextPageToken);
 
         // Consumer에 페이지 결과 전달 (처리 후 메모리 해제 가능)
         pageConsumer.accept(new PageResult(pageCount, pageIssues, isLastPage));
 
         log.debug("페이지 {} 스트리밍 완료: {}개 이슈", pageCount, pageIssues.size());
 
-      } while (nextPageToken != null);
+      } while (ObjectUtils.isNotEmpty(nextPageToken));
 
       log.info("프로젝트 {} 스트리밍 조회 완료. (총 {}페이지)", jiraProperties.getProjectKey(), pageCount);
 
     } catch (Exception e) {
       log.error("Jira 스트리밍 조회 중 오류가 발생했습니다: {}", e.getMessage(), e);
-      throw new RuntimeException("Jira 스트리밍 조회 실패", e);
+      throw new RestApiException("Jira 스트리밍 조회 실패", e);
     }
   }
 
@@ -289,19 +291,19 @@ public class JiraClientWrapper {
       requestBody.put("fields", List.of("summary", "issuetype", "assignee", "components",
           "customfield_10026", "customfield_10015", "customfield_10280", "worklog", "status"));
 
-      if (nextPageToken != null && !nextPageToken.trim().isEmpty()) {
+      if (ObjectUtils.isNotEmpty(nextPageToken) && !nextPageToken.trim().isEmpty()) {
         requestBody.put("nextPageToken", nextPageToken);
       }
 
       log.debug("JQL 검색 요청: jql={}, maxResults={}, nextPageToken={}",
-          jql, maxResults, nextPageToken != null ? "present" : "null");
+          jql, maxResults, ObjectUtils.isNotEmpty(nextPageToken) ? "present" : "null");
 
       return jiraRestApi.post(endpoint, requestBody, JiraSearchResultResponse.class);
 
     } catch (Exception e) {
       log.error("cursor-based 페이지 조회 중 오류 발생 (nextPageToken: {}): {}",
           nextPageToken, e.getMessage(), e);
-      throw new RuntimeException("Jira cursor-based 페이지 조회 실패", e);
+      throw new RestApiException("Jira cursor-based 페이지 조회 실패", e);
     }
   }
 
@@ -314,17 +316,17 @@ public class JiraClientWrapper {
       JiraIssueResponse.JiraFieldsDto fields = issue.getFields();
 
       // 기본 워크로그 정보 확인
-      if (fields.getWorklog() == null) {
+      if (ObjectUtils.isEmpty(fields.getWorklog())) {
         log.debug("이슈 {}에 워크로그 정보가 없습니다.", issue.getKey());
         return new ArrayList<>();
       }
 
       JiraIssueResponse.JiraWorklogContainerDto worklogContainer = fields.getWorklog();
-      int totalWorklogsCount = worklogContainer.getTotal() != null ? worklogContainer.getTotal() : 0;
+      int totalWorklogsCount = ObjectUtils.isNotEmpty(worklogContainer.getTotal()) ? worklogContainer.getTotal() : 0;
 
       log.debug("이슈 {} 워크로그: 총 {}개, 기본 포함 {}개",
           issue.getKey(), totalWorklogsCount,
-          worklogContainer.getWorklogs() != null ? worklogContainer.getWorklogs().size() : 0);
+          ObjectUtils.isNotEmpty(worklogContainer.getWorklogs()) ? worklogContainer.getWorklogs().size() : 0);
 
       // Python 로직: total > 19이면 별도 API로 전체 조회
       if (totalWorklogsCount > 19) {
@@ -336,7 +338,7 @@ public class JiraClientWrapper {
         log.debug("이슈 {} 워크로그가 {}개로 적음. 기본 워크로그를 사용합니다.",
             issue.getKey(), totalWorklogsCount);
 
-        if (worklogContainer.getWorklogs() == null || worklogContainer.getWorklogs().isEmpty()) {
+        if (CollectionUtils.isEmpty(worklogContainer.getWorklogs())) {
           return new ArrayList<>();
         }
 
@@ -374,7 +376,7 @@ public class JiraClientWrapper {
 
     } catch (Exception e) {
       log.error("이슈 {}의 워크로그 조회 중 오류가 발생했습니다: {}", issue.getKey(), e.getMessage(), e);
-      throw new RuntimeException("워크로그 조회 실패", e);
+      throw new RestApiException("워크로그 조회 실패", e);
     }
   }
 
@@ -382,7 +384,7 @@ public class JiraClientWrapper {
    * Infrastructure DTO를 Application DTO로 변환 (워크로그 제외)
    */
   private IssueDto convertToApplicationDtoWithoutWorklogs(JiraIssueResponse infraDto) {
-    if (infraDto == null || infraDto.getFields() == null) {
+    if (ObjectUtils.isEmpty(infraDto) || ObjectUtils.isEmpty(infraDto.getFields())) {
       return null;
     }
 
@@ -393,11 +395,11 @@ public class JiraClientWrapper {
         .issueKey(infraDto.getKey())
         .issueLink(infraDto.getSelf())
         .summary(fields.getSummary())
-        .issueType(fields.getIssueType() != null ? fields.getIssueType().getName() : null)
-        .status(fields.getStatus() != null ? fields.getStatus().getName() : null)
-        .assignee(fields.getAssignee() != null ? fields.getAssignee().getDisplayName() : null)
+        .issueType(ObjectUtils.isNotEmpty(fields.getIssueType()) ? fields.getIssueType().getName() : null)
+        .status(ObjectUtils.isNotEmpty(fields.getStatus()) ? fields.getStatus().getName() : null)
+        .assignee(ObjectUtils.isNotEmpty(fields.getAssignee()) ? fields.getAssignee().getDisplayName() : null)
         .components(convertComponents(fields.getComponents()))
-        .storyPoints(fields.getStoryPoints() != null ? BigDecimal.valueOf(fields.getStoryPoints()) : null)
+        .storyPoints(ObjectUtils.isNotEmpty(fields.getStoryPoints()) ? BigDecimal.valueOf(fields.getStoryPoints()) : null)
         .startDate(parseDate(fields.getStartDate()))
         .sprint(fields.getSprint())
         .worklogs(new ArrayList<>()) // 빈 리스트로 초기화
@@ -408,7 +410,7 @@ public class JiraClientWrapper {
    * Infrastructure DTO를 Application DTO로 변환
    */
   private IssueDto convertToApplicationDto(JiraIssueResponse infraDto) {
-    if (infraDto == null || infraDto.getFields() == null) {
+    if (ObjectUtils.isEmpty(infraDto) || ObjectUtils.isEmpty(infraDto.getFields())) {
       return null;
     }
 
@@ -416,7 +418,7 @@ public class JiraClientWrapper {
 
     // worklog 정보 변환
     List<WorklogDto> worklogDtos = new ArrayList<>();
-    if (fields.getWorklog() != null && fields.getWorklog().getWorklogs() != null) {
+    if (ObjectUtils.isNotEmpty(fields.getWorklog()) && ObjectUtils.isNotEmpty(fields.getWorklog().getWorklogs())) {
       worklogDtos = fields.getWorklog().getWorklogs().stream()
           .map(worklog -> convertToApplicationWorklogDto(worklog, infraDto))
           .collect(Collectors.toList());
@@ -427,11 +429,11 @@ public class JiraClientWrapper {
         .issueKey(infraDto.getKey())
         .issueLink(infraDto.getSelf())
         .summary(fields.getSummary())
-        .issueType(fields.getIssueType() != null ? fields.getIssueType().getName() : null)
-        .status(fields.getStatus() != null ? fields.getStatus().getName() : null)
-        .assignee(fields.getAssignee() != null ? fields.getAssignee().getDisplayName() : null)
+        .issueType(ObjectUtils.isNotEmpty(fields.getIssueType()) ? fields.getIssueType().getName() : null)
+        .status(ObjectUtils.isNotEmpty(fields.getStatus()) ? fields.getStatus().getName() : null)
+        .assignee(ObjectUtils.isNotEmpty(fields.getAssignee()) ? fields.getAssignee().getDisplayName() : null)
         .components(convertComponents(fields.getComponents()))
-        .storyPoints(fields.getStoryPoints() != null ? BigDecimal.valueOf(fields.getStoryPoints()) : null)
+        .storyPoints(ObjectUtils.isNotEmpty(fields.getStoryPoints()) ? BigDecimal.valueOf(fields.getStoryPoints()) : null)
         .startDate(parseDate(fields.getStartDate()))
         .sprint(fields.getSprint())
         .worklogs(worklogDtos)
@@ -443,7 +445,7 @@ public class JiraClientWrapper {
    */
   private WorklogDto convertToApplicationWorklogDto(JiraWorklogResponse infraWorklogDto, JiraIssueResponse issue) {
 
-    if (infraWorklogDto == null) {
+    if (ObjectUtils.isEmpty(infraWorklogDto)) {
       return null;
     }
 
@@ -452,18 +454,18 @@ public class JiraClientWrapper {
     return WorklogDto.builder()
         .id(infraWorklogDto.getId())
         .issueKey(issue.getKey())
-        .issueType(fields.getIssueType() != null ? fields.getIssueType().getName() : null)
-        .status(fields.getStatus() != null ? fields.getStatus().getName() : null)
+        .issueType(ObjectUtils.isNotEmpty(fields.getIssueType()) ? fields.getIssueType().getName() : null)
+        .status(ObjectUtils.isNotEmpty(fields.getStatus()) ? fields.getStatus().getName() : null)
         .issueLink(issue.getSelf())
         .summary(fields.getSummary())
-        .author(infraWorklogDto.getAuthor() != null ? infraWorklogDto.getAuthor().getDisplayName() : "Unknown")
+        .author(ObjectUtils.isNotEmpty(infraWorklogDto.getAuthor()) ? infraWorklogDto.getAuthor().getDisplayName() : "Unknown")
         .components(convertComponents(fields.getComponents()))
         .timeSpent(infraWorklogDto.getTimeSpent())
-        .timeHours(infraWorklogDto.getTimeSpentSeconds() != null
+        .timeHours(ObjectUtils.isNotEmpty(infraWorklogDto.getTimeSpentSeconds())
             ? BigDecimal.valueOf(infraWorklogDto.getTimeSpentSeconds() / 3600.0)
             : BigDecimal.ZERO)
-        .comment(infraWorklogDto.getComment() != null ? infraWorklogDto.getComment().extractText() : "")
-        .started(infraWorklogDto.getStarted() != null ? infraWorklogDto.getStarted().toLocalDateTime() : null)
+        .comment(ObjectUtils.isNotEmpty(infraWorklogDto.getComment()) ? infraWorklogDto.getComment().extractText() : "")
+        .started(ObjectUtils.isNotEmpty(infraWorklogDto.getStarted()) ? infraWorklogDto.getStarted().toLocalDateTime() : null)
         .worklogId(infraWorklogDto.getSelf()) // self URL을 worklogId로 사용
         .build();
   }
@@ -472,7 +474,7 @@ public class JiraClientWrapper {
    * 컴포넌트 리스트를 문자열로 변환
    */
   private String convertComponents(List<JiraIssueResponse.JiraComponentDto> components) {
-    if (components == null || components.isEmpty()) {
+    if (CollectionUtils.isEmpty(components)) {
       return null;
     }
 
@@ -485,7 +487,7 @@ public class JiraClientWrapper {
    * 날짜 문자열을 LocalDate으로 변환
    */
   private LocalDate parseDate(String dateStr) {
-    if (dateStr == null || dateStr.trim().isEmpty()) {
+    if (ObjectUtils.isEmpty(dateStr) || dateStr.trim().isEmpty()) {
       return null;
     }
 
@@ -516,7 +518,7 @@ public class JiraClientWrapper {
       params.add("maxResults", "0");
       JiraChangelogPageResponse firstPage = jiraRestApi.get(baseEndpoint, params, JiraChangelogPageResponse.class);
 
-      int total = firstPage.getTotal() != null ? firstPage.getTotal() : 0;
+      int total = ObjectUtils.isNotEmpty(firstPage.getTotal()) ? firstPage.getTotal() : 0;
       if (total == 0) {
         log.debug("이슈 {} changelog가 없습니다.", issueKey);
         return null;
@@ -534,7 +536,7 @@ public class JiraClientWrapper {
 
         JiraChangelogPageResponse page = jiraRestApi.get(baseEndpoint, params, JiraChangelogPageResponse.class);
 
-        if (page.getValues() == null || page.getValues().isEmpty()) {
+        if (CollectionUtils.isEmpty(page.getValues())) {
           startAt -= maxResults;
           continue;
         }
@@ -544,7 +546,7 @@ public class JiraClientWrapper {
         histories.sort((h1, h2) -> h2.getCreated().compareTo(h1.getCreated()));
 
         for (ChangelogHistoryDto history : histories) {
-          if (history.getItems() == null) continue;
+          if (ObjectUtils.isEmpty(history.getItems())) continue;
           for (ChangelogItemDto item : history.getItems()) {
             if ("status".equals(item.getField()) && doneStatuses.contains(item.getToString())) {
               log.debug("이슈 {} Done 상태 변경일 발견: {}", issueKey, history.getCreated().toLocalDate());

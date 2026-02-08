@@ -1,9 +1,9 @@
 package kr.hvy.blog.modules.post.application;
 
-import kr.hvy.blog.modules.post.application.service.PostSearchEnginePublicService;
+import java.util.List;
+import kr.hvy.blog.modules.post.application.dto.SearchEngineResponse;
+import kr.hvy.blog.modules.post.application.service.SearchEnginePublicService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -13,16 +13,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class PostSearchEngineController {
 
-  private final PostSearchEnginePublicService postSearchEnginePublicService;
+  private final SearchEnginePublicService searchEnginePublicService;
 
   /**
    * main post의 검색엔진 표기
    */
   @GetMapping
-  public ResponseEntity<?> getPostSearchEngine() {
-    return ResponseEntity
-        .status(HttpStatus.OK)
-        .body(postSearchEnginePublicService.findAll());
+  public List<SearchEngineResponse> getPostSearchEngine() {
+    return searchEnginePublicService.findAll();
   }
 
 

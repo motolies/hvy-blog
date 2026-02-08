@@ -17,8 +17,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.util.ArrayList;
 import java.util.List;
-import kr.hvy.blog.modules.admin.application.dto.CommonClassUpdate;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
+import org.apache.commons.lang3.ObjectUtils;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -30,7 +30,7 @@ import lombok.With;
  * 공통코드 클래스 엔티티 코드 그룹을 정의하는 상위 개념
  */
 @Entity
-@Table(name = "common_class", uniqueConstraints = @UniqueConstraint(name = "uk_common_class_code", columnNames = "code"))
+@Table(uniqueConstraints = @UniqueConstraint(name = "uk_common_class_code", columnNames = "code"))
 @Getter
 @Setter
 @Builder
@@ -49,13 +49,13 @@ public class CommonClass {
   /**
    * 클래스 코드 (Unique, Natural Key) 예: REGION_CLASS, SEOUL_DISTRICT_CLASS
    */
-  @Column(name = "code", nullable = false, unique = true, length = 64)
+  @Column(nullable = false, unique = true, length = 64)
   private String code;
 
   /**
    * 클래스명 예: "지역분류", "서울구분류"
    */
-  @Column(name = "name", length = 128)
+  @Column(length = 128)
   private String name;
 
   /**
@@ -123,10 +123,10 @@ public class CommonClass {
    */
   @PrePersist
   private void prePersist() {
-    if (this.created == null) {
+    if (ObjectUtils.isEmpty(this.created)) {
       this.created = EventLogEntity.defaultValues();
     }
-    if (this.isActive == null) {
+    if (ObjectUtils.isEmpty(this.isActive)) {
       this.isActive = true;
     }
   }
@@ -142,18 +142,20 @@ public class CommonClass {
   /**
    * 업데이트 메서드
    */
-  public void update(CommonClassUpdate updateDto) {
+  public void update(String code, String name, String description,
+      String attribute1Name, String attribute2Name, String attribute3Name,
+      String attribute4Name, String attribute5Name, Boolean isActive) {
     // code 필드도 업데이트 가능 (Surrogate Key 패턴)
-    if (updateDto.getCode() != null && !updateDto.getCode().trim().isEmpty()) {
-      this.code = updateDto.getCode();
+    if (ObjectUtils.isNotEmpty(code) && !code.trim().isEmpty()) {
+      this.code = code;
     }
-    this.name = updateDto.getName();
-    this.description = updateDto.getDescription();
-    this.attribute1Name = updateDto.getAttribute1Name();
-    this.attribute2Name = updateDto.getAttribute2Name();
-    this.attribute3Name = updateDto.getAttribute3Name();
-    this.attribute4Name = updateDto.getAttribute4Name();
-    this.attribute5Name = updateDto.getAttribute5Name();
-    this.isActive = updateDto.getIsActive();
+    this.name = name;
+    this.description = description;
+    this.attribute1Name = attribute1Name;
+    this.attribute2Name = attribute2Name;
+    this.attribute3Name = attribute3Name;
+    this.attribute4Name = attribute4Name;
+    this.attribute5Name = attribute5Name;
+    this.isActive = isActive;
   }
 }

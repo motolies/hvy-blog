@@ -3,6 +3,7 @@ package kr.hvy.blog.modules.auth.application;
 import jakarta.servlet.http.HttpServletRequest;
 import kr.hvy.blog.infra.security.CookieProvider;
 import kr.hvy.blog.modules.auth.application.dto.LoginRequest;
+import kr.hvy.blog.modules.auth.application.dto.RsaKeyResponse;
 import kr.hvy.blog.modules.auth.application.dto.UserCreate;
 import kr.hvy.blog.modules.auth.application.dto.UserResponse;
 import kr.hvy.blog.modules.auth.application.service.UserService;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -32,8 +34,8 @@ public class AuthController {
   private final UserService userService;
 
   @PostMapping("/shake")
-  public ResponseEntity<?> shake() {
-    return ResponseEntity.ok(userService.getRsaKey());
+  public RsaKeyResponse shake() {
+    return userService.getRsaKey();
   }
 
   @GetMapping("/profile")
@@ -59,8 +61,8 @@ public class AuthController {
   }
 
   @PostMapping
-  public ResponseEntity<?> create(@RequestBody UserCreate userCreate) {
-    UserResponse user = userService.create(userCreate);
-    return ResponseEntity.ok(user);
+  @ResponseStatus(HttpStatus.CREATED)
+  public UserResponse create(@RequestBody UserCreate userCreate) {
+    return userService.create(userCreate);
   }
 }

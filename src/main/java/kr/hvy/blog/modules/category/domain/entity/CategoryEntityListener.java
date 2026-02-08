@@ -2,17 +2,18 @@ package kr.hvy.blog.modules.category.domain.entity;
 
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.PostUpdate;
-import kr.hvy.blog.modules.category.application.service.CategoryProcedureService;
+import kr.hvy.blog.modules.category.domain.event.CategoryChangedEvent;
 import kr.hvy.common.core.util.ApplicationContextUtils;
+import org.springframework.context.ApplicationEventPublisher;
 
 public class CategoryEntityListener {
 
   @PostPersist
   @PostUpdate
   public void postPersistAndUpdate(Category categoryEntity) {
-    CategoryProcedureService procedureService = ApplicationContextUtils.getBean(CategoryProcedureService.class)
-        .orElseThrow(() -> new RuntimeException("CategoryProcedureService is not found"));
+    ApplicationEventPublisher eventPublisher = ApplicationContextUtils.getBean(ApplicationEventPublisher.class)
+        .orElseThrow(() -> new RuntimeException("ApplicationEventPublisher is not found"));
 
-    procedureService.updateFullName();
+    eventPublisher.publishEvent(new CategoryChangedEvent(categoryEntity.getId()));
   }
 }

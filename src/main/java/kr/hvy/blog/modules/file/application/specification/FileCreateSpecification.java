@@ -4,7 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import kr.hvy.blog.modules.file.application.dto.FileCreate;
 import kr.hvy.common.core.specification.Specification;
-import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.lang3.ObjectUtils;
+import org.springframework.util.CollectionUtils;
 
 public class FileCreateSpecification implements Specification<FileCreate> {
 
@@ -14,7 +15,7 @@ public class FileCreateSpecification implements Specification<FileCreate> {
   public boolean isSatisfiedBy(FileCreate fileCreate) {
     errorMessages.clear();
 
-    if (fileCreate.getPostId() == null || fileCreate.getPostId() < 1) {
+    if (ObjectUtils.isEmpty(fileCreate.getPostId()) || fileCreate.getPostId() < 1) {
       errorMessages.add("저장할 포스트 Id가 없습니다.");
     }
 
@@ -22,7 +23,7 @@ public class FileCreateSpecification implements Specification<FileCreate> {
       errorMessages.add("저장할 파일이 없습니다.");
     }
 
-    return !CollectionUtils.isNotEmpty(errorMessages);
+    return CollectionUtils.isEmpty(errorMessages);
   }
 
   @Override

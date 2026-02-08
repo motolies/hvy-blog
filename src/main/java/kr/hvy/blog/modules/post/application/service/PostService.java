@@ -31,6 +31,7 @@ import kr.hvy.blog.modules.tag.mapper.TagDtoMapper;
 import kr.hvy.common.application.domain.dto.DeleteResponse;
 import kr.hvy.common.core.exception.DataNotFoundException;
 import kr.hvy.common.core.specification.Specification;
+import org.springframework.util.CollectionUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
@@ -77,7 +78,7 @@ public class PostService {
 
   public Post findByMain() {
     List<Post> list = postRepository.findByMainPage(true);
-    if (list.isEmpty()) {
+    if (CollectionUtils.isEmpty(list)) {
       return postRepository.findTopByPublicAccessOrderById(true)
           .orElseThrow(() -> new DataNotFoundException("Not Found Public Post."));
     } else {
@@ -121,7 +122,7 @@ public class PostService {
     Post post = findById(id);
     Category category = categoryRepository.findById(updateDto.getCategoryId())
         .orElseThrow(() -> new DataNotFoundException("Not Found Category."));
-    post.update(updateDto, category);
+    post.update(updateDto.getSubject(), updateDto.getBody(), updateDto.isPublic(), updateDto.isMain(), category);
 
     // category의 postCount를 갱힌하고 싶다면
     Post saved = postRepository.saveAndFlush(post);

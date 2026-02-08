@@ -12,8 +12,7 @@ import lombok.*;
 @With
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name = "`search_engine`")
-public class PostSearchEngineEntity {
+public class SearchEngine {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

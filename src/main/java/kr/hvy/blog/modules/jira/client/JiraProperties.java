@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.jira.infrastructure.config;
+package kr.hvy.blog.modules.jira.client;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;

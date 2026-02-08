@@ -20,7 +20,7 @@ import lombok.NoArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
 
 @Entity
-@Table(name = "user", uniqueConstraints = @UniqueConstraint(name = "uk_user_login_id", columnNames = "loginId"))
+@Table(uniqueConstraints = @UniqueConstraint(name = "uk_user_login_id", columnNames = "loginId"))
 @Getter
 @Builder
 @AllArgsConstructor

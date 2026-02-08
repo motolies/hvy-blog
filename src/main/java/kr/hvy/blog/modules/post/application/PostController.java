@@ -4,11 +4,14 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
+import kr.hvy.blog.modules.post.application.dto.PostNoBodyResponse;
+import kr.hvy.blog.modules.post.application.dto.PostPrevNextResponse;
+import kr.hvy.blog.modules.post.application.dto.PostResponse;
 import kr.hvy.blog.modules.post.application.dto.SearchObject;
 import kr.hvy.blog.modules.post.application.service.PostPublicService;
+import kr.hvy.common.application.domain.dto.paging.PageResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,10 +30,8 @@ public class PostController {
    * main post 조회
    */
   @GetMapping
-  public ResponseEntity<?> getMainPost() {
-    return ResponseEntity
-        .status(HttpStatus.OK)
-        .body(postPublicService.mainPost());
+  public PostResponse getMainPost() {
+    return postPublicService.mainPost();
   }
 
 
@@ -38,10 +39,8 @@ public class PostController {
    * 단일 포스트 조회
    */
   @GetMapping("/{postId}")
-  public ResponseEntity<?> getPost(@PathVariable int postId) {
-    return ResponseEntity
-        .status(HttpStatus.OK)
-        .body(postPublicService.getPost(postId));
+  public PostResponse getPost(@PathVariable int postId) {
+    return postPublicService.getPost(postId);
   }
 
 
@@ -49,34 +48,28 @@ public class PostController {
    * 이전 글/이후 글 조회
    */
   @GetMapping(value = {"/prev-next/{postId}"})
-  public ResponseEntity<?> getContentPrevNext(@PathVariable int postId) {
-    return ResponseEntity
-        .status(HttpStatus.OK)
-        .body(postPublicService.getPrevPost(postId));
+  public PostPrevNextResponse getContentPrevNext(@PathVariable int postId) {
+    return postPublicService.getPrevPost(postId);
   }
 
   /**
    * sitemap.xml 만들기 위한 public contents id 목록을 조회
    */
   @GetMapping(value = {"/public-content"})
-  public ResponseEntity<?> getPublicContentId() {
-    return ResponseEntity
-        .status(HttpStatus.OK)
-        .body(postPublicService.getPublicPosts());
+  public List<Long> getPublicContentId() {
+    return postPublicService.getPublicPosts();
   }
 
   /**
    * 검색 상세(base64 인코딩한 파라미터(json object)
    */
   @GetMapping(value = {"/search"})
-  public ResponseEntity<?> searchDetail(@RequestParam String query) throws JsonProcessingException {
+  public PageResponse<PostNoBodyResponse> searchDetail(@RequestParam String query) throws JsonProcessingException {
     String decodedQuery = new String(Base64.getDecoder().decode(query), StandardCharsets.UTF_8);
 
     // https://stackoverflow.com/questions/4486787/jackson-with-json-unrecognized-field-not-marked-as-ignorable
     SearchObject searchObject = objectMapper.readValue(decodedQuery, SearchObject.class);
 
-    return ResponseEntity
-        .status(HttpStatus.OK)
-        .body(postPublicService.searchPosts(searchObject));
+    return postPublicService.searchPosts(searchObject);
   }
 }

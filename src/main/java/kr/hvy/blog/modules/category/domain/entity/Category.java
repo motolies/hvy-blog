@@ -15,12 +15,11 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
-import jakarta.persistence.Table;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import kr.hvy.blog.modules.category.application.dto.CategoryUpdate;
 import kr.hvy.blog.modules.post.domain.entity.Post;
 import kr.hvy.common.core.converter.TsidUtils;
 import lombok.AllArgsConstructor;
@@ -34,7 +33,6 @@ import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.Parameter;
 
 @Entity
-@Table(name = "`category`")
 @EntityListeners(CategoryEntityListener.class)
 @Getter
 @Setter
@@ -61,7 +59,7 @@ public class Category {
   @Column(nullable = false, length = 512)
   private String fullPath;
 
-  @Column(name = "parentId", columnDefinition = "VARCHAR(32)")
+  @Column(columnDefinition = "VARCHAR(32)")
   @GenericGenerator(name = "CATEGORY_PID_CATEGORYID_GENERATOR", strategy = "foreign", parameters = @Parameter(name = "property", value = "parent"))
   private String parentId;
 
@@ -90,9 +88,9 @@ public class Category {
     this.id = TsidUtils.getTsid().toString();
   }
 
-  public void update(CategoryUpdate categoryUpdate){
-    this.name = categoryUpdate.getName();
-    this.parentId = categoryUpdate.getParentId();
+  public void update(String name, String parentId){
+    this.name = name;
+    this.parentId = parentId;
   }
 
 }

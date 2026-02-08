@@ -4,6 +4,7 @@ import com.google.common.net.InternetDomainName;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.ObjectUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
@@ -21,7 +22,7 @@ public class CookieProvider {
   }
 
   private String getRootDomain(String refererUrl) {
-    if (refererUrl == null) {
+    if (ObjectUtils.isEmpty(refererUrl)) {
       return null;
     }
     try {
@@ -43,7 +44,7 @@ public class CookieProvider {
   public ResponseCookie createCookie(HttpServletRequest request, String name, String value) {
     String domain = getRootDomain(request.getHeader("referer"));
     ResponseCookie.ResponseCookieBuilder builder = buildBaseCookie(name, value);
-    if (domain != null) {
+    if (ObjectUtils.isNotEmpty(domain)) {
       builder.sameSite("None")
           .secure(true)
           .domain(domain);
@@ -58,7 +59,7 @@ public class CookieProvider {
     // 값이 null이고 maxAge를 0으로 설정하여 쿠키 제거
     ResponseCookie.ResponseCookieBuilder builder = buildBaseCookie(name, null)
         .maxAge(0);
-    if (domain != null) {
+    if (ObjectUtils.isNotEmpty(domain)) {
       builder.sameSite("None")
           .secure(true)
           .domain(domain);

@@ -20,8 +20,9 @@ import kr.hvy.blog.modules.jira.application.dto.SprintWorkerSummaryResponse;
 import kr.hvy.blog.modules.jira.application.dto.WorklogDetailResponse;
 import kr.hvy.blog.modules.jira.domain.entity.JiraIssue;
 import kr.hvy.blog.modules.jira.domain.entity.JiraWorklog;
-import kr.hvy.blog.modules.jira.domain.repository.JiraIssueRepository;
-import kr.hvy.blog.modules.jira.domain.repository.JiraWorklogRepository;
+import kr.hvy.blog.modules.jira.repository.JiraIssueRepository;
+import kr.hvy.blog.modules.jira.repository.JiraWorklogRepository;
+import kr.hvy.common.core.exception.DataNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -60,7 +61,7 @@ public class JiraQueryService {
    */
   public IssueDto getIssueByKey(String issueKey) {
     JiraIssue issue = jiraIssueRepository.findByIssueKey(issueKey)
-        .orElseThrow(() -> new RuntimeException("이슈를 찾을 수 없습니다: " + issueKey));
+        .orElseThrow(() -> new DataNotFoundException("이슈를 찾을 수 없습니다: " + issueKey));
 
     return convertToIssueDto(issue);
   }

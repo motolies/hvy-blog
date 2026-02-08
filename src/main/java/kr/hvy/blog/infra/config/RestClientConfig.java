@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Optional;
 import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
-import kr.hvy.blog.modules.jira.infrastructure.config.JiraProperties;
+import kr.hvy.blog.modules.jira.client.JiraProperties;
 import kr.hvy.common.infrastructure.client.config.RestClientConfigurer;
 import kr.hvy.common.infrastructure.client.rest.Interceptor.ApiLogInterceptor;
 import kr.hvy.common.infrastructure.client.rest.RestApi;

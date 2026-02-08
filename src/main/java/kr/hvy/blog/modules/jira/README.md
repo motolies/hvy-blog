@@ -12,16 +12,17 @@
 ## 아키텍처
 ```
 modules/jira/
-├── domain/
-│   ├── entity/          # JPA 엔티티
-│   └── repository/      # 리포지토리 인터페이스
 ├── application/
 │   ├── dto/             # 데이터 전송 객체
-│   └── service/         # 비즈니스 로직
-└── infrastructure/
-    ├── client/          # Jira REST 클라이언트
-    ├── config/          # 설정 및 구성
-    └── scheduler/       # 스케줄러
+│   ├── service/         # 비즈니스 로직
+│   └── *Controller.java # REST 컨트롤러
+├── domain/
+│   ├── entity/          # JPA 엔티티
+│   └── WorklogInfo.java # 값 객체
+├── repository/          # 리포지토리 인터페이스
+└── client/              # Jira REST 클라이언트
+    ├── dto/             # 외부 API 응답 DTO
+    └── JiraProperties.java # Jira 설정
 ```
 
 ## 설정

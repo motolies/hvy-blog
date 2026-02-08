@@ -1,4 +1,4 @@
-package kr.hvy.blog.modules.jira.infrastructure.client.dto;
+package kr.hvy.blog.modules.jira.client.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;

@@ -85,7 +85,7 @@ public class CategoryService {
     Specification.validate(CategoryUpdateSpecification::new, updateDto);
 
     Category category = findById(categoryId);
-    category.update(updateDto);
+    category.update(updateDto.getName(), updateDto.getParentId());
 
     Category savedCategory = save(category);
     return categoryDtoMapper.toResponse(savedCategory);

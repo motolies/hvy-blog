@@ -31,7 +31,7 @@ import lombok.With;
 import org.hibernate.annotations.Formula;
 
 @Entity
-@Table(name = "`tag`", uniqueConstraints = @UniqueConstraint(name = "uk_tag_name", columnNames = "name"))
+@Table(uniqueConstraints = @UniqueConstraint(name = "uk_tag_name", columnNames = "name"))
 @Getter
 @Setter
 @Builder

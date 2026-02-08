@@ -62,7 +62,7 @@ hvy:
 #Configure Mybatis
 mybatis:
   type-aliases-package: kr.hvy.blog.modules,kr.hvy.common.mybatis.CountMapper # 많아지면 콤마로 구분
-  type-handlers-package: kr.hvy.common.code
+  type-handlers-package: kr.hvy.common.core.code.converter
   mapper-locations: classpath:mybatis-mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true

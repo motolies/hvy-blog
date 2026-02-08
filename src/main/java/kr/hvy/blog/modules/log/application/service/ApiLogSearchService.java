@@ -9,7 +9,7 @@ import kr.hvy.common.application.domain.dto.paging.OrderBy;
 import kr.hvy.common.application.domain.dto.paging.PageResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.collections4.CollectionUtils;
+import org.springframework.util.CollectionUtils;
 import org.springframework.stereotype.Service;
 
 @Slf4j

@@ -24,6 +24,7 @@ public class ApiLogSearchRequest extends PageRequest {
   private String requestParam;
   private String requestBody;
   private String responseStatus;
+  private String responseBody;
   private LocalDate createdAtFrom;
   private LocalDate createdAtTo;
 

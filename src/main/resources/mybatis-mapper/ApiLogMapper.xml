@@ -49,6 +49,9 @@
             <if test="responseStatus != null and responseStatus != ''">
                 AND responseStatus = #{responseStatus}
             </if>
+            <if test="responseBody != null and responseBody != ''">
+                AND responseBody LIKE CONCAT('%', #{responseBody}, '%')
+            </if>
             <if test="createdAtFrom != null">
                 AND createdAt &gt;= #{createdAtFrom}
             </if>

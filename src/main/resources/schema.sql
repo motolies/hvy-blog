@@ -197,3 +197,33 @@ create or replace table tb_jira_worklog
     constraint uk_jira_worklog_id unique (worklogId)
 ) comment 'Jira 워크로그 정보';
 
+-- 메모 관련 테이블들
+
+create or replace table tb_memo_category
+(
+    id        bigint       not null auto_increment primary key,
+    name      varchar(64)  not null,
+    seq       int          not null default 0,
+    createdAt datetime(6)  not null,
+    createdBy varchar(255) null,
+    updatedAt datetime(6)  not null,
+    updatedBy varchar(255) null,
+    constraint uk_memo_category_name unique (name)
+);
+
+create or replace table tb_memo
+(
+    id         bigint       not null primary key,
+    content    longtext     not null,
+    categoryId bigint       null,
+    deleted    bit          not null default 0,
+    createdAt  datetime(6)  not null,
+    createdBy  varchar(255) null,
+    updatedAt  datetime(6)  not null,
+    updatedBy  varchar(255) null,
+    constraint fk_memo_category foreign key (categoryId) references tb_memo_category (id)
+);
+
+create index idx_memo_deleted_created on tb_memo (deleted, createdAt desc);
+create index idx_memo_category on tb_memo (categoryId, deleted);
+

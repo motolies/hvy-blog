@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="kr.hvy.blog.modules.memo.repository.mapper.MemoMapper">
+
+    <sql id="searchCondition">
+        <where>
+            <if test="includeDeleted == null or !includeDeleted">
+                AND m.deleted = 0
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND m.content LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+            <if test="categoryId != null">
+                AND m.categoryId = #{categoryId}
+            </if>
+        </where>
+    </sql>
+
+    <select id="searchMemos" parameterType="MemoSearchRequest" resultType="MemoSearchResult">
+        SELECT
+            m.id,
+            m.content,
+            m.deleted,
+            c.id AS categoryId,
+            c.name AS categoryName,
+            c.seq AS categorySeq,
+            m.createdAt,
+            m.createdBy,
+            m.updatedAt,
+            m.updatedBy
+        FROM tb_memo m
+        LEFT JOIN tb_memo_category c ON m.categoryId = c.id
+        <include refid="searchCondition"/>
+        ORDER BY m.createdAt DESC
+    </select>
+
+    <select id="countMemos" parameterType="MemoSearchRequest" resultType="int">
+        SELECT COUNT(*)
+        FROM tb_memo m
+        <include refid="searchCondition"/>
+    </select>
+
+</mapper>

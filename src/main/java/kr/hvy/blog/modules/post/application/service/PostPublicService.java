@@ -48,7 +48,7 @@ public class PostPublicService {
     if (CollectionUtils.isEmpty(searchObject.getOrderBy())) {
       searchObject.getOrderBy().add(
           OrderBy.builder()
-              .column("createdAt")
+              .column("created_at")
               .direction(Direction.DESCENDING)
               .build());
     }

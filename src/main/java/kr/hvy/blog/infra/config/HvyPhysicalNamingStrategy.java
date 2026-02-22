@@ -32,9 +32,7 @@ public class HvyPhysicalNamingStrategy implements PhysicalNamingStrategy {
 
   @Override
   public Identifier toPhysicalColumnName(Identifier name, JdbcEnvironment jdbcEnvironment) {
-    // 칼럼명을 파스칼 케이스로 변환
-//    return new Identifier(convertToPascalCase(name.getText()), name.isQuoted());
-    return name;
+    return new Identifier(convertToSnakeCase(name.getText()), name.isQuoted());
   }
 
 
@@ -50,18 +48,4 @@ public class HvyPhysicalNamingStrategy implements PhysicalNamingStrategy {
     return result.charAt(0) == '_' ? result.substring(1) : result.toString();
   }
 
-  private String convertToPascalCase(String name) {
-    // 첫 글자를 대문자로, 그 후의 글자는 원래 상태 유지
-    StringBuilder result = new StringBuilder();
-    boolean isFirst = true;
-    for (char character : name.toCharArray()) {
-      if (isFirst) {
-        result.append(Character.toUpperCase(character));
-        isFirst = false;
-      } else {
-        result.append(character);
-      }
-    }
-    return result.toString();
-  }
 }

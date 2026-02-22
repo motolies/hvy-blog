@@ -45,9 +45,10 @@ public class CategoryService {
         .orElseThrow(() -> new DataNotFoundException("카테고리가 존재하지 않습니다.")));
   }
 
-  public Category save(Category category) {
+  private Category save(Category category) {
     Category categoryEntity = categoryRepository.save(category);
     entityManager.flush();
+    categoryMapper.updateFullName();
     entityManager.refresh(categoryEntity);
     return categoryEntity;
   }

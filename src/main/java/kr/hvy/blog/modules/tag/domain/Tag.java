@@ -58,12 +58,12 @@ public class Tag {
   @Builder.Default
   private Set<Post> posts = new HashSet<>();
 
-  @Formula("(select count(*) from tb_post_tag_map as m where m.tagId = id)")
+  @Formula("(select count(*) from tb_post_tag_map as m where m.tag_id = id)")
   private int postCount;
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default

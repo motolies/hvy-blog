@@ -71,7 +71,7 @@ public class JiraWorklog {
   @Column(nullable = false, precision = 5, scale = 2)
   private BigDecimal timeHours;
 
-  @Column(columnDefinition = "LONGTEXT")
+  @Column(columnDefinition = "TEXT")
   private String comment;
 
   @Column(nullable = false)
@@ -82,7 +82,7 @@ public class JiraWorklog {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -90,7 +90,7 @@ public class JiraWorklog {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default

@@ -1,67 +1,61 @@
-DELIMITER $$
+DROP FUNCTION IF EXISTS usp_category_fullname_update();
 
-USE `blog`$$
-
-DROP PROCEDURE IF EXISTS usp_category_fullname_update$$
-create procedure usp_category_fullname_update() comment 'tb_category fullName 정리'
+CREATE OR REPLACE FUNCTION usp_category_fullname_update()
+    RETURNS void
+    LANGUAGE plpgsql
+AS
+$$
+DECLARE
+    mCur INTEGER;
+    mMax INTEGER;
 BEGIN
+    mCur := 1;
 
-	DECLARE mCur INT;
-	DECLARE mMax INT;
+    DROP TABLE IF EXISTS tmp_category;
+    CREATE TEMPORARY TABLE tmp_category
+    (
+        id        VARCHAR(32)  NOT NULL,
+        name      VARCHAR(64)  NOT NULL,
+        seq       INTEGER      NOT NULL,
+        full_name VARCHAR(512) NOT NULL,
+        full_path VARCHAR(512) NOT NULL,
+        parent_id VARCHAR(32),
+        level     INTEGER      NOT NULL
+    ) ON COMMIT DROP;
 
-	SET mCur = 1;
+    INSERT INTO tmp_category (id, name, seq, parent_id, full_name, full_path, level)
+    WITH RECURSIVE cte AS (
+        SELECT id, name, seq, parent_id, full_name, full_path, 0 AS level
+        FROM tb_category
+        WHERE parent_id IS NULL
+        UNION ALL
+        SELECT aa.id, aa.name, aa.seq, aa.parent_id, aa.full_name, aa.full_path, bb.level + 1 AS level
+        FROM tb_category AS aa
+                 INNER JOIN cte AS bb ON aa.parent_id = bb.id
+    )
+    SELECT id, name, seq, parent_id, full_name, full_path, level
+    FROM cte
+    ORDER BY full_name, seq;
 
-	DROP TEMPORARY TABLE IF EXISTS tmpCategory;
-	CREATE TEMPORARY TABLE tmpCategory
-	(
-		  id       VARCHAR(32) NOT NULL,
-		  name     VARCHAR(64) NOT NULL,
-		  seq  INT(11) NOT NULL,
-		  fullName VARCHAR(512) NOT NULL,
-		  fullPath VARCHAR(512) NOT NULL,
-		  parentId      VARCHAR(32),
-		  level		INT(11) NOT NULL
-	) ENGINE = MEMORY;
+    SELECT MAX(level) + 1 INTO mMax FROM tmp_category;
 
-	INSERT INTO tmpCategory(id, `name`, seq, parentId, fullName, fullPath, level)
-	WITH RECURSIVE cte
-	AS
-	(
-		SELECT id, `name`, seq, parentId, fullName, fullPath, 0 AS level
-		FROM tb_category
-		WHERE parentId IS NULL
-		UNION ALL
-		SELECT AA.id, AA.`name`, AA.seq, AA.parentId, AA.fullName, AA.fullPath, BB.level+1 AS level
-		FROM tb_category AS AA
-		   INNER JOIN cte AS BB ON AA.parentId = BB.id
-	)
-	SELECT id, `name`, seq, parentId, fullName, fullPath, level
-	FROM cte
-	ORDER BY fullname, seq;
+    WHILE mCur < mMax LOOP
 
-	SELECT MAX(level) + 1 INTO mMax FROM tmpCategory;
+        UPDATE tb_category c
+        SET full_name = CONCAT(p.full_name, c.name, '/')
+        FROM tb_category p
+        WHERE c.parent_id = p.id
+          AND c.id IN (SELECT id FROM tmp_category WHERE level = mCur);
 
-	WHILE mCur < mMax DO
+        UPDATE tb_category c
+        SET full_path = CONCAT(p.full_path, c.id, '/')
+        FROM tb_category p
+        WHERE c.parent_id = p.id
+          AND c.id IN (SELECT id FROM tmp_category WHERE level = mCur);
 
-		UPDATE tb_category c
-			LEFT JOIN tb_category p ON c.`parentId` = p.`id`
-			SET c.`fullName` = CONCAT(p.`fullName`, c.`name`, '/')
-		WHERE c.`id` IN(
-			SELECT id FROM tmpCategory WHERE level = mCur
-		);
-		
-		UPDATE tb_category c
-			LEFT JOIN tb_category p ON c.`parentId` = p.`id`
-			SET c.`fullPath` = CONCAT(p.`fullPath`, c.`id`, '/')
-		WHERE c.`id` IN(
-			SELECT id FROM tmpCategory WHERE level = mCur
-		);
+        mCur := mCur + 1;
 
-		SET mCur = mCur + 1;
+    END LOOP;
 
-	END WHILE;
-
-
-END$$
-
-DELIMITER ;
+END;
+$$;

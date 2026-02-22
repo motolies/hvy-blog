@@ -53,10 +53,10 @@ public class Post {
   @Column(nullable = false, length = 512)
   private String subject;
 
-  @Column(nullable = false, columnDefinition = "LONGTEXT")
+  @Column(nullable = false, columnDefinition = "TEXT")
   private String body;
 
-  @Column(nullable = false, columnDefinition = "LONGTEXT")
+  @Column(nullable = false, columnDefinition = "TEXT")
   private String normalBody;
 
   @Column(nullable = false)
@@ -86,7 +86,7 @@ public class Post {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -94,7 +94,7 @@ public class Post {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default

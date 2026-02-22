@@ -18,24 +18,24 @@
         p.id,
         p.subject AS SUBJECT,
         cat.name AS CATEGORY_NAME,
-        p.viewCount AS VIEW_COUNT,
-        p.createdAt AS CREATE_DATE,
-        p.updatedAt AS UPDATE_DATE
+        p.view_count AS VIEW_COUNT,
+        p.created_at AS CREATE_DATE,
+        p.updated_at AS UPDATE_DATE
         FROM tb_post AS p
-        LEFT JOIN tb_category cat ON p.categoryId = cat.id
-        LEFT JOIN tb_post_tag_map AS MAP ON MAP.postId = p.id
+        LEFT JOIN tb_category cat ON p.category_id = cat.id
+        LEFT JOIN tb_post_tag_map AS MAP ON MAP.post_id = p.id
         <where>
             <if test='isAdmin == false'>
-                AND p.publicAccess = 1
+                AND p.public_access = true
             </if>
             <if test='categories.size > 0'>
-                AND p.categoryId IN (
+                AND p.category_id IN (
                 SELECT id
                 FROM tb_category
                 WHERE
                 <foreach collection="categories" item="category" separator=" OR ">
                     /* TODO : 당장은 양쪽 라이크로 하지만 차후에는 category.id를 가지고 fullpath를 가져온 다음 fullpath로 like 검색을 하자 */
-                    cat.fullPath LIKE CONCAT('%/', #{category.id}, '/%')
+                    cat.full_path LIKE CONCAT('%/', #{category.id}, '/%')
                 </foreach>
                 )
             </if>
@@ -45,13 +45,13 @@
                     <foreach collection="searchCondition.keywords" index="index" item="key" open="(" separator=" AND " close=")">
                         <choose>
                             <when test='searchType.code.equals("TITLE")'>
-                                p.subject LIKE CONCAT('%', #{key.name}, '%')
+                                LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%')
                             </when>
                             <when test='searchType.code.equals("CONTENT")'>
-                                p.normalBody LIKE CONCAT('%', #{key.name}, '%')
+                                LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%')
                             </when>
                             <otherwise>
-                                p.subject LIKE CONCAT('%', #{key.name}, '%') OR p.normalBody LIKE CONCAT('%', #{key.name}, '%')
+                                LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%') OR LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%')
                             </otherwise>
                         </choose>
                     </foreach>
@@ -61,68 +61,67 @@
                     <foreach collection="searchCondition.keywords" index="index" item="key" open="(" separator=" OR " close=")">
                         <choose>
                             <when test='searchType.code.equals("TITLE")'>
-                                p.subject LIKE CONCAT('%', #{key.name}, '%')
+                                LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%')
                             </when>
                             <when test='searchType.code.equals("CONTENT")'>
-                                p.normalBody LIKE CONCAT('%', #{key.name}, '%')
+                                LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%')
                             </when>
                             <otherwise>
-                                p.subject LIKE CONCAT('%', #{key.name}, '%') OR p.normalBody LIKE CONCAT('%', #{key.name}, '%')
+                                LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%') OR LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%')
                             </otherwise>
                         </choose>
                     </foreach>
                 </if>
             </if>
             <if test='tags.size > 0'>
-                AND map.tagId IN
+                AND map.tag_id IN
                 <foreach collection="tags" item="tag" open="(" separator=", " close=")">
                     #{tag.id}
                 </foreach>
             </if>
         </where>
-        GROUP BY p.Id , p.subject , cat.name , p.viewCount , p.createdAt , p.updatedAt
+        GROUP BY p.id, p.subject, cat.name, p.view_count, p.created_at, p.updated_at
 
     </select>
 
   <select id="findPrevNextById" resultType="PostPrevNextResponse">
     SELECT
-    IFNULL((
+    COALESCE((
     <![CDATA[
-         SELECT ID
-           FROM TB_POST
-          WHERE ID < #{id}
+         SELECT id
+           FROM tb_post
+          WHERE id < #{id}
          ]]>
     <if test='isAdmin == false'>
-      AND publicAccess = 1
+      AND public_access = true
     </if>
-    ORDER BY ID DESC
+    ORDER BY id DESC
     LIMIT 1), 0) AS PREV
-    , IFNULL((SELECT ID
-    FROM TB_POST
-    WHERE ID > #{id}
+    , COALESCE((SELECT id
+    FROM tb_post
+    WHERE id > #{id}
     <if test='isAdmin == false'>
-      AND publicAccess = 1
+      AND public_access = true
     </if>
-    ORDER BY ID ASC
+    ORDER BY id ASC
     LIMIT 1), 0) AS NEXT
-    FROM DUAL;
   </select>
 
     <select id="findByTempPosts" resultType="Long">
-        SELECT ID
-          FROM TB_POST
+        SELECT id
+          FROM tb_post
          WHERE subject is null OR subject = ''
     </select>
 
     <select id="findByPublicPosts" resultType="Long">
-        SELECT ID
-          FROM TB_POST
-         WHERE publicAccess = 1
+        SELECT id
+          FROM tb_post
+         WHERE public_access = true
     </select>
 
-    <update id="setMainPost" parameterType="java.lang.Long" statementType="CALLABLE">
-        UPDATE TB_POST
-        SET mainPage = IF(Id = #{id}, TRUE, FALSE)
+    <update id="setMainPost" parameterType="java.lang.Long">
+        UPDATE tb_post
+        SET main_page = CASE WHEN id = #{id} THEN TRUE ELSE FALSE END
     </update>
 
 </mapper>

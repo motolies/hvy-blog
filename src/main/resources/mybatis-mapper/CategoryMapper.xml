@@ -5,13 +5,13 @@
 <mapper namespace="kr.hvy.blog.modules.category.repository.mapper.CategoryMapper">
 
   <select id="findAllCategory" resultType="CategoryFlatResponse">
-    SELECT Id, Name, seq as `Order`, FullName, ParentId
+    SELECT id, name, seq AS "order", full_name, parent_id
     FROM tb_category
-    ORDER BY FullName
+    ORDER BY full_name
   </select>
 
-  <update id="updateFullName" statementType="CALLABLE">
-    {call usp_category_fullname_update()}
+  <update id="updateFullName">
+    SELECT usp_category_fullname_update()
   </update>
 
 </mapper>

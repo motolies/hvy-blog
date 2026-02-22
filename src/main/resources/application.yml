@@ -6,8 +6,8 @@ spring:
     init:
       mode: never # data.sql 실행
   datasource:
-    url: jdbc:mariadb://${DB_URL:mariadb:3309}/blog?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC
-    driver-class-name: org.mariadb.jdbc.Driver
+    url: jdbc:postgresql://${DB_URL:postgres:5432}/blog
+    driver-class-name: org.postgresql.Driver
     username: ${DB_USER:motolies}
     password: ${DB_PASS:motolies!!}
     hikari:
@@ -25,7 +25,10 @@ spring:
     properties:
       hibernate:
         release_mode: AFTER_TRANSACTION
-        dialect: org.hibernate.dialect.MariaDBDialect
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+      hypersistence:
+        utils:
+          enable_types_contributor: false
     hibernate:
       ddl-auto: validate
       naming.physical-strategy: kr.hvy.blog.infra.config.HvyPhysicalNamingStrategy

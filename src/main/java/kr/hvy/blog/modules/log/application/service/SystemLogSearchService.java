@@ -25,7 +25,7 @@ public class SystemLogSearchService {
     if (CollectionUtils.isEmpty(request.getOrderBy())) {
       request.getOrderBy().add(
           OrderBy.builder()
-              .column("createdAt")
+              .column("created_at")
               .direction(Direction.DESCENDING)
               .build()
       );

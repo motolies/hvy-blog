@@ -5,13 +5,13 @@
     <sql id="searchCondition">
         <where>
             <if test="includeDeleted == null or !includeDeleted">
-                AND m.deleted = 0
+                AND m.deleted = false
             </if>
             <if test="keyword != null and keyword != ''">
                 AND m.content LIKE CONCAT('%', #{keyword}, '%')
             </if>
             <if test="categoryId != null">
-                AND m.categoryId = #{categoryId}
+                AND m.category_id = #{categoryId}
             </if>
         </where>
     </sql>
@@ -21,17 +21,17 @@
             m.id,
             m.content,
             m.deleted,
-            c.id AS categoryId,
-            c.name AS categoryName,
-            c.seq AS categorySeq,
-            m.createdAt,
-            m.createdBy,
-            m.updatedAt,
-            m.updatedBy
+            c.id AS "categoryId",
+            c.name AS "categoryName",
+            c.seq AS "categorySeq",
+            m.created_at AS "createdAt",
+            m.created_by AS "createdBy",
+            m.updated_at AS "updatedAt",
+            m.updated_by AS "updatedBy"
         FROM tb_memo m
-        LEFT JOIN tb_memo_category c ON m.categoryId = c.id
+        LEFT JOIN tb_memo_category c ON m.category_id = c.id
         <include refid="searchCondition"/>
-        ORDER BY m.createdAt DESC
+        ORDER BY m.created_at DESC
     </select>
 
     <select id="countMemos" parameterType="MemoSearchRequest" resultType="int">

@@ -41,7 +41,7 @@ dependencies {
 
     // Library
     if (env == "prod") {
-        implementation('io.github.motolies:hvy-common:0.1.14') {
+        implementation('io.github.motolies:hvy-common:0.1.16') {
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream'
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream-binder-kafka'
         }
@@ -60,7 +60,7 @@ dependencies {
     implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.3'
 
     // jdbc driver
-    implementation 'org.mariadb.jdbc:mariadb-java-client:3.5.1'
+    implementation 'org.postgresql:postgresql'
 
     // jwt
     implementation 'io.jsonwebtoken:jjwt-api:0.11.2'
@@ -100,7 +100,6 @@ dependencies {
     testAnnotationProcessor 'org.mapstruct:mapstruct-processor:1.6.2'
 
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
-    runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter-test:3.0.3'

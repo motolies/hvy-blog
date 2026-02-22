@@ -8,63 +8,63 @@
             resultType="kr.hvy.blog.modules.log.application.dto.SystemLogSearchResponse">
         SELECT
             id,
-            traceId,
-            spanId,
-            requestUri,
-            controllerName,
-            methodName,
-            httpMethodType,
-            paramData,
-            responseBody,
-            stackTrace,
-            remoteAddr,
-            processTime,
+            trace_id AS traceId,
+            span_id AS spanId,
+            request_uri AS requestUri,
+            controller_name AS controllerName,
+            method_name AS methodName,
+            http_method_type AS httpMethodType,
+            param_data AS paramData,
+            response_body AS responseBody,
+            stack_trace AS stackTrace,
+            remote_addr AS remoteAddr,
+            process_time AS processTime,
             status,
-            createdAt,
-            createdBy
+            created_at AS createdAt,
+            created_by AS createdBy
         FROM tb_system_log
         <where>
             <if test="id != null">
                 AND id = #{id}
             </if>
             <if test="traceId != null and traceId != ''">
-                AND traceId = #{traceId}
+                AND trace_id = #{traceId}
             </if>
             <if test="spanId != null and spanId != ''">
-                AND spanId = #{spanId}
+                AND span_id = #{spanId}
             </if>
             <if test="requestUri != null and requestUri != ''">
-                AND requestUri LIKE CONCAT('%', #{requestUri}, '%')
+                AND request_uri LIKE CONCAT('%', #{requestUri}, '%')
             </if>
             <if test="controllerName != null and controllerName != ''">
-                AND controllerName LIKE CONCAT('%', #{controllerName}, '%')
+                AND controller_name LIKE CONCAT('%', #{controllerName}, '%')
             </if>
             <if test="methodName != null and methodName != ''">
-                AND methodName LIKE CONCAT('%', #{methodName}, '%')
+                AND method_name LIKE CONCAT('%', #{methodName}, '%')
             </if>
             <if test="httpMethodType != null and httpMethodType != ''">
-                AND httpMethodType = #{httpMethodType}
+                AND http_method_type = #{httpMethodType}
             </if>
             <if test="paramData != null and paramData != ''">
-                AND paramData LIKE CONCAT('%', #{paramData}, '%')
+                AND param_data LIKE CONCAT('%', #{paramData}, '%')
             </if>
             <if test="responseBody != null and responseBody != ''">
-                AND responseBody LIKE CONCAT('%', #{responseBody}, '%')
+                AND response_body LIKE CONCAT('%', #{responseBody}, '%')
             </if>
             <if test="stackTrace != null and stackTrace != ''">
-                AND stackTrace LIKE CONCAT('%', #{stackTrace}, '%')
+                AND stack_trace LIKE CONCAT('%', #{stackTrace}, '%')
             </if>
             <if test="remoteAddr != null and remoteAddr != ''">
-                AND remoteAddr = #{remoteAddr}
+                AND remote_addr = #{remoteAddr}
             </if>
             <if test="status != null">
                 AND status = #{status}
             </if>
             <if test="createdAtFrom != null">
-                AND createdAt &gt;= #{createdAtFrom}
+                AND created_at &gt;= #{createdAtFrom}
             </if>
             <if test="createdAtTo != null">
-                AND createdAt &lt; DATE_ADD(#{createdAtTo}, INTERVAL 1 DAY)
+                AND created_at &lt; #{createdAtTo}::timestamp + INTERVAL '1 day'
             </if>
         </where>
         <!-- PageInterceptor가 자동으로 ORDER BY와 LIMIT 추가 -->

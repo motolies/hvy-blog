@@ -47,7 +47,7 @@ public class Memo {
     this.id = TSID.from(id).toLong();
   }
 
-  @Column(nullable = false, columnDefinition = "LONGTEXT")
+  @Column(nullable = false, columnDefinition = "TEXT")
   private String content;
 
   @ManyToOne(fetch = FetchType.LAZY)
@@ -60,7 +60,7 @@ public class Memo {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -68,7 +68,7 @@ public class Memo {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default

@@ -33,7 +33,6 @@ import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.Parameter;
 
 @Entity
-@EntityListeners(CategoryEntityListener.class)
 @Getter
 @Setter
 @Builder
@@ -80,7 +79,7 @@ public class Category {
   @OneToMany(mappedBy = "parent", targetEntity = Category.class, fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
   private List<Category> categories = new ArrayList<>();
 
-  @Formula("(select count(*) from tb_post as p where p.categoryId = id)")
+  @Formula("(select count(*) from tb_post as p where p.category_id = id)")
   private int postCount;
 
   @PrePersist

@@ -8,55 +8,55 @@
             resultType="kr.hvy.blog.modules.log.application.dto.ApiLogSearchResponse">
         SELECT
             id,
-            traceId,
-            spanId,
-            requestUri,
-            httpMethodType,
-            requestHeader,
-            requestParam,
-            requestBody,
-            responseStatus,
-            responseBody,
-            processTime,
-            createdAt,
-            createdBy
+            trace_id AS traceId,
+            span_id AS spanId,
+            request_uri AS requestUri,
+            http_method_type AS httpMethodType,
+            request_header AS requestHeader,
+            request_param AS requestParam,
+            request_body AS requestBody,
+            response_status AS responseStatus,
+            response_body AS responseBody,
+            process_time AS processTime,
+            created_at AS createdAt,
+            created_by AS createdBy
         FROM tb_api_log
         <where>
             <if test="id != null">
                 AND id = #{id}
             </if>
             <if test="traceId != null and traceId != ''">
-                AND traceId = #{traceId}
+                AND trace_id = #{traceId}
             </if>
             <if test="spanId != null and spanId != ''">
-                AND spanId = #{spanId}
+                AND span_id = #{spanId}
             </if>
             <if test="requestUri != null and requestUri != ''">
-                AND requestUri LIKE CONCAT('%', #{requestUri}, '%')
+                AND request_uri LIKE CONCAT('%', #{requestUri}, '%')
             </if>
             <if test="httpMethodType != null and httpMethodType != ''">
-                AND httpMethodType = #{httpMethodType}
+                AND http_method_type = #{httpMethodType}
             </if>
             <if test="requestHeader != null and requestHeader != ''">
-                AND requestHeader LIKE CONCAT('%', #{requestHeader}, '%')
+                AND request_header LIKE CONCAT('%', #{requestHeader}, '%')
             </if>
             <if test="requestParam != null and requestParam != ''">
-                AND requestParam LIKE CONCAT('%', #{requestParam}, '%')
+                AND request_param LIKE CONCAT('%', #{requestParam}, '%')
             </if>
             <if test="requestBody != null and requestBody != ''">
-                AND requestBody LIKE CONCAT('%', #{requestBody}, '%')
+                AND request_body LIKE CONCAT('%', #{requestBody}, '%')
             </if>
             <if test="responseStatus != null and responseStatus != ''">
-                AND responseStatus = #{responseStatus}
+                AND response_status = #{responseStatus}
             </if>
             <if test="responseBody != null and responseBody != ''">
-                AND responseBody LIKE CONCAT('%', #{responseBody}, '%')
+                AND response_body LIKE CONCAT('%', #{responseBody}, '%')
             </if>
             <if test="createdAtFrom != null">
-                AND createdAt &gt;= #{createdAtFrom}
+                AND created_at &gt;= #{createdAtFrom}
             </if>
             <if test="createdAtTo != null">
-                AND createdAt &lt; DATE_ADD(#{createdAtTo}, INTERVAL 1 DAY)
+                AND created_at &lt; #{createdAtTo}::timestamp + INTERVAL '1 day'
             </if>
         </where>
         <!-- PageInterceptor가 자동으로 ORDER BY와 LIMIT 추가 -->

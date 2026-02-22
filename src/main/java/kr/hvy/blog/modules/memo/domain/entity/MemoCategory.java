@@ -43,7 +43,7 @@ public class MemoCategory {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -51,7 +51,7 @@ public class MemoCategory {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "DATETIME(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default

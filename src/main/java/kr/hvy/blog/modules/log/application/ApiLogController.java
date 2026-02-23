@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.log.application;
 
+import jakarta.validation.Valid;
 import kr.hvy.blog.modules.log.application.dto.ApiLogSearchRequest;
 import kr.hvy.blog.modules.log.application.dto.ApiLogSearchResponse;
 import kr.hvy.blog.modules.log.application.service.ApiLogSearchService;
@@ -21,7 +22,7 @@ public class ApiLogController {
 
   @PostMapping("/search")
   public PageResponse<ApiLogSearchResponse> search(
-      @RequestBody ApiLogSearchRequest request) {
+      @RequestBody @Valid ApiLogSearchRequest request) {
     log.debug("API log search request: {}", request);
     return apiLogSearchService.search(request);
   }

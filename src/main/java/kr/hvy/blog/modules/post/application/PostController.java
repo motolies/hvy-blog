@@ -2,9 +2,13 @@ package kr.hvy.blog.modules.post.application;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Validator;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 import kr.hvy.blog.modules.post.application.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.application.dto.PostPrevNextResponse;
 import kr.hvy.blog.modules.post.application.dto.PostResponse;
@@ -25,6 +29,7 @@ public class PostController {
 
   private final ObjectMapper objectMapper;
   private final PostPublicService postPublicService;
+  private final Validator validator;
 
   /**
    * main post 조회
@@ -69,6 +74,11 @@ public class PostController {
 
     // https://stackoverflow.com/questions/4486787/jackson-with-json-unrecognized-field-not-marked-as-ignorable
     SearchObject searchObject = objectMapper.readValue(decodedQuery, SearchObject.class);
+
+    Set<ConstraintViolation<SearchObject>> violations = validator.validate(searchObject);
+    if (!violations.isEmpty()) {
+      throw new ConstraintViolationException(violations);
+    }
 
     return postPublicService.searchPosts(searchObject);
   }

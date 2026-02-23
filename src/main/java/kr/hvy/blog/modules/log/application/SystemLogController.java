@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.log.application;
 
+import jakarta.validation.Valid;
 import kr.hvy.blog.modules.log.application.dto.SystemLogSearchRequest;
 import kr.hvy.blog.modules.log.application.dto.SystemLogSearchResponse;
 import kr.hvy.blog.modules.log.application.service.SystemLogSearchService;
@@ -21,7 +22,7 @@ public class SystemLogController {
 
   @PostMapping("/search")
   public PageResponse<SystemLogSearchResponse> search(
-      @RequestBody SystemLogSearchRequest request) {
+      @RequestBody @Valid SystemLogSearchRequest request) {
     log.debug("System log search request: {}", request);
     return systemLogSearchService.search(request);
   }

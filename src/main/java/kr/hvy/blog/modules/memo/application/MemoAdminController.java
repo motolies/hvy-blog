@@ -49,7 +49,7 @@ public class MemoAdminController {
   }
 
   @PostMapping("/search")
-  public PageResponse<MemoResponse> search(@RequestBody MemoSearchRequest request) {
+  public PageResponse<MemoResponse> search(@RequestBody @Valid MemoSearchRequest request) {
     return memoService.search(request);
   }
 }

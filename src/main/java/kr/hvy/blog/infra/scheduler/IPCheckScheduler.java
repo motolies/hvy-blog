@@ -8,7 +8,7 @@ import kr.hvy.blog.modules.common.publicip.application.service.PublicIpService;
 import kr.hvy.blog.modules.common.publicip.domain.RedisPublicIp;
 import kr.hvy.common.infrastructure.client.rest.RestApi;
 import kr.hvy.common.infrastructure.notification.slack.Notify;
-import kr.hvy.common.infrastructure.notification.slack.NotifyRequest;
+import kr.hvy.common.infrastructure.notification.slack.message.NoticeMessage;
 import kr.hvy.common.infrastructure.scheduler.impl.AbstractScheduler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,10 +50,11 @@ public class IPCheckScheduler extends AbstractScheduler {
             if (!old.getIp().equals(newPublicIP)) {
               String msg = "Public IP changed from " + old.getIp() + " to " + newPublicIP;
               log.error(msg);
-              notify.sendMessage(NotifyRequest.builder()
+              notify.sendMessage(NoticeMessage.builder()
                   .channel(SlackChannel.NOTIFY.getChannel())
-                  .message(msg)
-                  .isNotify(true)
+                  .title("Public IP 변경 감지")
+                  .content(msg)
+                  .notify(true)
                   .build());
 
               // update new ip

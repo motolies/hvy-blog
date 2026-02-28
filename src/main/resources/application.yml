@@ -127,8 +127,8 @@ scheduler:
   public-ip:
     lock-name: PUBLIC-IP-TEST
     cron-expression: "0 0 0 * * ?"
-  ppomppu:
-    lock-name: PPOMPPU-TEST
+  hotdeal:
+    lock-name: HOTDEAL-TEST
     cron-expression: "*/10 * * * * ?"
   log-cleaner:
     lock-name: LOGCLEANER-TEST
@@ -163,9 +163,9 @@ scheduler:
   public-ip:
     lock-name: PUBLIC-IP-PROD
     cron-expression: "0 * * * * ?"
-  ppomppu:
-    lock-name: PPOMPPU-PROD
-    cron-expression: "* */10 * * * ?"
+  hotdeal:
+    lock-name: HOTDEAL-PROD
+    cron-expression: "0 */10 * * * ?"
   log-cleaner:
     lock-name: LOGCLEANER-PROD
     cron-expression: "* * 0 * * ?"

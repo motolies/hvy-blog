@@ -41,7 +41,7 @@ dependencies {
 
     // Library
     if (env == "prod") {
-        implementation('io.github.motolies:hvy-common:0.1.18') {
+        implementation('io.github.motolies:hvy-common:0.1.19') {
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream'
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream-binder-kafka'
         }
@@ -69,6 +69,9 @@ dependencies {
 
     // shedlock
     implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.3.0'
+
+    // html parsing (hot deal scraping)
+    implementation 'org.jsoup:jsoup:1.18.3'
 
 
     // redis

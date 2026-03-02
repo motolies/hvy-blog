@@ -21,8 +21,7 @@ CREATE TABLE IF NOT EXISTS tb_hot_deal_site
     created_at         TIMESTAMP(6)  NOT NULL,
     created_by         VARCHAR(255)           DEFAULT NULL,
     updated_at         TIMESTAMP(6)  NOT NULL,
-    updated_by         VARCHAR(255)           DEFAULT NULL,
-    CONSTRAINT uk_hot_deal_site_code UNIQUE (site_code)
+    updated_by         VARCHAR(255)           DEFAULT NULL
 );
 
 COMMENT ON TABLE  tb_hot_deal_site                    IS '핫딜 사이트 설정';
@@ -126,6 +125,10 @@ INSERT INTO tb_hot_deal_site
 VALUES
     ('PPOMPPU', '뽐뿌', 'https://www.ppomppu.co.kr', '/zboard/zboard.php?id=ppomppu',
      TRUE, FALSE,
-     20, 4000, 25,
-     NOW(), 'SYSTEM', NOW(), 'SYSTEM')
-ON CONFLICT (site_code) DO NOTHING;
+     20, 3000, 20,
+     NOW(), 'SYSTEM', NOW(), 'SYSTEM'),
+    ('PPOMPPU', '뽐뿌(해외)', 'https://www.ppomppu.co.kr', '/zboard/zboard.php?id=ppomppu4',
+     TRUE, FALSE,
+     20, 3000, 20,
+     NOW(), 'SYSTEM', NOW(), 'SYSTEM');
+-- ON CONFLICT (site_code) DO NOTHING;

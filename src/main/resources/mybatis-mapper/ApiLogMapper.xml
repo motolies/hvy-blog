@@ -4,7 +4,7 @@
 
 <mapper namespace="kr.hvy.blog.modules.log.repository.mapper.ApiLogMapper">
 
-    <select id="findBySearchRequest" parameterType="kr.hvy.blog.modules.log.application.dto.ApiLogSearchRequest"
+    <select id="findBySearchCriteria" parameterType="kr.hvy.blog.modules.log.application.dto.ApiLogSearchCriteria"
             resultType="kr.hvy.blog.modules.log.application.dto.ApiLogSearchResponse">
         SELECT
             id,
@@ -52,11 +52,11 @@
             <if test="responseBody != null and responseBody != ''">
                 AND response_body LIKE CONCAT('%', #{responseBody}, '%')
             </if>
-            <if test="createdAtFrom != null">
-                AND created_at &gt;= #{createdAtFrom}
+            <if test="createdAtFromUtc != null">
+                AND created_at &gt;= #{createdAtFromUtc}
             </if>
-            <if test="createdAtTo != null">
-                AND created_at &lt; #{createdAtTo}::timestamp + INTERVAL '1 day'
+            <if test="createdAtToUtcExclusive != null">
+                AND created_at &lt; #{createdAtToUtcExclusive}
             </if>
         </where>
         <!-- PageInterceptor가 자동으로 ORDER BY와 LIMIT 추가 -->

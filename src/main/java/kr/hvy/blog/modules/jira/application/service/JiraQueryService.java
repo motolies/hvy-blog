@@ -10,9 +10,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import kr.hvy.blog.modules.admin.application.dto.CommonClassResponse;
-import kr.hvy.blog.modules.admin.application.dto.CommonCodeResponse;
-import kr.hvy.blog.modules.admin.application.service.CommonCodePublicService;
+import kr.hvy.blog.modules.admin.application.dto.MasterCodeResponse;
+import kr.hvy.blog.modules.admin.application.service.MasterCodeService;
 import kr.hvy.blog.modules.jira.application.dto.IssueDto;
 import kr.hvy.blog.modules.jira.application.dto.JiraSprintSummaryResponse;
 import kr.hvy.blog.modules.jira.application.dto.WorklogDto;
@@ -42,7 +41,7 @@ public class JiraQueryService {
 
   private final JiraIssueRepository jiraIssueRepository;
   private final JiraWorklogRepository jiraWorklogRepository;
-  private final CommonCodePublicService commonCodePublicService;
+  private final MasterCodeService masterCodeService;
 
   /**
    * 모든 이슈를 조회합니다.
@@ -144,10 +143,10 @@ public class JiraQueryService {
     // 2. 해당 연도의 완료된 이슈들 조회
     String yearPattern = year + "-SP-%";
 
-    CommonClassResponse jiraStatus = commonCodePublicService.getClass("JIRA_STATUS");
-    Set<String> statuses = jiraStatus.getCodes().stream()
-        .filter(code -> "Y".equals(code.getAttribute2Value()))
-        .map(CommonCodeResponse::getCode)
+    List<MasterCodeResponse> jiraStatuses = masterCodeService.getChildrenByRootCode("JIRA_STATUS");
+    Set<String> statuses = jiraStatuses.stream()
+        .filter(code -> "Y".equals(code.getAttributes().get("isDone")))
+        .map(MasterCodeResponse::getCode)
         .collect(Collectors.toSet());
 
     List<JiraIssue> completedIssues = jiraIssueRepository.findCompletedIssuesByYear(yearPattern, statuses);

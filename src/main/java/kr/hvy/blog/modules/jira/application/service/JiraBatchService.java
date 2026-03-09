@@ -9,9 +9,8 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import kr.hvy.blog.modules.admin.application.dto.CommonClassResponse;
-import kr.hvy.blog.modules.admin.application.dto.CommonCodeResponse;
-import kr.hvy.blog.modules.admin.application.service.CommonCodePublicService;
+import kr.hvy.blog.modules.admin.application.dto.MasterCodeResponse;
+import kr.hvy.blog.modules.admin.application.service.MasterCodeService;
 import kr.hvy.blog.modules.jira.application.dto.IssueDto;
 import kr.hvy.blog.modules.jira.repository.JiraIssueRepository;
 import kr.hvy.blog.modules.jira.client.JiraClientWrapper;
@@ -36,7 +35,7 @@ public class JiraBatchService {
   private final JiraClientWrapper jiraClientWrapper;
   private final JiraSyncService jiraSyncService;
   private final JiraIssueRepository jiraIssueRepository;
-  private final CommonCodePublicService commonCodePublicService;
+  private final MasterCodeService masterCodeService;
   private final TaskExecutor virtualThreadExecutor;
 
 
@@ -179,10 +178,10 @@ public class JiraBatchService {
    * attribute2Value가 'Y'인 상태를 Done 상태로 간주
    */
   private Set<String> getDoneStatuses() {
-    CommonClassResponse jiraStatus = commonCodePublicService.getClass("JIRA_STATUS");
-    return jiraStatus.getCodes().stream()
-        .filter(code -> "Y".equals(code.getAttribute2Value()))
-        .map(CommonCodeResponse::getCode)
+    List<MasterCodeResponse> jiraStatuses = masterCodeService.getChildrenByRootCode("JIRA_STATUS");
+    return jiraStatuses.stream()
+        .filter(code -> "Y".equals(code.getAttributes().get("isDone")))
+        .map(MasterCodeResponse::getCode)
         .collect(Collectors.toSet());
   }
 

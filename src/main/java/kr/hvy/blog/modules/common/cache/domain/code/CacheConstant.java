@@ -7,8 +7,8 @@ public class CacheConstant {
   public static final String SEARCH_ENGINE = "searchEngine";
   public static final String CATEGORY = "category";
 
-  // CommonCode 캐시 상수들
-  public static final String COMMON_CODE_CLASS = "commonCodeClass";
-  public static final String COMMON_CODE_DATA = "commonCodeData";
-  public static final String COMMON_CODE_TREE = "commonCodeTree";
+  // MasterCode 캐시 상수들
+  public static final String MASTER_CODE_TREE = "masterCodeTree";
+  public static final String MASTER_CODE_NODE = "masterCodeNode";
+  public static final String MASTER_CODE_CHILDREN = "masterCodeChildren";
 }

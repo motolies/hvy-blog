@@ -20,8 +20,7 @@ DROP TABLE IF EXISTS tb_memo CASCADE;
 DROP TABLE IF EXISTS tb_memo_category CASCADE;
 DROP TABLE IF EXISTS tb_jira_worklog CASCADE;
 DROP TABLE IF EXISTS tb_jira_issue CASCADE;
-DROP TABLE IF EXISTS tb_common_code CASCADE;
-DROP TABLE IF EXISTS tb_common_class CASCADE;
+DROP TABLE IF EXISTS tb_master_code CASCADE;
 DROP TABLE IF EXISTS tb_user_authority_map CASCADE;
 DROP TABLE IF EXISTS tb_user CASCADE;
 DROP TABLE IF EXISTS tb_post_tag_map CASCADE;
@@ -213,86 +212,61 @@ COMMENT ON COLUMN tb_user_authority_map.user_id      IS '사용자 ID (FK)';
 COMMENT ON COLUMN tb_user_authority_map.authority_id IS '권한 ID (FK)';
 
 -- ---------------------------------------------
--- 공통코드 관리 테이블들 (엔티티 기준 Surrogate Key 패턴)
+-- 마스터코드 관리 테이블 (자기참조 트리 + JSONB 속성)
 -- ---------------------------------------------
 
-CREATE TABLE tb_common_class
-(
-    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code            VARCHAR(64)  NOT NULL,
-    name            VARCHAR(128) NULL,
-    description     VARCHAR(512) NULL,
-    attribute1_name VARCHAR(64)  NULL,
-    attribute2_name VARCHAR(64)  NULL,
-    attribute3_name VARCHAR(64)  NULL,
-    attribute4_name VARCHAR(64)  NULL,
-    attribute5_name VARCHAR(64)  NULL,
-    is_active       BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMP(6) NOT NULL,
-    created_by      VARCHAR(32)  NULL,
-    updated_at      TIMESTAMP(6) NULL,
-    updated_by      VARCHAR(32)  NULL,
-    CONSTRAINT uk_common_class_code UNIQUE (code)
-);
-COMMENT ON TABLE  tb_common_class                  IS '공통코드 클래스 (코드 그룹 정의)';
-COMMENT ON COLUMN tb_common_class.id               IS '클래스 내부 ID (PK, Surrogate Key)';
-COMMENT ON COLUMN tb_common_class.code             IS '클래스 코드 (Natural Key) 예: REGION_CLASS';
-COMMENT ON COLUMN tb_common_class.name             IS '클래스명 예: "지역분류"';
-COMMENT ON COLUMN tb_common_class.description      IS '설명';
-COMMENT ON COLUMN tb_common_class.attribute1_name  IS '동적속성1 이름';
-COMMENT ON COLUMN tb_common_class.attribute2_name  IS '동적속성2 이름';
-COMMENT ON COLUMN tb_common_class.attribute3_name  IS '동적속성3 이름';
-COMMENT ON COLUMN tb_common_class.attribute4_name  IS '동적속성4 이름';
-COMMENT ON COLUMN tb_common_class.attribute5_name  IS '동적속성5 이름';
-COMMENT ON COLUMN tb_common_class.is_active        IS '활성화 여부';
-COMMENT ON COLUMN tb_common_class.created_at       IS '생성일시';
-COMMENT ON COLUMN tb_common_class.created_by       IS '생성자';
-COMMENT ON COLUMN tb_common_class.updated_at       IS '수정일시';
-COMMENT ON COLUMN tb_common_class.updated_by       IS '수정자';
-
--- ---------------------------------------------
-
-CREATE TABLE tb_common_code
+CREATE TABLE tb_master_code
 (
     id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code             VARCHAR(32)  NOT NULL,
-    name             VARCHAR(64)  NOT NULL,
+
+    -- 트리 구조
+    parent_id        BIGINT       NULL,
+    depth            INTEGER      NOT NULL DEFAULT 0,
+    path             VARCHAR(512) NULL,
+
+    -- 코드 정보
+    code             VARCHAR(64)  NOT NULL,
+    name             VARCHAR(128) NOT NULL,
     description      VARCHAR(512) NULL,
-    attribute1_value VARCHAR(128) NULL,
-    attribute2_value VARCHAR(128) NULL,
-    attribute3_value VARCHAR(128) NULL,
-    attribute4_value VARCHAR(128) NULL,
-    attribute5_value VARCHAR(128) NULL,
+
+    -- 유연한 속성 (JSONB)
+    attributes       JSONB        NOT NULL DEFAULT '{}'::JSONB,
+    attribute_schema JSONB        NOT NULL DEFAULT '[]'::JSONB,
+
+    -- 메타
     sort             INTEGER      NOT NULL DEFAULT 0,
     is_active        BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at       TIMESTAMP(6) NOT NULL,
-    created_by       VARCHAR(32)  NULL,
+
+    -- 감사
+    created_at       TIMESTAMP(6) NOT NULL DEFAULT NOW(),
+    created_by       VARCHAR(64)  NULL,
     updated_at       TIMESTAMP(6) NULL,
-    updated_by       VARCHAR(32)  NULL,
-    class_id         BIGINT       NOT NULL,
-    child_class_id   BIGINT       NULL,
-    CONSTRAINT uk_common_code_class_code     UNIQUE (class_id, code),
-    CONSTRAINT fk_common_code_class_id       FOREIGN KEY (class_id)       REFERENCES tb_common_class (id),
-    CONSTRAINT fk_common_code_child_class_id FOREIGN KEY (child_class_id) REFERENCES tb_common_class (id)
+    updated_by       VARCHAR(64)  NULL,
+
+    CONSTRAINT uk_master_code_parent_code UNIQUE (parent_id, code),
+    CONSTRAINT fk_master_code_parent      FOREIGN KEY (parent_id) REFERENCES tb_master_code (id)
 );
-COMMENT ON TABLE  tb_common_code                  IS '공통코드 (실제 코드값 저장)';
-COMMENT ON COLUMN tb_common_code.id               IS '코드 내부 ID (PK, Surrogate Key)';
-COMMENT ON COLUMN tb_common_code.code             IS '코드값 (Natural Key)';
-COMMENT ON COLUMN tb_common_code.name             IS '코드명';
-COMMENT ON COLUMN tb_common_code.description      IS '설명';
-COMMENT ON COLUMN tb_common_code.attribute1_value IS '동적속성1 값';
-COMMENT ON COLUMN tb_common_code.attribute2_value IS '동적속성2 값';
-COMMENT ON COLUMN tb_common_code.attribute3_value IS '동적속성3 값';
-COMMENT ON COLUMN tb_common_code.attribute4_value IS '동적속성4 값';
-COMMENT ON COLUMN tb_common_code.attribute5_value IS '동적속성5 값';
-COMMENT ON COLUMN tb_common_code.sort             IS '정렬순서';
-COMMENT ON COLUMN tb_common_code.is_active        IS '활성화 여부';
-COMMENT ON COLUMN tb_common_code.created_at       IS '생성일시';
-COMMENT ON COLUMN tb_common_code.created_by       IS '생성자';
-COMMENT ON COLUMN tb_common_code.updated_at       IS '수정일시';
-COMMENT ON COLUMN tb_common_code.updated_by       IS '수정자';
-COMMENT ON COLUMN tb_common_code.class_id         IS '소속 클래스 ID (FK)';
-COMMENT ON COLUMN tb_common_code.child_class_id   IS '하위 클래스 ID (NULL이면 leaf 노드)';
+COMMENT ON TABLE  tb_master_code                   IS '마스터코드 (자기참조 트리 구조)';
+COMMENT ON COLUMN tb_master_code.id                IS '마스터코드 ID (PK)';
+COMMENT ON COLUMN tb_master_code.parent_id         IS '부모 노드 ID (NULL이면 루트)';
+COMMENT ON COLUMN tb_master_code.depth             IS '트리 깊이 (0=루트, 1+=하위)';
+COMMENT ON COLUMN tb_master_code.path              IS 'Materialized Path (예: /1/5/12)';
+COMMENT ON COLUMN tb_master_code.code              IS '코드값';
+COMMENT ON COLUMN tb_master_code.name              IS '코드명';
+COMMENT ON COLUMN tb_master_code.description       IS '설명';
+COMMENT ON COLUMN tb_master_code.attributes        IS '코드별 속성값 (JSONB)';
+COMMENT ON COLUMN tb_master_code.attribute_schema  IS '루트 노드 전용: 속성 스키마 정의 (JSONB)';
+COMMENT ON COLUMN tb_master_code.sort              IS '정렬순서';
+COMMENT ON COLUMN tb_master_code.is_active         IS '활성화 여부';
+COMMENT ON COLUMN tb_master_code.created_at        IS '생성일시';
+COMMENT ON COLUMN tb_master_code.created_by        IS '생성자';
+COMMENT ON COLUMN tb_master_code.updated_at        IS '수정일시';
+COMMENT ON COLUMN tb_master_code.updated_by        IS '수정자';
+
+CREATE INDEX idx_mc_parent_id  ON tb_master_code (parent_id);
+CREATE INDEX idx_mc_path       ON tb_master_code (path);
+CREATE INDEX idx_mc_code       ON tb_master_code (code);
+CREATE INDEX idx_mc_attributes ON tb_master_code USING GIN (attributes);
 
 -- ---------------------------------------------
 -- Jira 관련 테이블들

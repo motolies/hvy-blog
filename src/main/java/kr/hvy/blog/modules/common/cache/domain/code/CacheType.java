@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.common.cache.domain.code;
 
 import java.time.Duration;
+import kr.hvy.common.config.cache.TwoTierCacheProperties;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -8,16 +9,13 @@ import lombok.Getter;
 @AllArgsConstructor
 public enum CacheType {
 
-  SEARCH_ENGINE(CacheConstant.SEARCH_ENGINE, Duration.ofMinutes(10), 200, false),
-  CATEGORY(CacheConstant.CATEGORY, Duration.ofDays(1), 200, false),
+  SEARCH_ENGINE(TwoTierCacheProperties.twoTier(CacheConstant.SEARCH_ENGINE, Duration.ofHours(1), 200, Duration.ofDays(1))),
+  CATEGORY(TwoTierCacheProperties.twoTier(CacheConstant.CATEGORY, Duration.ofHours(1), 200, Duration.ofDays(1))),
 
-  // MasterCode L1 캐시 타입들 (Caffeine, 짧은 TTL)
-  MASTER_CODE_TREE(CacheConstant.MASTER_CODE_TREE, Duration.ofMinutes(10), 50, false),
-  MASTER_CODE_NODE(CacheConstant.MASTER_CODE_NODE, Duration.ofMinutes(10), 200, false),
-  MASTER_CODE_CHILDREN(CacheConstant.MASTER_CODE_CHILDREN, Duration.ofMinutes(10), 100, false);
+  // MasterCode L1+L2 캐시
+  MASTER_CODE_TREE(TwoTierCacheProperties.twoTier(CacheConstant.MASTER_CODE_TREE, Duration.ofHours(6), 50, Duration.ofDays(1))),
+  MASTER_CODE_NODE(TwoTierCacheProperties.twoTier(CacheConstant.MASTER_CODE_NODE, Duration.ofHours(6), 200, Duration.ofDays(1))),
+  MASTER_CODE_CHILDREN(TwoTierCacheProperties.twoTier(CacheConstant.MASTER_CODE_CHILDREN, Duration.ofHours(6), 100, Duration.ofDays(1)));
 
-  private final String name;
-  private final Duration timeout;
-  private final int maxSize;
-  private final boolean allowNullValues;
+  private final TwoTierCacheProperties properties;
 }

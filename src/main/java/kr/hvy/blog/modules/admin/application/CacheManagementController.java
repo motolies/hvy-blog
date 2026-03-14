@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.admin.application;
 
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
+import kr.hvy.common.config.cache.TwoTierCache;
 import kr.hvy.common.core.exception.DataNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -98,14 +99,10 @@ public class CacheManagementController {
 
     for (String cacheName : cacheManager.getCacheNames()) {
       Cache cache = cacheManager.getCache(cacheName);
-      if (cache instanceof CaffeineCache) {
-        CaffeineCache caffeineCache = (CaffeineCache) cache;
-        com.github.benmanes.caffeine.cache.Cache<Object, Object> nativeCache =
-            caffeineCache.getNativeCache();
+      com.github.benmanes.caffeine.cache.Cache<Object, Object> nativeCache = getNativeCaffeineCache(cache);
+      if (nativeCache != null) {
         CacheStats stats = nativeCache.stats();
-
-        Map<String, Object> statsMap = buildStatsMap(stats);
-        allStats.put(cacheName, statsMap);
+        allStats.put(cacheName, buildStatsMap(stats));
       }
     }
 
@@ -127,13 +124,10 @@ public class CacheManagementController {
       throw new DataNotFoundException("error.cache.not.found");
     }
 
-    if (!(cache instanceof CaffeineCache)) {
+    com.github.benmanes.caffeine.cache.Cache<Object, Object> nativeCache = getNativeCaffeineCache(cache);
+    if (nativeCache == null) {
       throw new IllegalArgumentException("error.cache.not.caffeine");
     }
-
-    CaffeineCache caffeineCache = (CaffeineCache) cache;
-    com.github.benmanes.caffeine.cache.Cache<Object, Object> nativeCache =
-        caffeineCache.getNativeCache();
     CacheStats stats = nativeCache.stats();
 
     Map<String, Object> response = new HashMap<>();
@@ -141,6 +135,17 @@ public class CacheManagementController {
     response.put("stats", buildStatsMap(stats));
 
     return response;
+  }
+
+  @SuppressWarnings("unchecked")
+  private com.github.benmanes.caffeine.cache.Cache<Object, Object> getNativeCaffeineCache(Cache cache) {
+    if (cache instanceof TwoTierCache twoTierCache) {
+      return (com.github.benmanes.caffeine.cache.Cache<Object, Object>) twoTierCache.getNativeCache();
+    }
+    if (cache instanceof CaffeineCache caffeineCache) {
+      return caffeineCache.getNativeCache();
+    }
+    return null;
   }
 
   /**

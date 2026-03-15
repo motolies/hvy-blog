@@ -1,9 +1,12 @@
 package kr.hvy.blog.modules.tag.application.service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import kr.hvy.blog.modules.tag.application.dto.TagCreate;
+import kr.hvy.blog.modules.tag.application.dto.TagMerge;
 import kr.hvy.blog.modules.tag.application.dto.TagResponse;
+import kr.hvy.blog.modules.tag.application.dto.TagUpdate;
 import kr.hvy.blog.modules.tag.application.specification.TagCreateSpecification;
 import kr.hvy.blog.modules.tag.domain.Tag;
 import kr.hvy.blog.modules.tag.mapper.TagDtoMapper;
@@ -69,5 +72,31 @@ public class TagService {
         .id(id).build();
   }
 
+  public TagResponse update(Long id, TagUpdate updateDto) {
+    Tag tag = findById(id);
+    tag.setName(updateDto.getName());
+    return tagDtoMapper.toResponse(tagRepository.save(tag));
+  }
+
+  public Map<String, Integer> deleteUnused() {
+    int deletedCount = tagRepository.deleteUnusedTags();
+    log.info("미사용 태그 {}건 삭제", deletedCount);
+    return Map.of("deletedCount", deletedCount);
+  }
+
+  @Transactional
+  public TagResponse merge(TagMerge mergeDto) {
+    Tag source = findById(mergeDto.getSourceTagId());
+    Tag target = findById(mergeDto.getTargetTagId());
+
+    // source의 포스트를 target에 추가 (이미 있으면 Set 특성상 무시됨)
+    Set.copyOf(source.getPosts()).forEach(post -> {
+      source.removePost(post);
+      target.addPost(post);
+    });
+
+    tagRepository.delete(source);
+    return tagDtoMapper.toResponse(tagRepository.save(target));
+  }
 
 }

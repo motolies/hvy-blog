@@ -76,7 +76,7 @@
             <if test='tags.size > 0'>
                 AND map.tag_id IN
                 <foreach collection="tags" item="tag" open="(" separator=", " close=")">
-                    #{tag.id}
+                    CAST(#{tag.id} AS BIGINT)
                 </foreach>
             </if>
         </where>

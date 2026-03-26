@@ -3,15 +3,36 @@
 
   <!-- 로그 파일 위치 및 공통 패턴 정의 -->
   <property name="LOG_HOME" value="logs"/>
+  <property name="LOG_PATTERN"
+            value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%-5level] [%X{traceId},%X{spanId}] %logger{15} - %msg%n"/>
 
-  <!-- 콘솔 출력 appender (모든 프로필 공통) -->
+  <!-- 텍스트 콘솔 appender (dev/default용) -->
   <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
       <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight([%-5level] [%X{traceId},%X{spanId}]) %cyan(%logger{15}) - %msg%n</pattern>
     </encoder>
   </appender>
 
-  <!-- 기본(default) 프로필이 아닐 때만 파일 롤링 appender 활성화 -->
+  <!-- prod 전용: JSON 콘솔 appender (Loki/Promtail이 stdout에서 수집) -->
+  <springProfile name="prod">
+    <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+      <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+        <includeMdc>true</includeMdc>
+        <includeContext>false</includeContext>
+        <includeCallerData>false</includeCallerData>
+        <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</timestampPattern>
+        <timezone>UTC</timezone>
+        <shortenedLoggerNameLength>36</shortenedLoggerNameLength>
+        <fieldNames>
+          <timestamp>timestamp</timestamp>
+          <version>[ignore]</version>
+        </fieldNames>
+        <customFields>{"service":"hvy-blog"}</customFields>
+      </encoder>
+    </appender>
+  </springProfile>
+
+  <!-- 비-default 프로필: 파일 롤링 appender -->
   <springProfile name="!default">
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
       <file>${LOG_HOME}/application.log</file>
@@ -28,14 +49,20 @@
     </appender>
   </springProfile>
 
-  <!-- root 로거 설정: 기본(default) 프로필은 콘솔만, 그 외 프로필은 콘솔과 파일 둘 다 사용 -->
+  <!-- Root 로거: 프로필별 분기 -->
   <springProfile name="default">
     <root level="INFO">
       <appender-ref ref="CONSOLE"/>
     </root>
   </springProfile>
 
-  <springProfile name="!default">
+  <springProfile name="prod">
+    <root level="INFO">
+      <appender-ref ref="JSON_CONSOLE"/>
+    </root>
+  </springProfile>
+
+  <springProfile name="!default &amp; !prod">
     <root level="INFO">
       <appender-ref ref="CONSOLE"/>
       <appender-ref ref="FILE"/>

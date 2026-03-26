@@ -2,6 +2,8 @@ server:
   port: ${PORT:9090}
 
 spring:
+  application:
+    name: hvy-blog
   sql:
     init:
       mode: never # data.sql 실행
@@ -97,6 +99,12 @@ logging:
       max-history: 7
       max-size: 10MB
 
+# tracing
+management:
+  tracing:
+    sampling:
+      probability: 0.0
+
 # jwt
 jwt:
   header:
@@ -155,6 +163,14 @@ spring:
   config:
     activate:
       on-profile: prod
+# tracing
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://zipkin:9411/api/v2/spans}
 # cache
 cache:
   logging:

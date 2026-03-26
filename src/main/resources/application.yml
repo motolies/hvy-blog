@@ -64,6 +64,7 @@ hvy:
         - "dataSource"
       enable-result-set-logging: true  # ResultSet 테이블 로깅 활성화
       max-column-value-length: ${DB_WRAPPER_MAX_COLUMN_VALUE_LENGTH:200}
+      max-param-value-length: ${DB_WRAPPER_MAX_PARAM_VALUE_LENGTH:500}  # SQL 파라미터 인라인 시 문자열 값 최대 길이
 
 #Configure Mybatis
 mybatis:

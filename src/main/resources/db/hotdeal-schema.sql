@@ -132,3 +132,18 @@ VALUES
      20, 3000, 20,
      NOW(), 'SYSTEM', NOW(), 'SYSTEM');
 -- ON CONFLICT (site_code) DO NOTHING;
+
+
+-- =============================================
+-- 초기 데이터: 루리웹 핫딜 게시판
+-- =============================================
+INSERT INTO tb_hot_deal_site
+    (site_code, site_name, site_url, board_url,
+     enabled, requires_login,
+     min_recommendation, min_view_count, min_comment_count,
+     created_at, created_by, updated_at, updated_by)
+VALUES
+    ('RULIWEB', '루리웹', 'https://bbs.ruliweb.com', '/market/board/1020',
+     TRUE, FALSE,
+     10, 5000, 15,
+     NOW(), 'SYSTEM', NOW(), 'SYSTEM');

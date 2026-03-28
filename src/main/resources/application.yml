@@ -132,6 +132,10 @@ jira:
   sync:
     batch-size: ${JIRA_SYNC_BATCH_SIZE:50}
 
+# browserless (Chromium sidecar for Cloudflare-protected sites)
+browser:
+  content-url: ${BROWSER_CONTENT_URL:http://192.168.0.100:3030/content}
+
 # scheduler
 scheduler:
   public-ip:

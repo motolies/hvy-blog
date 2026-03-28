@@ -147,3 +147,33 @@ VALUES
      TRUE, FALSE,
      10, 5000, 15,
      NOW(), 'SYSTEM', NOW(), 'SYSTEM');
+
+
+-- =============================================
+-- 초기 데이터: 퀘이사존 핫딜 게시판
+-- =============================================
+INSERT INTO tb_hot_deal_site
+    (site_code, site_name, site_url, board_url,
+     enabled, requires_login,
+     min_recommendation, min_view_count, min_comment_count,
+     created_at, created_by, updated_at, updated_by)
+VALUES
+    ('QUASARZONE', '퀘이사존', 'https://quasarzone.com', '/bbs/qb_saleinfo',
+     TRUE, FALSE,
+     10, 3000, 15,
+     NOW(), 'SYSTEM', NOW(), 'SYSTEM');
+
+
+-- =============================================
+-- 초기 데이터: 아카라이브 핫딜 게시판
+-- =============================================
+INSERT INTO tb_hot_deal_site
+    (site_code, site_name, site_url, board_url,
+     enabled, requires_login,
+     min_recommendation, min_view_count, min_comment_count,
+     created_at, created_by, updated_at, updated_by)
+VALUES
+    ('ARCALIVE', '아카라이브', 'https://arca.live', '/b/hotdeal',
+     TRUE, FALSE,
+     10, 3000, 15,
+     NOW(), 'SYSTEM', NOW(), 'SYSTEM');

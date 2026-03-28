@@ -10,7 +10,9 @@ public enum DealSiteCode implements EnumCode<String> {
 
   PPOMPPU("PPOMPPU", "뽐뿌"),
   CLIEN("CLIEN", "클리앙"),
-  RULIWEB("RULIWEB", "루리웹");
+  RULIWEB("RULIWEB", "루리웹"),
+  QUASARZONE("QUASARZONE", "퀘이사존"),
+  ARCALIVE("ARCALIVE", "아카라이브");
 
   private final String code;
   private final String desc;

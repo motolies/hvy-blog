@@ -73,6 +73,7 @@ public class HotDealService {
     int newCount = 0;
     int updatedCount = 0;
     int notifiedCount = 0;
+    int skippedCount = 0;
 
     for (ScrapedDeal deal : deals) {
       Optional<HotDealItem> existing = itemRepository.findBySiteAndExternalId(site, deal.getExternalId());
@@ -93,35 +94,36 @@ public class HotDealService {
         }
         updatedCount++;
       } else {
-        HotDealItem item = HotDealItem.builder()
-            .site(site)
-            .externalId(deal.getExternalId())
-            .title(deal.getTitle())
-            .url(deal.getUrl())
-            .author(deal.getAuthor())
-            .recommendationCount(deal.getRecommendationCount())
-            .unrecommendationCount(deal.getUnrecommendationCount())
-            .viewCount(deal.getViewCount())
-            .commentCount(deal.getCommentCount())
-            .price(deal.getPrice())
-            .dealCategory(deal.getDealCategory())
-            .thumbnailUrl(deal.getThumbnailUrl())
-            .scrapedAt(LocalDateTime.now())
-            .build();
-
-        itemRepository.save(item);
-
         if (notificationSpec.isSatisfiedBy(deal)) {
-          sendNotification(site, item);
+          HotDealItem item = HotDealItem.builder()
+              .site(site)
+              .externalId(deal.getExternalId())
+              .title(deal.getTitle())
+              .url(deal.getUrl())
+              .author(deal.getAuthor())
+              .recommendationCount(deal.getRecommendationCount())
+              .unrecommendationCount(deal.getUnrecommendationCount())
+              .viewCount(deal.getViewCount())
+              .commentCount(deal.getCommentCount())
+              .price(deal.getPrice())
+              .dealCategory(deal.getDealCategory())
+              .thumbnailUrl(deal.getThumbnailUrl())
+              .scrapedAt(LocalDateTime.now())
+              .build();
+
           item.markNotified();
+          itemRepository.save(item);
+          sendNotification(site, item);
           notifiedCount++;
+          newCount++;
+        } else {
+          skippedCount++;
         }
-        newCount++;
       }
     }
 
-    log.info("사이트 처리 완료: siteCode={}, 신규={}, 업데이트={}, 알림={}",
-        site.getSiteCode(), newCount, updatedCount, notifiedCount);
+    log.info("사이트 처리 완료: siteCode={}, 신규={}, 업데이트={}, 알림={}, 건너뜀={}",
+        site.getSiteCode(), newCount, updatedCount, notifiedCount, skippedCount);
   }
 
   /**

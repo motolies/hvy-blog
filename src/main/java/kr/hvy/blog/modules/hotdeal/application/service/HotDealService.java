@@ -1,9 +1,13 @@
 package kr.hvy.blog.modules.hotdeal.application.service;
 
+import jakarta.persistence.EntityNotFoundException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
+import kr.hvy.blog.modules.hotdeal.application.dto.HotDealSiteResponse;
+import kr.hvy.blog.modules.hotdeal.application.dto.HotDealSiteUpdateRequest;
 import kr.hvy.blog.modules.hotdeal.application.dto.ScrapedDeal;
 import kr.hvy.blog.modules.hotdeal.application.filter.DealNotificationFilter;
 import kr.hvy.blog.modules.hotdeal.application.filter.DealNotificationFilterResolver;
@@ -131,6 +135,44 @@ public class HotDealService {
     }
     return new MinViewCountSpecification(site.getMinViewCount())
         .or(new RecommendationRatioSpecification(site.getMinRecommendation(), 0));
+  }
+
+  public int deleteItemsOlderThan(LocalDateTime cutoffDate) {
+    return itemRepository.deleteByCreatedAtBefore(cutoffDate);
+  }
+
+  @Transactional(readOnly = true)
+  public List<HotDealSiteResponse> getAllSites() {
+    return siteRepository.findAll().stream()
+        .map(this::toSiteResponse)
+        .collect(Collectors.toList());
+  }
+
+  public HotDealSiteResponse updateSite(Long id, HotDealSiteUpdateRequest request) {
+    HotDealSite site = siteRepository.findById(id)
+        .orElseThrow(() -> new EntityNotFoundException("사이트를 찾을 수 없습니다: " + id));
+    site.setEnabled(request.isEnabled());
+    site.setMinRecommendation(request.getMinRecommendation());
+    site.setMinViewCount(request.getMinViewCount());
+    site.setMinCommentCount(request.getMinCommentCount());
+    return toSiteResponse(site);
+  }
+
+  private HotDealSiteResponse toSiteResponse(HotDealSite site) {
+    return HotDealSiteResponse.builder()
+        .id(site.getId())
+        .siteCode(site.getSiteCode().getCode())
+        .siteName(site.getSiteName())
+        .siteUrl(site.getSiteUrl())
+        .boardUrl(site.getBoardUrl())
+        .enabled(site.isEnabled())
+        .requiresLogin(site.isRequiresLogin())
+        .minRecommendation(site.getMinRecommendation())
+        .minViewCount(site.getMinViewCount())
+        .minCommentCount(site.getMinCommentCount())
+        .createdAt(site.getCreated().getAt())
+        .updatedAt(site.getUpdated().getAt())
+        .build();
   }
 
   private void sendNotification(HotDealSite site, HotDealItem item) {

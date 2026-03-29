@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="kr.hvy.blog.modules.hotdeal.repository.mapper.HotDealItemMapper">
+
+    <select id="findBySearchCriteria" parameterType="kr.hvy.blog.modules.hotdeal.application.dto.HotDealItemSearchCriteria"
+            resultType="kr.hvy.blog.modules.hotdeal.application.dto.HotDealItemSearchResponse">
+        SELECT
+            i.id,
+            i.site_id              AS siteId,
+            s.site_name            AS siteName,
+            s.site_code            AS siteCode,
+            i.external_id          AS externalId,
+            i.title,
+            i.url,
+            i.author,
+            i.recommendation_count   AS recommendationCount,
+            i.unrecommendation_count AS unrecommendationCount,
+            i.view_count           AS viewCount,
+            i.comment_count        AS commentCount,
+            i.price,
+            i.deal_category        AS dealCategory,
+            i.thumbnail_url        AS thumbnailUrl,
+            i.notified,
+            i.notified_at          AS notifiedAt,
+            i.scraped_at           AS scrapedAt,
+            i.created_at           AS createdAt
+        FROM tb_hot_deal_item i
+        INNER JOIN tb_hot_deal_site s ON i.site_id = s.id
+        <where>
+            <if test="siteId != null">
+                AND i.site_id = #{siteId}
+            </if>
+            <if test="title != null and title != ''">
+                AND i.title LIKE CONCAT('%', #{title}, '%')
+            </if>
+            <if test="notified != null">
+                AND i.notified = #{notified}
+            </if>
+            <if test="dealCategory != null and dealCategory != ''">
+                AND i.deal_category = #{dealCategory}
+            </if>
+            <if test="scrapedAtFromUtc != null">
+                AND i.scraped_at &gt;= #{scrapedAtFromUtc}
+            </if>
+            <if test="scrapedAtToUtcExclusive != null">
+                AND i.scraped_at &lt; #{scrapedAtToUtcExclusive}
+            </if>
+        </where>
+        <!-- PageInterceptor가 자동으로 ORDER BY와 LIMIT 추가 -->
+    </select>
+
+</mapper>

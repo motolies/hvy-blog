@@ -1,6 +1,7 @@
 package kr.hvy.blog.infra.scheduler;
 
 import java.time.LocalDateTime;
+import kr.hvy.blog.modules.hotdeal.application.service.HotDealService;
 import kr.hvy.common.aop.logging.service.ApiLogService;
 import kr.hvy.common.aop.logging.service.SystemLogService;
 import kr.hvy.common.infrastructure.scheduler.impl.AbstractScheduler;
@@ -19,26 +20,35 @@ public class LogCleanerScheduler extends AbstractScheduler {
 
   private final ApiLogService apiLogService;
   private final SystemLogService systemLogService;
+  private final HotDealService hotDealService;
 
   private static final int LOG_RETENTION_DAYS = 60;
+  private static final int HOTDEAL_RETENTION_DAYS = 90;
 
   @Scheduled(cron = "${scheduler.log-cleaner.cron-expression}")
   @SchedulerLock(name = "${scheduler.log-cleaner.lock-name}", lockAtLeastFor = "PT30S", lockAtMostFor = "PT5M")
   public void cleanLogs() {
     proceedScheduler("LOG-CLEANER")
-        .accept(this::deleteOldLogs);
+        .accept(this::deleteOldData);
   }
 
-  private void deleteOldLogs() {
-    LocalDateTime cutoffDate = LocalDateTime.now().minusDays(LOG_RETENTION_DAYS);
+  private void deleteOldData() {
+    LocalDateTime logCutoffDate = LocalDateTime.now().minusDays(LOG_RETENTION_DAYS);
 
     // ApiLogEntity 삭제
-    int deletedApiLogs = apiLogService.deleteLogsOlderThan(cutoffDate);
+    int deletedApiLogs = apiLogService.deleteLogsOlderThan(logCutoffDate);
 
     // SystemLogEntity 삭제
-    int deletedSystemLogs = systemLogService.deleteLogsOlderThan(cutoffDate);
+    int deletedSystemLogs = systemLogService.deleteLogsOlderThan(logCutoffDate);
 
     log.info("로그 정리 완료: {}일 이전 로그 삭제 (API 로그: {}, 시스템 로그: {})",
         LOG_RETENTION_DAYS, deletedApiLogs, deletedSystemLogs);
+
+    // HotDealItem 삭제
+    LocalDateTime hotDealCutoffDate = LocalDateTime.now().minusDays(HOTDEAL_RETENTION_DAYS);
+    int deletedHotDeals = hotDealService.deleteItemsOlderThan(hotDealCutoffDate);
+
+    log.info("핫딜 정리 완료: {}일 이전 아이템 삭제 (삭제 건수: {})",
+        HOTDEAL_RETENTION_DAYS, deletedHotDeals);
   }
 }

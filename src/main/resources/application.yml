@@ -150,6 +150,9 @@ scheduler:
   jira:
     lock-name: JIRA-SYNC-TEST
     cron-expression: "0 0 0 1 * ?"
+  claude:
+    lock-name: CLAUDE-REFRESH-TEST
+    enabled: false
 
 cookie:
   same-site: LAX
@@ -194,6 +197,9 @@ scheduler:
   jira:
     lock-name: JIRA-SYNC-PROD
     cron-expression: "0 0 * * * ?"
+  claude:
+    lock-name: CLAUDE-REFRESH-PROD
+    enabled: true
 
 cookie:
   same-site: NONE

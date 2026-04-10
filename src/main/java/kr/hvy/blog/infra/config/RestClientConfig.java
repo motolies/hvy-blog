@@ -32,6 +32,11 @@ public class RestClientConfig extends RestClientConfigurer {
     return new RestApi(restClient, notify, Optional.of(SlackChannel.ERROR.getChannel()));
   }
 
+  @Bean("claudeRestClient")
+  public RestClient claudeRestClient() {
+    return restClient(10, 60, "https://api.anthropic.com");
+  }
+
   @Bean("jiraRestClient")
   public RestClient jiraRestClient(JiraProperties jiraProperties) {
     // Basic Authentication 헤더 생성

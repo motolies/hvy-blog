@@ -34,25 +34,25 @@
                 AND span_id = #{spanId}
             </if>
             <if test="requestUri != null and requestUri != ''">
-                AND request_uri LIKE CONCAT('%', #{requestUri}, '%')
+                AND request_uri ILIKE CONCAT('%', #{requestUri}, '%')
             </if>
             <if test="controllerName != null and controllerName != ''">
-                AND controller_name LIKE CONCAT('%', #{controllerName}, '%')
+                AND controller_name ILIKE CONCAT('%', #{controllerName}, '%')
             </if>
             <if test="methodName != null and methodName != ''">
-                AND method_name LIKE CONCAT('%', #{methodName}, '%')
+                AND method_name ILIKE CONCAT('%', #{methodName}, '%')
             </if>
             <if test="httpMethodType != null and httpMethodType != ''">
                 AND http_method_type = #{httpMethodType}
             </if>
             <if test="paramData != null and paramData != ''">
-                AND param_data LIKE CONCAT('%', #{paramData}, '%')
+                AND param_data ILIKE CONCAT('%', #{paramData}, '%')
             </if>
             <if test="responseBody != null and responseBody != ''">
-                AND response_body LIKE CONCAT('%', #{responseBody}, '%')
+                AND response_body ILIKE CONCAT('%', #{responseBody}, '%')
             </if>
             <if test="stackTrace != null and stackTrace != ''">
-                AND stack_trace LIKE CONCAT('%', #{stackTrace}, '%')
+                AND stack_trace ILIKE CONCAT('%', #{stackTrace}, '%')
             </if>
             <if test="remoteAddr != null and remoteAddr != ''">
                 AND remote_addr = #{remoteAddr}

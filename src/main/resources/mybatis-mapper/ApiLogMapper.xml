@@ -32,25 +32,25 @@
                 AND span_id = #{spanId}
             </if>
             <if test="requestUri != null and requestUri != ''">
-                AND request_uri LIKE CONCAT('%', #{requestUri}, '%')
+                AND request_uri ILIKE CONCAT('%', #{requestUri}, '%')
             </if>
             <if test="httpMethodType != null and httpMethodType != ''">
                 AND http_method_type = #{httpMethodType}
             </if>
             <if test="requestHeader != null and requestHeader != ''">
-                AND request_header LIKE CONCAT('%', #{requestHeader}, '%')
+                AND request_header ILIKE CONCAT('%', #{requestHeader}, '%')
             </if>
             <if test="requestParam != null and requestParam != ''">
-                AND request_param LIKE CONCAT('%', #{requestParam}, '%')
+                AND request_param ILIKE CONCAT('%', #{requestParam}, '%')
             </if>
             <if test="requestBody != null and requestBody != ''">
-                AND request_body LIKE CONCAT('%', #{requestBody}, '%')
+                AND request_body ILIKE CONCAT('%', #{requestBody}, '%')
             </if>
             <if test="responseStatus != null and responseStatus != ''">
                 AND response_status = #{responseStatus}
             </if>
             <if test="responseBody != null and responseBody != ''">
-                AND response_body LIKE CONCAT('%', #{responseBody}, '%')
+                AND response_body ILIKE CONCAT('%', #{responseBody}, '%')
             </if>
             <if test="createdAtFromUtc != null">
                 AND created_at &gt;= #{createdAtFromUtc}

@@ -579,3 +579,6 @@ CREATE INDEX idx_category_name_bigm ON tb_category USING GIN (LOWER(name) gin_bi
 CREATE INDEX idx_tag_name_bigm ON tb_tag USING GIN (LOWER(name) gin_bigm_ops);
 
 CREATE INDEX idx_memo_content_bigm ON tb_memo USING GIN (LOWER(content) gin_bigm_ops);
+
+CREATE INDEX idx_hot_deal_item_title_bigm ON tb_hot_deal_item USING GIN (LOWER(title) gin_bigm_ops);
+

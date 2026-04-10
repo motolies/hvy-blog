@@ -88,8 +88,8 @@
   <select id="findPrevNextById" resultType="PostPrevNextResponse">
     SELECT
     COALESCE(prev_post.id, 0) AS PREV
-    , prev_post.subject AS PREV_SUBJECT
     , COALESCE(next_post.id, 0) AS NEXT
+    , prev_post.subject AS PREV_SUBJECT
     , next_post.subject AS NEXT_SUBJECT
     FROM (SELECT 1) AS dummy
     LEFT JOIN (

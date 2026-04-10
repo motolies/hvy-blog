@@ -69,6 +69,14 @@ public class AdminPostController {
   }
 
   /**
+   * 포스트 드래프트 삭제 (초안 폐기)
+   */
+  @DeleteMapping("/{id}/draft")
+  public void deleteDraft(@PathVariable Long id) {
+    postService.deleteDraft(id);
+  }
+
+  /**
    * 포스트에 태크 추가
    */
   @PostMapping("/{postId}/tag")

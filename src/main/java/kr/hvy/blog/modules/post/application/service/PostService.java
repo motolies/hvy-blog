@@ -13,13 +13,17 @@ import kr.hvy.blog.modules.post.application.dto.PostCreate;
 import kr.hvy.blog.modules.post.application.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.application.dto.PostPrevNextResponse;
 import kr.hvy.blog.modules.post.application.dto.PostPublicRequest;
+import kr.hvy.blog.modules.post.application.dto.PostRelatedResponse;
 import kr.hvy.blog.modules.post.application.dto.PostResponse;
 import kr.hvy.blog.modules.post.application.dto.PostUpdate;
 import kr.hvy.blog.modules.post.application.dto.SearchObject;
 import kr.hvy.blog.modules.post.application.specification.PostAuthoritySpecification;
 import kr.hvy.blog.modules.post.application.specification.PostUpdateSpecification;
+import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import kr.hvy.blog.modules.post.domain.entity.Post;
+import kr.hvy.blog.modules.post.domain.entity.PostDraft;
 import kr.hvy.blog.modules.post.mapper.PostDtoMapper;
+import kr.hvy.blog.modules.post.repository.PostDraftRepository;
 import kr.hvy.blog.modules.post.repository.PostRepository;
 import kr.hvy.blog.modules.post.repository.mapper.PostMapper;
 import kr.hvy.blog.modules.tag.application.dto.TagCreate;
@@ -52,6 +56,7 @@ public class PostService {
   private final TagDtoMapper tagDtoMapper;
   private final PostDtoMapper postDtoMapper;
   private final PostRepository postRepository;
+  private final PostDraftRepository postDraftRepository;
   private final PostMapper postMapper;
   private final CategoryRepository categoryRepository;
 
@@ -94,6 +99,10 @@ public class PostService {
     return postMapper.findByPublicPosts();
   }
 
+  public List<PostRelatedResponse> findRelatedPosts(Long postId, int limit) {
+    return postMapper.findRelatedPosts(postId, limit);
+  }
+
   public List<PostNoBodyResponse> findBySearchObject(SearchObject searchObject) {
     return postMapper.findBySearchObject(searchObject);
   }
@@ -120,16 +129,36 @@ public class PostService {
     Specification.validate(PostUpdateSpecification::new, updateDto);
 
     Post post = findById(id);
+
+    // PUBLISH 포스트에 TEMP 요청 → 드래프트 저장 (발행 상태 유지)
+    if (post.getStatus() == PostStatus.PUBLISH && updateDto.getStatus() == PostStatus.TEMP) {
+      PostDraft draft = postDraftRepository.findById(id)
+          .orElse(PostDraft.builder().postId(id).build());
+      draft.update(updateDto.getSubject(), updateDto.getBody());
+      postDraftRepository.save(draft);
+      return postDtoMapper.toResponse(post);
+    }
+
     Category category = categoryRepository.findById(updateDto.getCategoryId())
         .orElseThrow(() -> new DataNotFoundException("Not Found Category."));
-    post.update(updateDto.getSubject(), updateDto.getBody(), updateDto.isPublic(), updateDto.isMain(), category);
+    post.update(updateDto.getSubject(), updateDto.getBody(), updateDto.isPublic(), updateDto.isMain(), updateDto.getStatus(), category);
 
-    // category의 postCount를 갱힌하고 싶다면
+    // 발행 시 드래프트가 있으면 삭제
+    postDraftRepository.deleteById(id);
+
     Post saved = postRepository.saveAndFlush(post);
     entityManager.refresh(saved);
     entityManager.refresh(category);
 
     return postDtoMapper.toResponse(post);
+  }
+
+  public void deleteDraft(Long postId) {
+    postDraftRepository.deleteById(postId);
+  }
+
+  public PostDraft findDraftByPostId(Long postId) {
+    return postDraftRepository.findById(postId).orElse(null);
   }
 
   public DeleteResponse<Long> delete(Long id) {

@@ -5,6 +5,7 @@ import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -26,6 +27,8 @@ import java.util.HashSet;
 import java.util.Set;
 import kr.hvy.blog.modules.category.domain.entity.Category;
 import kr.hvy.blog.modules.file.domain.entity.File;
+import kr.hvy.blog.modules.post.domain.code.PostStatus;
+import kr.hvy.blog.modules.post.domain.code.converter.PostStatusConverter;
 import kr.hvy.blog.modules.tag.domain.Tag;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import kr.hvy.common.core.security.SecurityUtils;
@@ -67,6 +70,11 @@ public class Post {
 
   @Column(nullable = false)
   private int viewCount;
+
+  @Convert(converter = PostStatusConverter.class)
+  @Column(name = "status", length = 3, nullable = false)
+  @Builder.Default
+  private PostStatus status = PostStatus.PUBLISH;
 
   @OrderBy("name ASC")
   @ManyToMany(mappedBy = "posts", fetch = FetchType.LAZY, targetEntity = Tag.class, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
@@ -122,11 +130,12 @@ public class Post {
    * 비즈니스 로직
    *****************************************************************************/
 
-  public void update(String subject, String body, boolean publicAccess, boolean mainPage, Category category) {
+  public void update(String subject, String body, boolean publicAccess, boolean mainPage, PostStatus status, Category category) {
     this.subject = subject;
     this.body = body;
     this.publicAccess = publicAccess;
     this.mainPage = mainPage;
+    this.status = status;
     this.updated = EventLogEntity.builder()
         .at(LocalDateTime.now())
         .by(SecurityUtils.getUsername())

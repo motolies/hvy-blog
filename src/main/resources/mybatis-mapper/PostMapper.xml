@@ -27,6 +27,7 @@
         <where>
             <if test='isAdmin == false'>
                 AND p.public_access = true
+                AND p.status = 'PUB'
             </if>
             <if test='categories.size > 0'>
                 AND p.category_id IN (
@@ -86,25 +87,35 @@
 
   <select id="findPrevNextById" resultType="PostPrevNextResponse">
     SELECT
-    COALESCE((
+    COALESCE(prev_post.id, 0) AS PREV
+    , prev_post.subject AS PREV_SUBJECT
+    , COALESCE(next_post.id, 0) AS NEXT
+    , next_post.subject AS NEXT_SUBJECT
+    FROM (SELECT 1) AS dummy
+    LEFT JOIN (
     <![CDATA[
-         SELECT id
-           FROM tb_post
-          WHERE id < #{id}
-         ]]>
+        SELECT id, subject
+          FROM tb_post
+         WHERE id < #{id}
+    ]]>
     <if test='isAdmin == false'>
-      AND public_access = true
+           AND public_access = true
+           AND status = 'PUB'
     </if>
-    ORDER BY id DESC
-    LIMIT 1), 0) AS PREV
-    , COALESCE((SELECT id
-    FROM tb_post
-    WHERE id > #{id}
+         ORDER BY id DESC
+         LIMIT 1
+    ) prev_post ON true
+    LEFT JOIN (
+        SELECT id, subject
+          FROM tb_post
+         WHERE id &gt; #{id}
     <if test='isAdmin == false'>
-      AND public_access = true
+           AND public_access = true
+           AND status = 'PUB'
     </if>
-    ORDER BY id ASC
-    LIMIT 1), 0) AS NEXT
+         ORDER BY id ASC
+         LIMIT 1
+    ) next_post ON true
   </select>
 
     <select id="findByTempPosts" resultType="Long">
@@ -117,11 +128,44 @@
         SELECT id
           FROM tb_post
          WHERE public_access = true
+           AND status = 'PUB'
     </select>
 
     <update id="setMainPost" parameterType="java.lang.Long">
         UPDATE tb_post
         SET main_page = CASE WHEN id = #{id} THEN TRUE ELSE FALSE END
     </update>
+
+    <select id="findRelatedPosts" resultType="PostRelatedResponse">
+        SELECT
+            p.id,
+            p.subject,
+            cat.name AS CATEGORY_NAME,
+            p.created_at AS CREATE_DATE,
+            COALESCE(tag_match.common_tag_count, 0) AS COMMON_TAG_COUNT
+        FROM tb_post p
+        LEFT JOIN tb_category cat ON p.category_id = cat.id
+        LEFT JOIN (
+            SELECT
+                m2.post_id,
+                COUNT(*) AS common_tag_count
+            FROM tb_post_tag_map m1
+            INNER JOIN tb_post_tag_map m2 ON m1.tag_id = m2.tag_id AND m2.post_id != #{postId}
+            WHERE m1.post_id = #{postId}
+            GROUP BY m2.post_id
+        ) tag_match ON tag_match.post_id = p.id
+        WHERE p.id != #{postId}
+          AND p.public_access = true
+          AND p.status = 'PUB'
+          AND (
+              p.category_id = (SELECT category_id FROM tb_post WHERE id = #{postId})
+              OR tag_match.common_tag_count > 0
+          )
+        ORDER BY
+            CASE WHEN p.category_id = (SELECT category_id FROM tb_post WHERE id = #{postId}) THEN 1 ELSE 0 END
+            + COALESCE(tag_match.common_tag_count, 0) DESC,
+            p.created_at DESC
+        LIMIT #{limit}
+    </select>
 
 </mapper>

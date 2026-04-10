@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.post.application.dto;
 
 import kr.hvy.blog.modules.category.domain.code.CategoryConstant;
+import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
@@ -20,4 +21,6 @@ public class PostCreate {
   boolean isPublic = false;
   @Builder.Default
   boolean isMain = false;
+  @Builder.Default
+  PostStatus status = PostStatus.TEMP;
 }

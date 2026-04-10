@@ -3,9 +3,11 @@ package kr.hvy.blog.modules.post.application.service;
 import java.util.List;
 import kr.hvy.blog.modules.post.application.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.application.dto.PostPrevNextResponse;
+import kr.hvy.blog.modules.post.application.dto.PostRelatedResponse;
 import kr.hvy.blog.modules.post.application.dto.PostResponse;
 import kr.hvy.blog.modules.post.application.dto.SearchObject;
 import kr.hvy.blog.modules.post.domain.entity.Post;
+import kr.hvy.blog.modules.post.domain.entity.PostDraft;
 import kr.hvy.blog.modules.post.mapper.PostDtoMapper;
 import kr.hvy.common.application.domain.dto.paging.Direction;
 import kr.hvy.common.application.domain.dto.paging.OrderBy;
@@ -33,7 +35,20 @@ public class PostPublicService {
 
   public PostResponse getPost(int id) {
     Post post = postService.findByIdCheckAuthority((long) id);
-    return postDtoMapper.toResponse(post);
+    PostResponse response = postDtoMapper.toResponse(post);
+
+    if (SecurityUtils.hasAdminRole()) {
+      PostDraft draft = postService.findDraftByPostId((long) id);
+      if (draft != null) {
+        return response.toBuilder()
+            .hasDraft(true)
+            .draftSubject(draft.getSubject())
+            .draftBody(draft.getBody())
+            .build();
+      }
+    }
+
+    return response;
   }
 
   public PostPrevNextResponse getPrevPost(int id) {
@@ -42,6 +57,10 @@ public class PostPublicService {
 
   public List<Long> getPublicPosts() {
     return postService.findByPublicPosts();
+  }
+
+  public List<PostRelatedResponse> getRelatedPosts(Long postId, int limit) {
+    return postService.findRelatedPosts(postId, limit);
   }
 
   public PageResponse<PostNoBodyResponse> searchPosts(SearchObject searchObject) {

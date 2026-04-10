@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="kr.hvy.blog.modules.stats.repository.mapper.StatsMapper">
+
+    <!-- 발행된 포스트 총 수 -->
+    <select id="countPublishedPosts" resultType="long">
+        SELECT COUNT(*)
+          FROM tb_post
+         WHERE status = 'PUB'
+    </select>
+
+    <!-- 전체 조회수 합계 (tb_post.view_count 기반) -->
+    <select id="sumViewCounts" resultType="long">
+        SELECT COALESCE(SUM(view_count), 0)
+          FROM tb_post
+         WHERE status = 'PUB'
+    </select>
+
+    <!-- 오늘 조회수 (tb_system_log 기반, 포스트 상세 조회 API 요청 수) -->
+    <select id="countTodayViews" resultType="long">
+        SELECT COUNT(*)
+          FROM tb_system_log
+         WHERE request_uri ~ '^/api/post/[0-9]+$'
+           AND http_method_type = 'GET'
+           AND status = 'SUCC'
+           AND created_at &gt;= #{todayStart}
+           AND created_at &lt; #{tomorrowStart}
+    </select>
+
+    <!-- 사용 중인 카테고리 수 -->
+    <select id="countCategories" resultType="long">
+        SELECT COUNT(DISTINCT category_id)
+          FROM tb_post
+         WHERE status = 'PUB'
+    </select>
+
+    <!-- 전체 태그 수 -->
+    <select id="countTags" resultType="long">
+        SELECT COUNT(*)
+          FROM tb_tag
+    </select>
+
+    <!-- 일별 조회수 추이 (tb_system_log 기반) -->
+    <select id="findDailyViewCounts" resultType="DailyViewCount">
+        SELECT CAST(created_at AS DATE) AS date,
+               COUNT(*) AS count
+          FROM tb_system_log
+         WHERE request_uri ~ '^/api/post/[0-9]+$'
+           AND http_method_type = 'GET'
+           AND status = 'SUCC'
+           AND created_at &gt;= #{from}
+           AND created_at &lt; #{to}
+         GROUP BY CAST(created_at AS DATE)
+         ORDER BY date ASC
+    </select>
+
+    <!-- 인기 포스트 Top N (view_count 기준) -->
+    <select id="findPopularPosts" resultType="PopularPost">
+        SELECT p.id,
+               p.subject,
+               cat.name AS CATEGORY_NAME,
+               p.view_count AS VIEW_COUNT
+          FROM tb_post p
+          LEFT JOIN tb_category cat ON p.category_id = cat.id
+         WHERE p.status = 'PUB'
+           AND p.public_access = true
+         ORDER BY p.view_count DESC
+         LIMIT #{limit}
+    </select>
+
+    <!-- 카테고리별 포스트 분포 -->
+    <select id="findCategoryDistribution" resultType="CategoryDistribution">
+        SELECT cat.name AS CATEGORY_NAME,
+               COUNT(p.id) AS POST_COUNT
+          FROM tb_post p
+         INNER JOIN tb_category cat ON p.category_id = cat.id
+         WHERE p.status = 'PUB'
+         GROUP BY cat.name
+         ORDER BY POST_COUNT DESC
+    </select>
+
+    <!-- 태그별 포스트 분포 Top N -->
+    <select id="findTagDistribution" resultType="TagDistribution">
+        SELECT t.name AS TAG_NAME,
+               COUNT(m.post_id) AS POST_COUNT
+          FROM tb_post_tag_map m
+         INNER JOIN tb_tag t ON m.tag_id = t.id
+         INNER JOIN tb_post p ON m.post_id = p.id
+         WHERE p.status = 'PUB'
+         GROUP BY t.name
+         ORDER BY POST_COUNT DESC
+         LIMIT #{limit}
+    </select>
+
+</mapper>

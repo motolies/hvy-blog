@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.post.application.dto;
 
 import jakarta.validation.constraints.NotNull;
+import kr.hvy.blog.modules.post.domain.code.PostStatus;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
@@ -18,4 +19,6 @@ public class PostUpdate {
   String categoryId;
   boolean isPublic;
   boolean isMain;
+  @Builder.Default
+  PostStatus status = PostStatus.PUBLISH;
 }

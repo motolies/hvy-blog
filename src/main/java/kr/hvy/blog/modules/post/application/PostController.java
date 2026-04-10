@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Set;
 import kr.hvy.blog.modules.post.application.dto.PostNoBodyResponse;
 import kr.hvy.blog.modules.post.application.dto.PostPrevNextResponse;
+import kr.hvy.blog.modules.post.application.dto.PostRelatedResponse;
 import kr.hvy.blog.modules.post.application.dto.PostResponse;
 import kr.hvy.blog.modules.post.application.dto.SearchObject;
 import kr.hvy.blog.modules.post.application.service.PostPublicService;
@@ -55,6 +56,14 @@ public class PostController {
   @GetMapping(value = {"/prev-next/{postId}"})
   public PostPrevNextResponse getContentPrevNext(@PathVariable int postId) {
     return postPublicService.getPrevPost(postId);
+  }
+
+  /**
+   * 관련글 추천 조회
+   */
+  @GetMapping("/{postId}/related")
+  public List<PostRelatedResponse> getRelatedPosts(@PathVariable Long postId) {
+    return postPublicService.getRelatedPosts(postId, 5);
   }
 
   /**

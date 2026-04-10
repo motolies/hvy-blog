@@ -23,6 +23,9 @@ DROP TABLE IF EXISTS tb_jira_issue CASCADE;
 DROP TABLE IF EXISTS tb_master_code CASCADE;
 DROP TABLE IF EXISTS tb_user_authority_map CASCADE;
 DROP TABLE IF EXISTS tb_user CASCADE;
+DROP TABLE IF EXISTS tb_series_post CASCADE;
+DROP TABLE IF EXISTS tb_series CASCADE;
+DROP TABLE IF EXISTS tb_post_draft CASCADE;
 DROP TABLE IF EXISTS tb_post_tag_map CASCADE;
 DROP TABLE IF EXISTS tb_tag CASCADE;
 DROP TABLE IF EXISTS tb_search_engine CASCADE;
@@ -79,6 +82,7 @@ CREATE TABLE tb_post
     public_access BOOLEAN      NOT NULL,
     main_page     BOOLEAN      NOT NULL,
     view_count    INTEGER      NOT NULL,
+    status        VARCHAR(3)   NOT NULL DEFAULT 'PUB',
     category_id   VARCHAR(32)  NOT NULL,
     created_at    TIMESTAMP(6) NOT NULL,
     created_by    VARCHAR(255) NULL,
@@ -94,11 +98,29 @@ COMMENT ON COLUMN tb_post.normal_body   IS '본문 일반 텍스트 (검색용)'
 COMMENT ON COLUMN tb_post.public_access IS '공개 여부';
 COMMENT ON COLUMN tb_post.main_page     IS '메인 페이지 노출 여부';
 COMMENT ON COLUMN tb_post.view_count    IS '조회수';
+COMMENT ON COLUMN tb_post.status        IS '게시 상태 (TEM=임시저장, PUB=배포완료)';
 COMMENT ON COLUMN tb_post.category_id   IS '카테고리 ID (FK)';
 COMMENT ON COLUMN tb_post.created_at    IS '생성일시';
 COMMENT ON COLUMN tb_post.created_by    IS '생성자';
 COMMENT ON COLUMN tb_post.updated_at    IS '수정일시';
 COMMENT ON COLUMN tb_post.updated_by    IS '수정자';
+
+-- ---------------------------------------------
+
+CREATE TABLE tb_post_draft
+(
+    post_id    BIGINT PRIMARY KEY REFERENCES tb_post (id) ON DELETE CASCADE,
+    subject    VARCHAR(512) NOT NULL,
+    body       TEXT         NOT NULL,
+    updated_at TIMESTAMP(6) NOT NULL,
+    updated_by VARCHAR(255) NULL
+);
+COMMENT ON TABLE  tb_post_draft            IS '발행 포스트의 임시저장 초안';
+COMMENT ON COLUMN tb_post_draft.post_id    IS '포스��� ID (FK, PK)';
+COMMENT ON COLUMN tb_post_draft.subject    IS '초안 제목';
+COMMENT ON COLUMN tb_post_draft.body       IS '초안 본문';
+COMMENT ON COLUMN tb_post_draft.updated_at IS '수정일시';
+COMMENT ON COLUMN tb_post_draft.updated_by IS '수정자';
 
 -- ---------------------------------------------
 
@@ -178,6 +200,46 @@ CREATE TABLE tb_post_tag_map
 COMMENT ON TABLE  tb_post_tag_map         IS '포스트-태그 매핑';
 COMMENT ON COLUMN tb_post_tag_map.post_id IS '포스트 ID (FK)';
 COMMENT ON COLUMN tb_post_tag_map.tag_id  IS '태그 ID (FK)';
+
+-- ---------------------------------------------
+
+CREATE TABLE tb_series
+(
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    title       VARCHAR(256) NOT NULL,
+    description VARCHAR(1024) NULL,
+    created_at  TIMESTAMP(6) NOT NULL,
+    created_by  VARCHAR(255) NULL,
+    updated_at  TIMESTAMP(6) NOT NULL,
+    updated_by  VARCHAR(255) NULL
+);
+COMMENT ON TABLE  tb_series             IS '시리즈(연재물)';
+COMMENT ON COLUMN tb_series.id          IS '시리즈 ID';
+COMMENT ON COLUMN tb_series.title       IS '시리즈 제목';
+COMMENT ON COLUMN tb_series.description IS '시리즈 설명';
+COMMENT ON COLUMN tb_series.created_at  IS '생성일시';
+COMMENT ON COLUMN tb_series.created_by  IS '생성자';
+COMMENT ON COLUMN tb_series.updated_at  IS '수정일시';
+COMMENT ON COLUMN tb_series.updated_by  IS '수정자';
+
+-- ---------------------------------------------
+
+CREATE TABLE tb_series_post
+(
+    id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    series_id BIGINT  NOT NULL,
+    post_id   BIGINT  NOT NULL,
+    seq       INTEGER NOT NULL,
+    CONSTRAINT fk_series_post_series_id FOREIGN KEY (series_id) REFERENCES tb_series (id),
+    CONSTRAINT fk_series_post_post_id FOREIGN KEY (post_id) REFERENCES tb_post (id),
+    CONSTRAINT uk_series_post UNIQUE (series_id, post_id)
+);
+CREATE INDEX IF NOT EXISTS idx01_series_post ON tb_series_post (series_id, seq);
+COMMENT ON TABLE  tb_series_post           IS '시리즈-포스트 매핑';
+COMMENT ON COLUMN tb_series_post.id        IS '매핑 ID';
+COMMENT ON COLUMN tb_series_post.series_id IS '시리즈 ID (FK)';
+COMMENT ON COLUMN tb_series_post.post_id   IS '포스트 ID (FK)';
+COMMENT ON COLUMN tb_series_post.seq       IS '시리즈 내 순서';
 
 -- ---------------------------------------------
 

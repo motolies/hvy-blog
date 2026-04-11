@@ -31,10 +31,10 @@ public class ClaudeCodeRefreshService {
   private static final String ATTR_ACCESS_TOKEN = "accessToken";
   private static final String ATTR_EXPIRES_AT = "expiresAt";
   private static final long TOKEN_BUFFER_MILLIS = 5 * 60 * 1000L; // 만료 5분 전부터 갱신
-  private static final String TOKEN_ENDPOINT = "https://console.anthropic.com/v1/oauth/token";
-  private static final String CLIENT_ID = "https://claude.ai/oauth/claude-code-client-metadata";
+  private static final String TOKEN_ENDPOINT = "https://platform.claude.com/v1/oauth/token";
+  private static final String CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
   private static final String ANTHROPIC_BETA = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05";
-  private static final String CLI_VERSION = "2.1.100";
+  private static final String CLI_VERSION = "2.1.101";
   private static final String USER_AGENT = "claude-cli/" + CLI_VERSION + " (external, cli)";
   private static final String BILLING_HEADER = "cc_version=" + CLI_VERSION + ".claude-sonnet-4-20250514; cc_entrypoint=cli; cch=00000;";
   private static final String SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude.";
@@ -158,12 +158,23 @@ public class ClaudeCodeRefreshService {
 
     for (int attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        return claudeRestClient.post()
+        ClaudeTokenResponse tokenResponse = claudeRestClient.post()
             .uri(TOKEN_ENDPOINT)
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
-            .retrieve()
-            .body(ClaudeTokenResponse.class);
+            .exchange((req, res) -> {
+              String responseBody = new String(res.getBody().readAllBytes());
+              if (!res.getStatusCode().is2xxSuccessful()) {
+                throw new IllegalStateException(
+                    String.format("토큰 갱신 실패: %s %s", res.getStatusCode(), responseBody));
+              }
+              return new com.fasterxml.jackson.databind.ObjectMapper()
+                  .readValue(responseBody, ClaudeTokenResponse.class);
+            });
+        if (tokenResponse.getAccessToken() == null) {
+          throw new IllegalStateException("토큰 갱신 응답에 access_token이 없습니다");
+        }
+        return tokenResponse;
       } catch (Exception e) {
         lastException = e;
         log.warn("토큰 갱신 시도 {}/{} 실패: {}", attempt + 1, maxAttempts, e.getMessage());

@@ -1,9 +1,11 @@
 package kr.hvy.blog.modules.claude.client.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ClaudeTokenResponse {
 
   @JsonProperty("access_token")

@@ -197,8 +197,12 @@ public class MasterCode {
     if (ObjectUtils.isNotEmpty(code) && !code.trim().isEmpty()) {
       this.code = code;
     }
-    this.name = name;
-    this.description = description;
+    if (name != null) {
+      this.name = name;
+    }
+    if (description != null) {
+      this.description = description;
+    }
     if (attributes != null) {
       this.attributes = attributes;
     }

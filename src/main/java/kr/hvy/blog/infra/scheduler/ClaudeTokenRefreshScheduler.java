@@ -19,12 +19,12 @@ public class ClaudeTokenRefreshScheduler extends AbstractScheduler {
 
   private final ClaudeCodeRefreshService claudeCodeRefreshService;
 
-  @Scheduled(cron = "0 50 5 * * ?", zone = "Asia/Seoul")
-  @Scheduled(cron = "0 0 11 * * ?", zone = "Asia/Seoul")
-  @Scheduled(cron = "0 10 16 * * ?", zone = "Asia/Seoul")
+  @Scheduled(cron = "0 5 6 * * ?", zone = "Asia/Seoul")
+  @Scheduled(cron = "0 5 11 * * ?", zone = "Asia/Seoul")
+  @Scheduled(cron = "0 5 16 * * ?", zone = "Asia/Seoul")
   @SchedulerLock(name = "${scheduler.claude.lock-name:CLAUDE-REFRESH}", lockAtMostFor = "5m", lockAtLeastFor = "1m")
   public void refreshToken() {
     proceedScheduler("CLAUDE-TOKEN-REFRESH")
-        .accept(() -> claudeCodeRefreshService.refreshAndPing());
+        .accept(claudeCodeRefreshService::refreshAndPing);
   }
 }

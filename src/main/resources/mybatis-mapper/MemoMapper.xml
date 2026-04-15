@@ -8,7 +8,7 @@
                 AND m.deleted = false
             </if>
             <if test="keyword != null and keyword != ''">
-                AND m.content LIKE CONCAT('%', #{keyword}, '%')
+                AND LOWER(m.content) LIKE CONCAT('%', LOWER(#{keyword}), '%')
             </if>
             <if test="categoryId != null">
                 AND m.category_id = #{categoryId}

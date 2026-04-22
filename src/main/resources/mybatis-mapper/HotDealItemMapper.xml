@@ -47,6 +47,24 @@
             <if test="scrapedAtToUtcExclusive != null">
                 AND i.scraped_at &lt; #{scrapedAtToUtcExclusive}
             </if>
+            <if test="minRecommendationCount != null">
+                AND i.recommendation_count &gt;= #{minRecommendationCount}
+            </if>
+            <if test="maxRecommendationCount != null">
+                AND i.recommendation_count &lt;= #{maxRecommendationCount}
+            </if>
+            <if test="minViewCount != null">
+                AND i.view_count &gt;= #{minViewCount}
+            </if>
+            <if test="maxViewCount != null">
+                AND i.view_count &lt;= #{maxViewCount}
+            </if>
+            <if test="minCommentCount != null">
+                AND i.comment_count &gt;= #{minCommentCount}
+            </if>
+            <if test="maxCommentCount != null">
+                AND i.comment_count &lt;= #{maxCommentCount}
+            </if>
         </where>
         <!-- PageInterceptor가 자동으로 ORDER BY와 LIMIT 추가 -->
     </select>

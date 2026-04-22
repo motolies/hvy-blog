@@ -62,6 +62,12 @@ public class HotDealItemSearchService {
         .dealCategory(request.getDealCategory())
         .scrapedAtFromUtc(scrapedRange.fromInclusive())
         .scrapedAtToUtcExclusive(scrapedRange.toExclusive())
+        .minRecommendationCount(request.getMinRecommendationCount())
+        .maxRecommendationCount(request.getMaxRecommendationCount())
+        .minViewCount(request.getMinViewCount())
+        .maxViewCount(request.getMaxViewCount())
+        .minCommentCount(request.getMinCommentCount())
+        .maxCommentCount(request.getMaxCommentCount())
         .build();
   }
 }

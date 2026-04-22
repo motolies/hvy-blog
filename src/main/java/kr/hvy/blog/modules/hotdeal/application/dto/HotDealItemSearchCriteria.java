@@ -21,4 +21,10 @@ public class HotDealItemSearchCriteria extends PageRequest {
   private String dealCategory;
   private LocalDateTime scrapedAtFromUtc;
   private LocalDateTime scrapedAtToUtcExclusive;
+  private Integer minRecommendationCount;
+  private Integer maxRecommendationCount;
+  private Integer minViewCount;
+  private Integer maxViewCount;
+  private Integer minCommentCount;
+  private Integer maxCommentCount;
 }

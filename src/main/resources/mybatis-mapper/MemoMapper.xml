@@ -34,10 +34,4 @@
         ORDER BY m.created_at DESC
     </select>
 
-    <select id="countMemos" parameterType="MemoSearchRequest" resultType="int">
-        SELECT COUNT(*)
-        FROM tb_memo m
-        <include refid="searchCondition"/>
-    </select>
-
 </mapper>

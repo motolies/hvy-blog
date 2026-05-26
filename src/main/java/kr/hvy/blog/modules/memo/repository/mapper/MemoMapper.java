@@ -9,6 +9,4 @@ import org.apache.ibatis.annotations.Mapper;
 public interface MemoMapper {
 
   List<MemoSearchResult> searchMemos(MemoSearchRequest request);
-
-  int countMemos(MemoSearchRequest request);
 }

@@ -91,14 +91,14 @@ public class MemoService {
 
   @Transactional(readOnly = true)
   public PageResponse<MemoResponse> search(MemoSearchRequest request) {
-    int totalCount = memoMapper.countMemos(request);
+    // MyBatis 조회 (PageInterceptor가 totalCount 자동 설정)
     List<MemoSearchResult> results = memoMapper.searchMemos(request);
     List<MemoResponse> memos = results.stream().map(this::toMemoResponse).toList();
     return PageResponse.<MemoResponse>builder()
         .list(memos)
         .page(request.getPage())
         .pageSize(request.getPageSize())
-        .totalCount(totalCount)
+        .totalCount(request.getTotalCount())
         .build();
   }
 

@@ -7,33 +7,31 @@ on:
 
 env:
   DOCKERHUB_USER: knw1234
-  DOCKER_IMAGE_NAME: knw1234/hvy-blog
-  GHCR_IMAGE_NAME: motolies/hvy-blog
+  DOCKER_IMAGE: knw1234/hvy-blog
+  GHCR_IMAGE: ghcr.io/motolies/hvy-blog
 
 jobs:
-  main:
-    runs-on: ubuntu-latest
+  # arch별 네이티브 러너에서 병렬 빌드 후 태그 없이 다이제스트로만 두 레지스트리에 푸시
+  build:
+    runs-on: ${{ matrix.runner }}
     if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       -
         name: Checkout
         uses: actions/checkout@v4
       -
-        name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      -
         name: Set up Buildx
         uses: docker/setup-buildx-action@v3
-      -
-        name: Cache Gradle packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
       -
         name: Login to docker.io
         uses: docker/login-action@v3
@@ -49,30 +47,86 @@ jobs:
           password: ${{ secrets.GHCR_PAT }}
       -
         name: Get Variables
-        id: vars
         run: |
           COMMIT_HASH=$(git log -1 --pretty=%h)
           echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
-          BUILD_TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          echo "BUILD_TIMESTAMP=$BUILD_TIMESTAMP" >> $GITHUB_ENV
       -
-        name: Buildx and Push
+        name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
-          tags: |
-            ${{ env.DOCKER_IMAGE_NAME }}:latest
-            ${{ env.DOCKER_IMAGE_NAME }}:${{ env.COMMIT_HASH }}
-            ${{ env.DOCKER_IMAGE_NAME }}:${{ env.BUILD_TIMESTAMP }}
-            ghcr.io/${{ env.GHCR_IMAGE_NAME }}:latest
-            ghcr.io/${{ env.GHCR_IMAGE_NAME }}:${{ env.COMMIT_HASH }}
-            ghcr.io/${{ env.GHCR_IMAGE_NAME }}:${{ env.BUILD_TIMESTAMP }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           build-args: |
             VERSION=${{ env.COMMIT_HASH }}
-            BUILD_TIMESTAMP=${{ env.BUILD_TIMESTAMP }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          push: true
+            BUILD_TIMESTAMP=${{ github.run_id }}
+            ENV_TYPE=prod
+          outputs: type=image,"name=${{ env.DOCKER_IMAGE }},${{ env.GHCR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+      -
+        name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      -
+        name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
 
+  # 각 arch 다이제스트를 묶어 멀티아치 manifest list 생성 + 태그 부여 (두 레지스트리 각각)
+  merge:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    steps:
+      -
+        name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+      -
+        name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to docker.io
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      -
+        name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_PAT }}
+      -
+        name: Get Variables
+        run: |
+          echo "COMMIT_HASH=$(git log -1 --pretty=%h)" >> $GITHUB_ENV
+          echo "BUILD_TIMESTAMP=$(date +%Y%m%d%H%M%S)" >> $GITHUB_ENV
+      -
+        name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          for IMG in "$DOCKER_IMAGE" "$GHCR_IMAGE"; do
+            docker buildx imagetools create \
+              -t ${IMG}:latest \
+              -t ${IMG}:${COMMIT_HASH} \
+              -t ${IMG}:${BUILD_TIMESTAMP} \
+              $(printf "${IMG}@sha256:%s " *)
+          done
+      -
+        name: Inspect manifest
+        run: |
+          docker buildx imagetools inspect ${DOCKER_IMAGE}:${COMMIT_HASH}
+          docker buildx imagetools inspect ${GHCR_IMAGE}:${COMMIT_HASH}

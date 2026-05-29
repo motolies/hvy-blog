@@ -11,18 +11,14 @@ COPY build.gradle settings.gradle gradlew ./
 COPY gradle gradle
 RUN chmod +x gradlew
 
-# 의존성 미리 다운로드 (캐시 활용)
-RUN echo Download Start: $(date +%F_%T)
-# gradlew 실행 시 -Penv 환경 변수를 전달합니다.
-RUN --mount=type=cache,target=/root/.gradle \
-    ./gradlew --no-daemon dependencies -Penv=${ENV_TYPE}
-RUN echo Download End: $(date +%F_%T)
+# 의존성 미리 다운로드
+# 캐시 마운트(--mount=type=cache)를 제거해 다운로드 결과가 레이어에 남도록 한다.
+# 이래야 build.gradle 불변 시 gha 레이어 캐시가 이 레이어를 재사용하여 의존성 재다운로드를 막는다.
+RUN ./gradlew --no-daemon dependencies -Penv=${ENV_TYPE}
 
-# 소스 코드 복사 및 빌드 (테스트는 제외)
+# 소스 코드 복사 후 실행 가능한 부트 jar만 빌드 (테스트/플레인 jar 제외)
 COPY src src
-RUN --mount=type=cache,target=/root/.gradle \
-    ./gradlew --no-daemon build -x test -Penv=${ENV_TYPE}
-RUN echo BuildEnd: $(date +%F_%T)
+RUN ./gradlew --no-daemon bootJar -Penv=${ENV_TYPE}
 
 
 ### STAGE 2: Production Environment ###

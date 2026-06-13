@@ -41,38 +41,23 @@
                 )
             </if>
             <if test='searchCondition.keywords.size > 0'>
-                <if test='searchCondition.logic.equals("AND")'>
-                    AND
-                    <foreach collection="searchCondition.keywords" index="index" item="key" open="(" separator=" AND " close=")">
-                        <choose>
-                            <when test='searchType.code.equals("TITLE")'>
-                                LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%')
-                            </when>
-                            <when test='searchType.code.equals("CONTENT")'>
-                                LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%')
-                            </when>
-                            <otherwise>
-                                LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%') OR LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%')
-                            </otherwise>
-                        </choose>
-                    </foreach>
-                </if>
-                <if test='!searchCondition.logic.equals("AND")'>
-                    AND
-                    <foreach collection="searchCondition.keywords" index="index" item="key" open="(" separator=" OR " close=")">
-                        <choose>
-                            <when test='searchType.code.equals("TITLE")'>
-                                LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%')
-                            </when>
-                            <when test='searchType.code.equals("CONTENT")'>
-                                LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%')
-                            </when>
-                            <otherwise>
-                                LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%') OR LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%')
-                            </otherwise>
-                        </choose>
-                    </foreach>
-                </if>
+                AND
+                <!-- 키워드 결합 연산자(AND/OR): foreach의 separator 속성은 ${} 치환이 안 되므로, 본문 텍스트노드에서 index>0 일 때 연산자를 출력한다. logic은 LogicalOperation enum(AND/OR)이라 ${} 사용이 안전하다 -->
+                <foreach collection="searchCondition.keywords" index="index" item="key" open="(" close=")">
+                    <if test="index > 0"> ${searchCondition.logic.code} </if>
+                    <choose>
+                        <when test='searchType.code.equals("TITLE")'>
+                            LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%')
+                        </when>
+                        <when test='searchType.code.equals("CONTENT")'>
+                            LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%')
+                        </when>
+                        <otherwise>
+                            <!-- FULL(제목+본문): 키워드 단위 결합(AND/OR)과의 연산자 우선순위 보장을 위해 괄호로 감싼다 -->
+                            (LOWER(p.subject) LIKE CONCAT('%', LOWER(#{key.name}), '%') OR LOWER(p.normal_body) LIKE CONCAT('%', LOWER(#{key.name}), '%'))
+                        </otherwise>
+                    </choose>
+                </foreach>
             </if>
             <if test='tags.size > 0'>
                 AND map.tag_id IN

@@ -79,7 +79,8 @@ public class PostController {
    */
   @GetMapping(value = {"/search"})
   public PageResponse<PostNoBodyResponse> searchDetail(@RequestParam String query) throws JsonProcessingException {
-    String decodedQuery = new String(Base64.getDecoder().decode(query), StandardCharsets.UTF_8);
+    // 프론트가 URL-safe base64(패딩 없음, +/- _/= 미사용)로 인코딩해 보내므로 getUrlDecoder로 디코딩
+    String decodedQuery = new String(Base64.getUrlDecoder().decode(query), StandardCharsets.UTF_8);
 
     // https://stackoverflow.com/questions/4486787/jackson-with-json-unrecognized-field-not-marked-as-ignorable
     SearchObject searchObject = objectMapper.readValue(decodedQuery, SearchObject.class);

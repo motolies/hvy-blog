@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 
 import java.util.HashSet;
 import java.util.Optional;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
@@ -297,9 +299,9 @@ class UserServiceTest {
     @DisplayName("정상 요청이면 UserResponse를 반환한다")
     void create_validRequest_returnsUserResponse() {
       // Given
+      // UserCreate는 더 이상 authorities를 받지 않는다(권한상승 방지). 서버가 ROLE_USER를 강제 주입한다.
       UserCreate userCreate = UserCreate.builder()
           .name("관리자").username("admin").password("password123")
-          .authorities(Set.of(AuthorityName.ROLE_ADMIN))
           .build();
 
       User tempUser = mock(User.class);
@@ -326,6 +328,43 @@ class UserServiceTest {
 
       // Then
       assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
+    @DisplayName("실제 User 엔티티 경로에서 항상 ROLE_USER만 부여한다(권한상승 방지 회귀)")
+    void create_alwaysAssignsRoleUser_withRealEntity() {
+      // Given: UserCreate에는 authorities 필드 자체가 없어 클라이언트가 권한을 주입할 수 없다.
+      UserCreate userCreate = UserCreate.builder()
+          .name("홍길동").username("hong").password("password123")
+          .build();
+
+      // 실제 User 엔티티를 사용해 권한 주입/스왑(전이→영속) 경로를 그대로 실행한다(mock 아님).
+      User mappedUser = User.builder()
+          .name("홍길동").username("hong").authorities(new HashSet<>()).build();
+      User encodedUser = User.builder()
+          .name("홍길동").username("hong").password("encodedPassword")
+          .isEnabled(true).authorities(new HashSet<>()).build();
+      Authority managedRoleUser = Authority.builder().name(AuthorityName.ROLE_USER).build();
+
+      given(userDtoMapper.toDomain(userCreate)).willReturn(mappedUser);
+      given(passwordEncoder.encode("password123")).willReturn("encodedPassword");
+      given(userDtoMapper.createUserWithEncodedPassword(any(), any())).willReturn(encodedUser);
+      given(authorityRepository.findByName(AuthorityName.ROLE_USER)).willReturn(Optional.of(managedRoleUser));
+      given(userRepository.save(any())).willAnswer(invocation -> invocation.getArgument(0));
+      given(userDtoMapper.toResponse(any())).willReturn(
+          UserResponse.builder().id(1L).name("홍길동").username("hong").isEnabled(true).build());
+
+      // When
+      userService.create(userCreate);
+
+      // Then: 저장된 User 권한은 정확히 ROLE_USER 하나여야 한다(요청 입력과 무관).
+      ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+      verify(userRepository).save(captor.capture());
+      Set<Authority> savedAuthorities = captor.getValue().getAuthorities();
+      assertThat(savedAuthorities).hasSize(1);
+      assertThat(savedAuthorities)
+          .extracting(Authority::getName)
+          .containsExactly(AuthorityName.ROLE_USER);
     }
   }
 

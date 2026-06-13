@@ -29,9 +29,11 @@ public interface UserDtoMapper {
   UserResponse toResponse(User user);
 
   // target에만 있는 속성에 기본값을 주려면 constant 사용
+  // authorities는 클라이언트 입력을 신뢰하지 않고 무시한다(권한상승 방지). 서비스에서 ROLE_USER를 강제 주입한다.
   @Mapping(target = "isEnabled", constant = "true")
   @Mapping(target = "id", ignore = true)
   @Mapping(target = "password", ignore = true)
+  @Mapping(target = "authorities", ignore = true)
   User toDomain(UserCreate userCreate);
 
   @Mapping(target = "password", ignore = true)

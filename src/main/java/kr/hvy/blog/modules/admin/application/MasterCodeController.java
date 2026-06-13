@@ -1,143 +1,49 @@
 package kr.hvy.blog.modules.admin.application;
 
-import jakarta.validation.Valid;
 import java.util.List;
-import kr.hvy.blog.modules.admin.application.dto.MasterCodeCreate;
-import kr.hvy.blog.modules.admin.application.dto.MasterCodeMoveRequest;
-import kr.hvy.blog.modules.admin.application.dto.MasterCodeUpdate;
+import java.util.Set;
 import kr.hvy.blog.modules.admin.application.service.MasterCodeService;
-import kr.hvy.common.application.domain.dto.DeleteResponse;
-import kr.hvy.common.infrastructure.redis.impl.masterdata.cache.MasterCodeCacheService;
-import kr.hvy.common.infrastructure.redis.impl.masterdata.dto.MasterCodeResponse;
 import kr.hvy.common.infrastructure.redis.impl.masterdata.dto.MasterCodeTreeResponse;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 마스터코드 Controller
- * /api/v1/code 엔드포인트
+ * 마스터코드 공개 조회 Controller (/api/codes).
+ * <p>
+ * 민감 attribute 제거는 {@link MasterCodeService} 가 현재 사용자의 ROLE_ADMIN 여부로 서비스 레벨에서 수행한다
+ * (비관리자=sanitize, 관리자=원본). 이 컨트롤러는 화이트리스트 검사 후 서비스에 위임만 한다.
+ * 전체 트리/그룹/검색/노드 단건 조회 및 모든 쓰기는 admin 전용({@link AdminMasterCodeController}, /api/codes/admin)으로 분리되어
+ * SecurityConfig 의 {@code /api/{module}/admin} 규칙으로 보호된다.
+ * <p>
+ * 또한 공개 조회는 {@code hvy.master-code.public-roots} 화이트리스트에 등록된 루트만 허용한다.
+ * 미등록 루트(예: CLAUDE)는 sanitize 와 무관하게 구조(id/code/name)조차 노출하지 않기 위해 빈 목록을 반환한다.
  */
-@Slf4j
 @RestController
-@RequestMapping("/api/v1/codes")
+@RequestMapping("/api/codes")
 @RequiredArgsConstructor
 public class MasterCodeController {
 
   private final MasterCodeService masterCodeService;
-  private final MasterCodeCacheService masterCodeCacheService;
 
-  // ========== 트리 조회 ==========
-
-  /**
-   * 전체 트리 조회
-   */
-  @GetMapping("/tree")
-  public List<MasterCodeTreeResponse> getFullTree() {
-    return masterCodeService.getFullTree();
-  }
+  // 공개 조회를 허용할 루트코드 화이트리스트(쉼표구분). 기본은 즐겨찾기(FAVORITE) 만 공개한다.
+  // 코드는 대문자 규약이므로 비교 시 대문자로 정규화한다.
+  @Value("${hvy.master-code.public-roots:FAVORITE}")
+  private Set<String> publicRoots;
 
   /**
-   * 루트별 서브트리 조회
+   * 루트별 서브트리 조회 (공개). 비관리자 응답은 서비스에서 민감 attribute 가 제거되어 반환된다.
+   * (예: 공개 페이지의 즐겨찾기 'FAVORITE' 조회)
+   * 화이트리스트에 없는 루트는 빈 목록을 반환한다.
    */
   @GetMapping("/tree/{rootCode}")
   public List<MasterCodeTreeResponse> getSubTree(@PathVariable String rootCode) {
+    if (rootCode == null || !publicRoots.contains(rootCode.toUpperCase())) {
+      return List.of();
+    }
     return masterCodeService.getSubTree(rootCode);
-  }
-
-  /**
-   * 루트별 플랫 목록 조회 (select box용)
-   */
-  @GetMapping("/tree/{rootCode}/flat")
-  public List<MasterCodeResponse> getFlatCodes(@PathVariable String rootCode) {
-    return masterCodeService.getFlatCodes(rootCode);
-  }
-
-  /**
-   * 루트 목록 조회
-   */
-  @GetMapping("/groups")
-  public List<MasterCodeResponse> getGroups() {
-    return masterCodeService.getGroups();
-  }
-
-  // ========== 노드 CRUD ==========
-
-  /**
-   * 노드 생성
-   */
-  @PostMapping("/nodes")
-  @ResponseStatus(HttpStatus.CREATED)
-  public MasterCodeResponse createNode(@Valid @RequestBody MasterCodeCreate createDto) {
-    return masterCodeService.createNode(createDto);
-  }
-
-  /**
-   * 노드 상세 조회
-   */
-  @GetMapping("/nodes/{id}")
-  public MasterCodeResponse getNode(@PathVariable Long id) {
-    return masterCodeService.getNode(id);
-  }
-
-  /**
-   * 노드 수정
-   */
-  @PutMapping("/nodes/{id}")
-  public MasterCodeResponse updateNode(
-      @PathVariable Long id,
-      @Valid @RequestBody MasterCodeUpdate updateDto) {
-    return masterCodeService.updateNode(id, updateDto);
-  }
-
-  /**
-   * 노드 삭제
-   */
-  @DeleteMapping("/nodes/{id}")
-  @ResponseStatus(HttpStatus.NO_CONTENT)
-  public void deleteNode(@PathVariable Long id) {
-    masterCodeService.deleteNode(id);
-  }
-
-  /**
-   * 노드 이동 (부모 변경)
-   */
-  @PutMapping("/nodes/{id}/move")
-  public MasterCodeResponse moveNode(
-      @PathVariable Long id,
-      @Valid @RequestBody MasterCodeMoveRequest moveRequest) {
-    return masterCodeService.moveNode(id, moveRequest);
-  }
-
-  // ========== 검색 ==========
-
-  /**
-   * 이름/코드 검색
-   */
-  @GetMapping("/search")
-  public List<MasterCodeResponse> search(@RequestParam String q) {
-    return masterCodeService.searchNodes(q);
-  }
-
-  // ========== 캐시 관리 ==========
-
-  /**
-   * 전체 캐시 초기화 (관리자용)
-   */
-  @DeleteMapping("/cache")
-  @ResponseStatus(HttpStatus.NO_CONTENT)
-  public void evictAllCache() {
-    masterCodeCacheService.evictAll();
-    log.info("마스터코드 전체 캐시 초기화");
   }
 }

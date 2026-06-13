@@ -55,6 +55,14 @@ spring:
         enabled: false # kafka 사용 여부
 
 hvy:
+  master-code:
+    # 비인증 공개(/api/codes/tree/{rootCode})로 노출을 허용할 루트코드(쉼표구분, 대문자).
+    # 미등록 루트는 구조조차 노출하지 않고 빈 목록을 반환한다.
+    public-roots: ${MASTER_CODE_PUBLIC_ROOTS:FAVORITE}
+  cors:
+    # CORS 허용 오리진 패턴(쉼표구분). 기본 "*" 는 하위호환용이며,
+    # 운영에서는 실제 프론트 도메인만 지정할 것을 권장(allowCredentials=true 와 "*" 조합은 과대 허용).
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
   sql:
     datasource-wrapper:
       enable-wrapper: true

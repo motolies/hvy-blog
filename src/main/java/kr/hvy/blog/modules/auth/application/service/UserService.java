@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.auth.application.service;
 
 import java.util.Base64;
+import java.util.HashSet;
 import kr.hvy.blog.infra.security.JwtTokenProvider;
 import kr.hvy.blog.modules.auth.application.dto.LoginRequest;
 import kr.hvy.blog.modules.auth.application.dto.RsaKeyResponse;
@@ -96,6 +97,9 @@ public class UserService implements UserDetailsService {
     String encodedPassword = passwordEncoder.encode(userCreate.getPassword());
     User userSetPass = userDtoMapper.createUserWithEncodedPassword(tempUser, encodedPassword);
 
+    // 신규 가입자는 항상 ROLE_USER 로 고정한다. 요청 본문으로 전달된 권한은 신뢰하지 않는다(수직 권한상승 방지).
+    userSetPass.addAuthority(Authority.builder().name(AuthorityName.ROLE_USER).build());
+
     if (USER_CREATE_SPECIFICATION.not().isSatisfiedBy(userSetPass)) {
       throw new IllegalArgumentException("잘못된 파라미터를 사용하여 사용자를 생성할 수 없습니다.");
     }
@@ -115,7 +119,9 @@ public class UserService implements UserDetailsService {
   }
 
   private User create(User user) {
-    user.getAuthorities().forEach(tempAuth -> {
+    // 순회 중 컬렉션을 직접 변경(remove/add)하면 권한이 2개 이상일 때 ConcurrentModificationException 이 발생한다.
+    // 스냅샷을 만들어 순회하고 원본만 변경한다(전이 권한 → 영속 권한 스왑).
+    new HashSet<>(user.getAuthorities()).forEach(tempAuth -> {
       Authority authority = loadAuthority(tempAuth.getName());
       user.removeAuthority(tempAuth);
       user.addAuthority(authority);

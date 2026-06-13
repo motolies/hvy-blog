@@ -4,6 +4,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.admin.application.MasterCodeAttributeSanitizer;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeCreate;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeMoveRequest;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeUpdate;
@@ -12,6 +13,7 @@ import kr.hvy.blog.modules.admin.mapper.MasterCodeDtoMapper;
 import kr.hvy.blog.modules.admin.repository.MasterCodeRepository;
 import kr.hvy.common.application.domain.dto.DeleteResponse;
 import kr.hvy.common.core.exception.DataNotFoundException;
+import kr.hvy.common.core.security.SecurityUtils;
 import kr.hvy.common.infrastructure.redis.impl.masterdata.cache.MasterCodeCacheService;
 import kr.hvy.common.infrastructure.redis.impl.masterdata.dto.MasterCodeResponse;
 import kr.hvy.common.infrastructure.redis.impl.masterdata.dto.MasterCodeTreeResponse;
@@ -42,17 +44,29 @@ public class MasterCodeService {
   private final MasterCodeDtoMapper masterCodeDtoMapper;
   private final MasterCodeCacheService cacheService;
   private final MasterCodeQuery masterCodeQuery;
+  private final MasterCodeAttributeSanitizer sanitizer;
 
   // ========== 트리 조회 (캐시 경유) ==========
 
   @Transactional(readOnly = true)
   public List<MasterCodeTreeResponse> getFullTree() {
-    return masterCodeQuery.getFullTree();
+    return sanitizeIfNotAdmin(masterCodeQuery.getFullTree());
   }
 
   @Transactional(readOnly = true)
   public List<MasterCodeTreeResponse> getSubTree(String rootCode) {
-    return masterCodeQuery.getSubTree(rootCode);
+    return sanitizeIfNotAdmin(masterCodeQuery.getSubTree(rootCode));
+  }
+
+  /**
+   * 현재 사용자가 ROLE_ADMIN 이 아니면 민감 attribute 를 제거한 트리를 반환한다(서비스 레벨 중앙 결정).
+   * <p>
+   * 엔드포인트 분기 대신 실제 인증 주체의 역할로 sanitize 여부를 정하므로, 어떤 컨트롤러를 거치든
+   * 비관리자에게는 민감 attribute 가 노출되지 않는다. {@link MasterCodeAttributeSanitizer} 는 캐시 DTO 를
+   * 변경하지 않고 새 복사본을 생성하므로 L1/L2 캐시 오염이 없다.
+   */
+  private List<MasterCodeTreeResponse> sanitizeIfNotAdmin(List<MasterCodeTreeResponse> trees) {
+    return SecurityUtils.hasAdminRole() ? trees : sanitizer.sanitizeTrees(trees);
   }
 
   /**

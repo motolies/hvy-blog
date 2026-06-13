@@ -1,8 +1,6 @@
 package kr.hvy.blog.modules.auth.application.dto;
 
 import jakarta.validation.constraints.NotNull;
-import java.util.Set;
-import kr.hvy.blog.modules.auth.domain.code.AuthorityName;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -23,6 +21,4 @@ public class UserCreate {
 
   @NotNull(message = "비밀번호는 필수 입니다. ")
   String password;
-
-  Set<AuthorityName> authorities;
 }

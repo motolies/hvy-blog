@@ -1,11 +1,13 @@
 package kr.hvy.blog.infra.config;
 
 import java.util.Collections;
+import java.util.List;
 import kr.hvy.blog.infra.security.CustomAccessDeniedHandler;
 import kr.hvy.blog.infra.security.CustomAuthenticationEntryPoint;
 import kr.hvy.blog.infra.security.JwtFilter;
 import kr.hvy.blog.infra.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -27,6 +29,12 @@ import org.springframework.web.cors.CorsConfigurationSource;
 public class SecurityConfig {
 
   private final JwtTokenProvider jwtTokenProvider;
+
+  // CORS 허용 오리진 패턴(쉼표구분). 기본값은 하위호환을 위해 "*" 이나,
+  // 운영에서는 hvy.cors.allowed-origins(또는 CORS_ALLOWED_ORIGINS) 로 실제 프론트 도메인만 허용할 것을 권장한다.
+  // allowCredentials(true) 와 "*" 조합은 자격증명 포함 요청을 모든 오리진에 반사하므로 과대 허용이다.
+  @Value("${hvy.cors.allowed-origins:*}")
+  private List<String> allowedOriginPatterns;
 
   @Bean
   public PasswordEncoder passwordEncoder() {
@@ -57,8 +65,8 @@ public class SecurityConfig {
       CorsConfiguration config = new CorsConfiguration();
       config.setAllowedHeaders(Collections.singletonList("*"));
       config.setAllowedMethods(Collections.singletonList("*"));
-//      config.setAllowedOriginPatterns(Collections.singletonList("http://localhost:3000"));
-      config.setAllowedOriginPatterns(Collections.singletonList("*"));
+      // 허용 오리진은 프로퍼티(hvy.cors.allowed-origins)로 외부화한다. 기본 "*" 는 하위호환용.
+      config.setAllowedOriginPatterns(allowedOriginPatterns);
       config.setAllowCredentials(true);
       return config;
     };

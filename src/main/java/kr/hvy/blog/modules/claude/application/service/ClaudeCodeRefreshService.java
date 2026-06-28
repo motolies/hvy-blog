@@ -41,11 +41,13 @@ public class ClaudeCodeRefreshService {
   private static final String ANTHROPIC_VERSION = "2023-06-01";
   private static final String OAUTH_BETA = "oauth-2025-04-20";
   private static final String ANTHROPIC_BETA = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05";
-  private static final String CLI_VERSION = "2.1.101";
+  private static final String CLI_VERSION = "2.1.195";
   private static final String USER_AGENT = "claude-cli/" + CLI_VERSION + " (external, cli)";
-  private static final String BILLING_HEADER = "cc_version=" + CLI_VERSION + ".claude-sonnet-4-20250514; cc_entrypoint=cli; cch=00000;";
   private static final String SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude.";
-  private static final String MODEL = "claude-sonnet-4-20250514";
+  // keep-alive ping 모델: 저가·현재 유효 모델. 모델이 은퇴하면 404 not_found_error 가 나므로 갱신 필요.
+  // (이전 claude-sonnet-4-20250514 는 2026-06-15 은퇴 → ping 이 404 로 실패하던 원인)
+  private static final String MODEL = "claude-haiku-4-5";
+  private static final String BILLING_HEADER = "cc_version=" + CLI_VERSION + "." + MODEL + "; cc_entrypoint=cli; cch=00000;";
 
   private static final int MAX_REFRESH_ATTEMPTS = 3;
   private static final long MAX_RETRY_BACKOFF_MILLIS = 120_000L; // Retry-After/백오프 상한 (2분)
@@ -327,27 +329,47 @@ public class ClaudeCodeRefreshService {
         List.of(new Message("user", "ping"))
     );
 
+    // 정품 SDK 는 베타 헤더가 있을 때 /v1/messages?beta=true 로 POST 한다(경로 정합).
     claudeRestClient.post()
-        .uri("/v1/messages")
+        .uri("/v1/messages?beta=true")
         .header("Authorization", "Bearer " + accessToken)
         .header("anthropic-version", ANTHROPIC_VERSION)
         .header("anthropic-beta", ANTHROPIC_BETA)
         .header("user-agent", USER_AGENT)
         .header("x-app", "cli")
         .header("x-anthropic-billing-header", BILLING_HEADER)
+        // anthropic SDK(stainless) 텔레메트리 헤더: 정품 요청과 동일하게 보강(서버 강제 아님)
+        .header("X-Stainless-Lang", "js")
+        .header("X-Stainless-Package-Version", CLI_VERSION)
+        .header("X-Stainless-OS", "Linux")
+        .header("X-Stainless-Arch", "x64")
+        .header("X-Stainless-Runtime", "node")
+        .header("X-Stainless-Runtime-Version", "v22.0.0")
+        .header("X-Stainless-Retry-Count", "0")
         .contentType(MediaType.APPLICATION_JSON)
         .body(request)
         .exchange((req, res) -> {
           if (res.getStatusCode().is2xxSuccessful()) {
             log.info("[{}] ping 성공", accountName);
-          } else if (res.getStatusCode().value() == 429) {
-            log.warn("[{}] ping 429 rate_limit — 현재 사용량 한도 초과 상태 (토큰 갱신은 정상)", accountName);
-          } else {
-            String body = new String(res.getBody().readAllBytes(), StandardCharsets.UTF_8);
-            throw new IllegalStateException(
-                String.format("[%s] ping 실패: %s %s", accountName, res.getStatusCode(), body));
+            return null;
           }
-          return null;
+
+          String body = new String(res.getBody().readAllBytes(), StandardCharsets.UTF_8);
+          if (res.getStatusCode().value() == 429) {
+            log.warn("[{}] ping 429 rate_limit — 현재 사용량 한도 초과 상태 (토큰 갱신은 정상)", accountName);
+            return null;
+          }
+
+          // 404 not_found_error: 모델 ID 가 은퇴했거나 오타다. MODEL 상수를 현재 유효한 모델로 교체해야 한다.
+          if (res.getStatusCode().value() == 404 || body.contains("not_found_error")) {
+            throw new IllegalStateException(String.format(
+                "[%s] ping 실패: 모델 '%s' 이(가) 유효하지 않습니다(모델 은퇴 또는 오타 가능). "
+                    + "MODEL 상수를 현재 유효한 모델(예: claude-haiku-4-5, claude-sonnet-4-6)로 변경하세요. status=%s body=%s",
+                accountName, MODEL, res.getStatusCode(), body));
+          }
+
+          throw new IllegalStateException(
+              String.format("[%s] ping 실패: %s %s", accountName, res.getStatusCode(), body));
         });
   }
 

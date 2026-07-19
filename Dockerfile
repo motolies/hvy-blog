@@ -56,4 +56,5 @@ ENV PORT 8080
 ENV SPRING_PROFILES_ACTIVE=default
 
 EXPOSE ${PORT}
-ENTRYPOINT ["java", "-Dspring.profiles.active=${SPRING_PROFILES_ACTIVE}", "-jar", "/app.jar"]
+# JVM 타임존을 UTC로 명시 고정 — 베이스 이미지 기본값에 대한 암묵 의존 제거
+ENTRYPOINT ["java", "-Duser.timezone=UTC", "-Dspring.profiles.active=${SPRING_PROFILES_ACTIVE}", "-jar", "/app.jar"]

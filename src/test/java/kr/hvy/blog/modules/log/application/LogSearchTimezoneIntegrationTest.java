@@ -7,9 +7,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
-import kr.hvy.blog.infra.time.ClientTimeZoneResolver;
+import kr.hvy.common.core.time.ClientTimeZoneResolver;
 import kr.hvy.common.aop.logging.entity.ApiLog;
 import kr.hvy.common.aop.logging.entity.SystemLog;
 import kr.hvy.common.aop.logging.repository.ApiLogRepository;
@@ -55,10 +55,10 @@ class LogSearchTimezoneIntegrationTest {
 
   @Test
   void systemLogSearchUsesBrowserTimezoneBoundaries() throws Exception {
-    systemLogRepository.saveAndFlush(createSystemLog("excluded-before", LocalDateTime.of(2026, 3, 7, 14, 59, 59)));
-    systemLogRepository.saveAndFlush(createSystemLog("included-start", LocalDateTime.of(2026, 3, 7, 15, 0, 0)));
-    systemLogRepository.saveAndFlush(createSystemLog("included-end", LocalDateTime.of(2026, 3, 8, 14, 59, 59)));
-    systemLogRepository.saveAndFlush(createSystemLog("excluded-after", LocalDateTime.of(2026, 3, 8, 15, 0, 0)));
+    systemLogRepository.saveAndFlush(createSystemLog("excluded-before", Instant.parse("2026-03-07T14:59:59Z")));
+    systemLogRepository.saveAndFlush(createSystemLog("included-start", Instant.parse("2026-03-07T15:00:00Z")));
+    systemLogRepository.saveAndFlush(createSystemLog("included-end", Instant.parse("2026-03-08T14:59:59Z")));
+    systemLogRepository.saveAndFlush(createSystemLog("excluded-after", Instant.parse("2026-03-08T15:00:00Z")));
 
     mockMvc.perform(post("/api/log/admin/system/search")
             .with(user("admin").authorities(() -> "ROLE_ADMIN"))
@@ -74,10 +74,10 @@ class LogSearchTimezoneIntegrationTest {
 
   @Test
   void apiLogSearchUsesBrowserTimezoneBoundaries() throws Exception {
-    apiLogRepository.saveAndFlush(createApiLog("excluded-before", LocalDateTime.of(2026, 3, 7, 14, 59, 59)));
-    apiLogRepository.saveAndFlush(createApiLog("included-start", LocalDateTime.of(2026, 3, 7, 15, 0, 0)));
-    apiLogRepository.saveAndFlush(createApiLog("included-end", LocalDateTime.of(2026, 3, 8, 14, 59, 59)));
-    apiLogRepository.saveAndFlush(createApiLog("excluded-after", LocalDateTime.of(2026, 3, 8, 15, 0, 0)));
+    apiLogRepository.saveAndFlush(createApiLog("excluded-before", Instant.parse("2026-03-07T14:59:59Z")));
+    apiLogRepository.saveAndFlush(createApiLog("included-start", Instant.parse("2026-03-07T15:00:00Z")));
+    apiLogRepository.saveAndFlush(createApiLog("included-end", Instant.parse("2026-03-08T14:59:59Z")));
+    apiLogRepository.saveAndFlush(createApiLog("excluded-after", Instant.parse("2026-03-08T15:00:00Z")));
 
     mockMvc.perform(post("/api/log/admin/api/search")
             .with(user("admin").authorities(() -> "ROLE_ADMIN"))
@@ -100,7 +100,7 @@ class LogSearchTimezoneIntegrationTest {
     ));
   }
 
-  private SystemLog createSystemLog(String traceId, LocalDateTime createdAt) {
+  private SystemLog createSystemLog(String traceId, Instant createdAt) {
     return SystemLog.builder()
         .traceId(traceId)
         .spanId(buildSpanId(traceId))
@@ -121,7 +121,7 @@ class LogSearchTimezoneIntegrationTest {
         .build();
   }
 
-  private ApiLog createApiLog(String traceId, LocalDateTime createdAt) {
+  private ApiLog createApiLog(String traceId, Instant createdAt) {
     return ApiLog.builder()
         .traceId(traceId)
         .spanId(buildSpanId(traceId))

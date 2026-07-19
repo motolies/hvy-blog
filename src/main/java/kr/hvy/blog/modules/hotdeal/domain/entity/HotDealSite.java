@@ -71,7 +71,7 @@ public class HotDealSite {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -79,7 +79,7 @@ public class HotDealSite {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default

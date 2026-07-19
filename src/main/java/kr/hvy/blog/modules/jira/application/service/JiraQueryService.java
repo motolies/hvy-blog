@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.jira.application.service;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -79,7 +79,7 @@ public class JiraQueryService {
   /**
    * 특정 기간의 워크로그를 조회합니다.
    */
-  public List<WorklogDto> getWorklogsByDateRange(LocalDateTime startDate, LocalDateTime endDate) {
+  public List<WorklogDto> getWorklogsByDateRange(Instant startDate, Instant endDate) {
     List<JiraWorklog> worklogs = jiraWorklogRepository
         .findByStartedBetweenOrderByStartedDesc(startDate, endDate);
 

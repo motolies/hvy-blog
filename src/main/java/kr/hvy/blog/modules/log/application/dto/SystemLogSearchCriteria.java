@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.log.application.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import kr.hvy.common.application.domain.dto.paging.PageRequest;
 import kr.hvy.common.core.code.ApiResponseStatus;
 import lombok.AllArgsConstructor;
@@ -28,6 +28,6 @@ public class SystemLogSearchCriteria extends PageRequest {
   private String stackTrace;
   private String remoteAddr;
   private ApiResponseStatus status;
-  private LocalDateTime createdAtFromUtc;
-  private LocalDateTime createdAtToUtcExclusive;
+  private Instant createdAtFrom;
+  private Instant createdAtToExclusive;
 }

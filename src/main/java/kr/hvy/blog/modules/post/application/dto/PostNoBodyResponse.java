@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.post.application.dto;
 
+import java.time.Instant;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
@@ -13,8 +14,8 @@ public class PostNoBodyResponse {
   String subject;
   String categoryName;
   int viewCount;
-  java.sql.Timestamp createDate;
-  java.sql.Timestamp updateDate;
+  Instant createDate;
+  Instant updateDate;
 
 }
 

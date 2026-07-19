@@ -12,7 +12,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
@@ -48,7 +48,7 @@ public class Series {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -56,7 +56,7 @@ public class Series {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default
@@ -67,7 +67,7 @@ public class Series {
     this.title = title;
     this.description = description;
     this.updated = EventLogEntity.builder()
-        .at(LocalDateTime.now())
+        .at(Instant.now())
         .by(SecurityUtils.getUsername())
         .build();
   }

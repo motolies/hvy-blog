@@ -10,7 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import kr.hvy.common.core.security.SecurityUtils;
 import lombok.AllArgsConstructor;
@@ -43,7 +43,7 @@ public class MemoCategory {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -51,7 +51,7 @@ public class MemoCategory {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default
@@ -61,7 +61,7 @@ public class MemoCategory {
     this.name = name;
     this.seq = seq;
     this.updated = EventLogEntity.builder()
-        .at(LocalDateTime.now())
+        .at(Instant.now())
         .by(SecurityUtils.getUsername())
         .build();
   }

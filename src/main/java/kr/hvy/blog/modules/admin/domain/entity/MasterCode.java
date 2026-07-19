@@ -131,7 +131,7 @@ public class MasterCode {
    */
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy", length = 64))
   })
   @Builder.Default
@@ -142,7 +142,7 @@ public class MasterCode {
    */
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)")),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt")),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy", length = 64))
   })
   private EventLogEntity updated;

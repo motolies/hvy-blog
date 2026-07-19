@@ -52,11 +52,11 @@
             <if test="responseBody != null and responseBody != ''">
                 AND response_body ILIKE CONCAT('%', #{responseBody}, '%')
             </if>
-            <if test="createdAtFromUtc != null">
-                AND created_at &gt;= #{createdAtFromUtc}
+            <if test="createdAtFrom != null">
+                AND created_at &gt;= #{createdAtFrom}
             </if>
-            <if test="createdAtToUtcExclusive != null">
-                AND created_at &lt; #{createdAtToUtcExclusive}
+            <if test="createdAtToExclusive != null">
+                AND created_at &lt; #{createdAtToExclusive}
             </if>
         </where>
         <!-- PageInterceptor가 자동으로 ORDER BY와 LIMIT 추가 -->

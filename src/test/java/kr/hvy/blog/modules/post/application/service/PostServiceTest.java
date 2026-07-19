@@ -30,6 +30,7 @@ import kr.hvy.blog.modules.post.application.dto.PostUpdate;
 import kr.hvy.blog.modules.post.application.dto.SearchObject;
 import kr.hvy.blog.modules.post.domain.entity.Post;
 import kr.hvy.blog.modules.post.mapper.PostDtoMapper;
+import kr.hvy.blog.modules.post.repository.PostDraftRepository;
 import kr.hvy.blog.modules.post.repository.PostRepository;
 import kr.hvy.blog.modules.post.repository.mapper.PostMapper;
 import kr.hvy.blog.modules.tag.application.dto.TagCreate;
@@ -80,6 +81,9 @@ class PostServiceTest {
 
   @Mock
   CategoryRepository categoryRepository;
+
+  @Mock
+  PostDraftRepository postDraftRepository;
 
   @InjectMocks
   PostService postService;

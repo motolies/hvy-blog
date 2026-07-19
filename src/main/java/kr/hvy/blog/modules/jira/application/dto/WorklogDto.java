@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * Jira 워크로그 DTO
@@ -28,9 +28,9 @@ public class WorklogDto {
     private String timeSpent;
     private BigDecimal timeHours;
     private String comment;
-    private LocalDateTime started;
+    private Instant started;
     private String worklogId;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
+    private Instant createdAt;
+    private Instant updatedAt;
 
 }

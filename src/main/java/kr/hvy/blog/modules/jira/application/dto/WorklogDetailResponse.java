@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * 작업로그 상세 DTO
@@ -20,7 +20,7 @@ public class WorklogDetailResponse {
     private String issueKey;        // 이슈
     private String author;          // 작업자
     private String comment;         // 작업 코멘트
-    private LocalDateTime started;  // 작업시작시간(started)
+    private Instant started;  // 작업시작시간(started)
     private BigDecimal timeHours;   // 작업시간(timeHours)
 
 }

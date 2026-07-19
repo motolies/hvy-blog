@@ -22,7 +22,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreRemove;
 import jakarta.persistence.PreUpdate;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 import kr.hvy.blog.modules.category.domain.entity.Category;
@@ -94,7 +94,7 @@ public class Post {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -102,7 +102,7 @@ public class Post {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default
@@ -137,7 +137,7 @@ public class Post {
     this.mainPage = mainPage;
     this.status = status;
     this.updated = EventLogEntity.builder()
-        .at(LocalDateTime.now())
+        .at(Instant.now())
         .by(SecurityUtils.getUsername())
         .build();
 

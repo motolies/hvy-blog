@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.log.application.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import kr.hvy.common.application.domain.dto.paging.PageRequest;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -25,6 +25,6 @@ public class ApiLogSearchCriteria extends PageRequest {
   private String requestBody;
   private String responseStatus;
   private String responseBody;
-  private LocalDateTime createdAtFromUtc;
-  private LocalDateTime createdAtToUtcExclusive;
+  private Instant createdAtFrom;
+  private Instant createdAtToExclusive;
 }

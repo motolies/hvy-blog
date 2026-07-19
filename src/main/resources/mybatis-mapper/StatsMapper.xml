@@ -42,9 +42,9 @@
           FROM tb_tag
     </select>
 
-    <!-- 일별 조회수 추이 (tb_system_log 기반) -->
+    <!-- 일별 조회수 추이 (tb_system_log 기반) — 클라이언트 타임존 기준 날짜 경계로 그룹핑 -->
     <select id="findDailyViewCounts" resultType="DailyViewCount">
-        SELECT CAST(created_at AS DATE) AS date,
+        SELECT CAST(created_at AT TIME ZONE #{zoneId} AS DATE) AS date,
                COUNT(*) AS count
           FROM tb_system_log
          WHERE request_uri ~ '^/api/post/[0-9]+$'
@@ -52,7 +52,7 @@
            AND status = 'SUCC'
            AND created_at &gt;= #{from}
            AND created_at &lt; #{to}
-         GROUP BY CAST(created_at AS DATE)
+         GROUP BY CAST(created_at AT TIME ZONE #{zoneId} AS DATE)
          ORDER BY date ASC
     </select>
 

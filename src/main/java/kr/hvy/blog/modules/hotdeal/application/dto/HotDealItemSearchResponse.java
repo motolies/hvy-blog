@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.hotdeal.application.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
@@ -26,7 +26,7 @@ public class HotDealItemSearchResponse {
   String dealCategory;
   String thumbnailUrl;
   boolean notified;
-  LocalDateTime notifiedAt;
-  LocalDateTime scrapedAt;
-  LocalDateTime createdAt;
+  Instant notifiedAt;
+  Instant scrapedAt;
+  Instant createdAt;
 }

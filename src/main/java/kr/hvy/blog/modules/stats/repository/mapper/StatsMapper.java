@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.stats.repository.mapper;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import kr.hvy.blog.modules.stats.application.dto.CategoryDistribution;
 import kr.hvy.blog.modules.stats.application.dto.DailyViewCount;
@@ -16,15 +16,16 @@ public interface StatsMapper {
 
   long sumViewCounts();
 
-  long countTodayViews(@Param("todayStart") LocalDateTime todayStart,
-      @Param("tomorrowStart") LocalDateTime tomorrowStart);
+  long countTodayViews(@Param("todayStart") Instant todayStart,
+      @Param("tomorrowStart") Instant tomorrowStart);
 
   long countCategories();
 
   long countTags();
 
-  List<DailyViewCount> findDailyViewCounts(@Param("from") LocalDateTime from,
-      @Param("to") LocalDateTime to);
+  // zoneId: 일별 그룹핑의 날짜 경계 기준 타임존 (클라이언트 존)
+  List<DailyViewCount> findDailyViewCounts(@Param("from") Instant from,
+      @Param("to") Instant to, @Param("zoneId") String zoneId);
 
   List<PopularPost> findPopularPosts(@Param("limit") int limit);
 

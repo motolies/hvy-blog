@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.hotdeal.application.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
@@ -20,6 +20,6 @@ public class HotDealSiteResponse {
   int minRecommendation;
   int minViewCount;
   int minCommentCount;
-  LocalDateTime createdAt;
-  LocalDateTime updatedAt;
+  Instant createdAt;
+  Instant updatedAt;
 }

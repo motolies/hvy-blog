@@ -2,8 +2,8 @@ package kr.hvy.blog.modules.log.application.service;
 
 import java.util.ArrayList;
 import java.util.List;
-import kr.hvy.blog.infra.time.BrowserDateTimeConverter;
-import kr.hvy.blog.infra.time.UtcDateRange;
+import kr.hvy.common.core.time.BrowserDateTimeConverter;
+import kr.hvy.common.core.time.UtcDateRange;
 import kr.hvy.blog.modules.log.application.dto.SystemLogSearchCriteria;
 import kr.hvy.blog.modules.log.application.dto.SystemLogSearchRequest;
 import kr.hvy.blog.modules.log.application.dto.SystemLogSearchResponse;
@@ -72,8 +72,8 @@ public class SystemLogSearchService {
         .stackTrace(request.getStackTrace())
         .remoteAddr(request.getRemoteAddr())
         .status(request.getStatus())
-        .createdAtFromUtc(createdAtRange.fromInclusive())
-        .createdAtToUtcExclusive(createdAtRange.toExclusive())
+        .createdAtFrom(createdAtRange.fromInclusive())
+        .createdAtToExclusive(createdAtRange.toExclusive())
         .build();
   }
 }

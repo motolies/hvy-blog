@@ -14,7 +14,7 @@ import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import kr.hvy.common.core.security.SecurityUtils;
 import lombok.AllArgsConstructor;
@@ -60,7 +60,7 @@ public class Memo {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -68,7 +68,7 @@ public class Memo {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default
@@ -78,7 +78,7 @@ public class Memo {
     this.content = content;
     this.category = category;
     this.updated = EventLogEntity.builder()
-        .at(LocalDateTime.now())
+        .at(Instant.now())
         .by(SecurityUtils.getUsername())
         .build();
   }
@@ -86,7 +86,7 @@ public class Memo {
   public void softDelete() {
     this.deleted = true;
     this.updated = EventLogEntity.builder()
-        .at(LocalDateTime.now())
+        .at(Instant.now())
         .by(SecurityUtils.getUsername())
         .build();
   }

@@ -2,6 +2,9 @@
 -- 핫딜 스케줄러 테이블 DDL
 -- PostgreSQL
 -- =============================================
+-- 시각 컬럼은 TIMESTAMPTZ(시간대 인지) 사용. DB는 UTC 기준으로 운영한다.
+-- timestamp→timestamptz 전환 이력: db/migration_timestamptz/V20260713_01__convert_timestamptz.sql
+-- =============================================
 
 -- 핫딜 사이트 설정 테이블
 CREATE TABLE IF NOT EXISTS tb_hot_deal_site
@@ -18,9 +21,9 @@ CREATE TABLE IF NOT EXISTS tb_hot_deal_site
     min_recommendation INTEGER       NOT NULL DEFAULT 10,
     min_view_count     INTEGER       NOT NULL DEFAULT 1000,
     min_comment_count  INTEGER       NOT NULL DEFAULT 25,
-    created_at         TIMESTAMP(6)  NOT NULL,
+    created_at         TIMESTAMPTZ(6)  NOT NULL,
     created_by         VARCHAR(255)           DEFAULT NULL,
-    updated_at         TIMESTAMP(6)  NOT NULL,
+    updated_at         TIMESTAMPTZ(6)  NOT NULL,
     updated_by         VARCHAR(255)           DEFAULT NULL
 );
 
@@ -60,11 +63,11 @@ CREATE TABLE IF NOT EXISTS tb_hot_deal_item
     deal_category        VARCHAR(64)            DEFAULT NULL,
     thumbnail_url        VARCHAR(1024)         DEFAULT NULL,
     notified             BOOLEAN       NOT NULL DEFAULT FALSE,
-    notified_at          TIMESTAMP(6)           DEFAULT NULL,
-    scraped_at           TIMESTAMP(6)  NOT NULL,
-    created_at           TIMESTAMP(6)  NOT NULL,
+    notified_at          TIMESTAMPTZ(6)           DEFAULT NULL,
+    scraped_at           TIMESTAMPTZ(6)  NOT NULL,
+    created_at           TIMESTAMPTZ(6)  NOT NULL,
     created_by           VARCHAR(255)           DEFAULT NULL,
-    updated_at           TIMESTAMP(6)  NOT NULL,
+    updated_at           TIMESTAMPTZ(6)  NOT NULL,
     updated_by           VARCHAR(255)           DEFAULT NULL,
     CONSTRAINT fk_hot_deal_item_site_id
         FOREIGN KEY (site_id) REFERENCES tb_hot_deal_site (id),

@@ -25,7 +25,7 @@ public class JiraSyncScheduler extends AbstractScheduler {
   /**
    * 10분마다 Jira 이슈 및 워크로그 동기화 실행
    */
-  @Scheduled(cron = "${scheduler.jira.cron-expression:0 */10 * * * ?}")
+  @Scheduled(cron = "${scheduler.jira.cron-expression:0 */10 * * * ?}", zone = "UTC")
   @SchedulerLock(name = "${scheduler.jira.lock-name:JIRA-SYNC}", lockAtMostFor = "9m", lockAtLeastFor = "1m")
   public void syncJiraData() {
     proceedScheduler("JIRA-ISSUE-COLLECTION")

@@ -3,7 +3,7 @@ package kr.hvy.blog.modules.jira.repository;
 import kr.hvy.blog.modules.jira.domain.entity.JiraWorklog;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,7 +30,7 @@ public interface JiraWorklogRepository extends JpaRepository<JiraWorklog, Long> 
     /**
      * 특정 기간 동안의 워크로그 조회
      */
-    List<JiraWorklog> findByStartedBetweenOrderByStartedDesc(LocalDateTime startDate, LocalDateTime endDate);
+    List<JiraWorklog> findByStartedBetweenOrderByStartedDesc(Instant startDate, Instant endDate);
 
     /**
      * 작업자별 워크로그 조회

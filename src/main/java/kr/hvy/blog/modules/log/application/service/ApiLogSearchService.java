@@ -2,8 +2,8 @@ package kr.hvy.blog.modules.log.application.service;
 
 import java.util.ArrayList;
 import java.util.List;
-import kr.hvy.blog.infra.time.BrowserDateTimeConverter;
-import kr.hvy.blog.infra.time.UtcDateRange;
+import kr.hvy.common.core.time.BrowserDateTimeConverter;
+import kr.hvy.common.core.time.UtcDateRange;
 import kr.hvy.blog.modules.log.application.dto.ApiLogSearchCriteria;
 import kr.hvy.blog.modules.log.application.dto.ApiLogSearchRequest;
 import kr.hvy.blog.modules.log.application.dto.ApiLogSearchResponse;
@@ -70,8 +70,8 @@ public class ApiLogSearchService {
         .requestBody(request.getRequestBody())
         .responseStatus(request.getResponseStatus())
         .responseBody(request.getResponseBody())
-        .createdAtFromUtc(createdAtRange.fromInclusive())
-        .createdAtToUtcExclusive(createdAtRange.toExclusive())
+        .createdAtFrom(createdAtRange.fromInclusive())
+        .createdAtToExclusive(createdAtRange.toExclusive())
         .build();
   }
 }

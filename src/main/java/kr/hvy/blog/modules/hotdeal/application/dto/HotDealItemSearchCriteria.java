@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.hotdeal.application.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import kr.hvy.common.application.domain.dto.paging.PageRequest;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -19,8 +19,8 @@ public class HotDealItemSearchCriteria extends PageRequest {
   private String title;
   private Boolean notified;
   private String dealCategory;
-  private LocalDateTime scrapedAtFromUtc;
-  private LocalDateTime scrapedAtToUtcExclusive;
+  private Instant scrapedAtFrom;
+  private Instant scrapedAtToExclusive;
   private Integer minRecommendationCount;
   private Integer maxRecommendationCount;
   private Integer minViewCount;

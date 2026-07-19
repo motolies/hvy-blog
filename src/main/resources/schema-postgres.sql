@@ -5,11 +5,17 @@
 --   bigint auto_increment → BIGINT GENERATED ALWAYS AS IDENTITY
 --   bit                   → BOOLEAN
 --   longtext              → TEXT
---   datetime(6)           → TIMESTAMP(6)
+--   datetime(6)           → TIMESTAMPTZ(6)
 --   int                   → INTEGER
 --   decimal               → NUMERIC
 --   camelCase 컬럼명      → snake_case (PG unquoted 식별자 소문자 폴딩 + JPA PhysicalNamingStrategy 대응)
 --   comment '...' (인라인)→ COMMENT ON ... (별도 문장, 각 테이블 생성 직후 배치)
+-- =============================================
+-- 시각 타입 규칙(2026-07-13 갱신):
+--   모든 시각 컬럼은 TIMESTAMPTZ(시간대 인지) 사용. DB는 UTC 기준으로 운영한다.
+--   과거 timestamp without time zone(UTC 벽시계 저장)에서 timestamptz로 전환한 이력은
+--   db/migration_timestamptz/V20260713_01__convert_timestamptz.sql 참조.
+--   DATE 타입(tb_jira_issue.start_date/end_date)은 시각 정보가 없어 그대로 유지한다.
 -- =============================================
 
 -- =============================================
@@ -84,9 +90,9 @@ CREATE TABLE tb_post
     view_count    INTEGER      NOT NULL,
     status        VARCHAR(3)   NOT NULL DEFAULT 'PUB',
     category_id   VARCHAR(32)  NOT NULL,
-    created_at    TIMESTAMP(6) NOT NULL,
+    created_at    TIMESTAMPTZ(6) NOT NULL,
     created_by    VARCHAR(255) NULL,
-    updated_at    TIMESTAMP(6) NOT NULL,
+    updated_at    TIMESTAMPTZ(6) NOT NULL,
     updated_by    VARCHAR(255) NULL,
     CONSTRAINT fk_post_category_id FOREIGN KEY (category_id) REFERENCES tb_category (id)
 );
@@ -112,7 +118,7 @@ CREATE TABLE tb_post_draft
     post_id    BIGINT PRIMARY KEY REFERENCES tb_post (id) ON DELETE CASCADE,
     subject    VARCHAR(512) NOT NULL,
     body       TEXT         NOT NULL,
-    updated_at TIMESTAMP(6) NOT NULL,
+    updated_at TIMESTAMPTZ(6) NOT NULL,
     updated_by VARCHAR(255) NULL
 );
 COMMENT ON TABLE  tb_post_draft            IS '발행 포스트의 임시저장 초안';
@@ -133,7 +139,7 @@ CREATE TABLE tb_file
     path        VARCHAR(512) NOT NULL,
     file_size   BIGINT       NOT NULL,
     deleted     BOOLEAN      NOT NULL,
-    created_at  TIMESTAMP(6) NOT NULL,
+    created_at  TIMESTAMPTZ(6) NOT NULL,
     created_by  VARCHAR(255) NULL,
     CONSTRAINT fk_file_post FOREIGN KEY (post_id) REFERENCES tb_post (id)
 );
@@ -156,9 +162,9 @@ CREATE TABLE tb_search_engine
     name       VARCHAR(32)  NOT NULL,
     url        VARCHAR(512) NOT NULL,
     seq        INTEGER      NOT NULL,
-    created_at TIMESTAMP(6) NOT NULL,
+    created_at TIMESTAMPTZ(6) NOT NULL,
     created_by VARCHAR(255) NULL,
-    updated_at TIMESTAMP(6) NOT NULL,
+    updated_at TIMESTAMPTZ(6) NOT NULL,
     updated_by VARCHAR(255) NULL
 );
 COMMENT ON TABLE  tb_search_engine            IS '검색 엔진 설정';
@@ -177,7 +183,7 @@ CREATE TABLE tb_tag
 (
     id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name       VARCHAR(64)  NOT NULL,
-    created_at TIMESTAMP(6) NOT NULL,
+    created_at TIMESTAMPTZ(6) NOT NULL,
     created_by VARCHAR(255) NULL,
     CONSTRAINT uk_tag_name UNIQUE (name)
 );
@@ -208,9 +214,9 @@ CREATE TABLE tb_series
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     title       VARCHAR(256) NOT NULL,
     description VARCHAR(1024) NULL,
-    created_at  TIMESTAMP(6) NOT NULL,
+    created_at  TIMESTAMPTZ(6) NOT NULL,
     created_by  VARCHAR(255) NULL,
-    updated_at  TIMESTAMP(6) NOT NULL,
+    updated_at  TIMESTAMPTZ(6) NOT NULL,
     updated_by  VARCHAR(255) NULL
 );
 COMMENT ON TABLE  tb_series             IS '시리즈(연재물)';
@@ -300,9 +306,9 @@ CREATE TABLE tb_master_code
     is_active        BOOLEAN      NOT NULL DEFAULT TRUE,
 
     -- 감사
-    created_at       TIMESTAMP(6) NOT NULL DEFAULT NOW(),
+    created_at       TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
     created_by       VARCHAR(64)  NULL,
-    updated_at       TIMESTAMP(6) NULL,
+    updated_at       TIMESTAMPTZ(6) NULL,
     updated_by       VARCHAR(64)  NULL,
 
     CONSTRAINT uk_master_code_parent_code UNIQUE (parent_id, code),
@@ -349,9 +355,9 @@ CREATE TABLE tb_jira_issue
     start_date    DATE         NULL,
     end_date      DATE         NULL,
     sprint        VARCHAR(32)  NULL,
-    created_at    TIMESTAMP(6) NOT NULL,
+    created_at    TIMESTAMPTZ(6) NOT NULL,
     created_by    VARCHAR(32)  NULL,
-    updated_at    TIMESTAMP(6) NOT NULL,
+    updated_at    TIMESTAMPTZ(6) NOT NULL,
     updated_by    VARCHAR(32)  NULL,
     CONSTRAINT uk_jira_issue_key UNIQUE (issue_key)
 );
@@ -390,11 +396,11 @@ CREATE TABLE tb_jira_worklog
     time_spent VARCHAR(32)  NOT NULL,
     time_hours NUMERIC(5,2) NOT NULL,
     comment    TEXT         NULL,
-    started    TIMESTAMP(6) NOT NULL,
+    started    TIMESTAMPTZ(6) NOT NULL,
     worklog_id VARCHAR(256) NOT NULL,
-    created_at TIMESTAMP(6) NOT NULL,
+    created_at TIMESTAMPTZ(6) NOT NULL,
     created_by VARCHAR(32)  NULL,
-    updated_at TIMESTAMP(6) NOT NULL,
+    updated_at TIMESTAMPTZ(6) NOT NULL,
     updated_by VARCHAR(32)  NULL,
     CONSTRAINT fk_jira_worklog_issue_id FOREIGN KEY (issue_id) REFERENCES tb_jira_issue (id),
     CONSTRAINT uk_jira_worklog_id UNIQUE (worklog_id)
@@ -428,9 +434,9 @@ CREATE TABLE tb_memo_category
     id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name       VARCHAR(64)  NOT NULL,
     seq        INTEGER      NOT NULL DEFAULT 0,
-    created_at TIMESTAMP(6) NOT NULL,
+    created_at TIMESTAMPTZ(6) NOT NULL,
     created_by VARCHAR(255) NULL,
-    updated_at TIMESTAMP(6) NOT NULL,
+    updated_at TIMESTAMPTZ(6) NOT NULL,
     updated_by VARCHAR(255) NULL,
     CONSTRAINT uk_memo_category_name UNIQUE (name)
 );
@@ -451,9 +457,9 @@ CREATE TABLE tb_memo
     content     TEXT         NOT NULL,
     category_id BIGINT       NULL,
     deleted     BOOLEAN      NOT NULL DEFAULT FALSE,
-    created_at  TIMESTAMP(6) NOT NULL,
+    created_at  TIMESTAMPTZ(6) NOT NULL,
     created_by  VARCHAR(255) NULL,
-    updated_at  TIMESTAMP(6) NOT NULL,
+    updated_at  TIMESTAMPTZ(6) NOT NULL,
     updated_by  VARCHAR(255) NULL,
     CONSTRAINT fk_memo_category FOREIGN KEY (category_id) REFERENCES tb_memo_category (id)
 );
@@ -486,7 +492,7 @@ CREATE TABLE tb_system_log
     remote_addr      VARCHAR(64)   NULL,
     process_time     BIGINT        NULL,
     status           VARCHAR(4)    NOT NULL,
-    created_at       TIMESTAMP(6)  NOT NULL,
+    created_at       TIMESTAMPTZ(6)  NOT NULL,
     created_by       VARCHAR(255)  NULL
 );
 COMMENT ON TABLE  tb_system_log                  IS '시스템 로그 (요청/응답 추적)';
@@ -521,7 +527,7 @@ CREATE TABLE tb_api_log
     response_status  VARCHAR(128)  NULL,
     response_body    TEXT          NULL,
     process_time     BIGINT        NULL,
-    created_at       TIMESTAMP(6)  NOT NULL,
+    created_at       TIMESTAMPTZ(6)  NOT NULL,
     created_by       VARCHAR(255)  NULL
 );
 COMMENT ON TABLE  tb_api_log                   IS 'API 로그 (외부 API 호출 추적)';
@@ -546,8 +552,8 @@ COMMENT ON COLUMN tb_api_log.created_by        IS '생성자';
 CREATE TABLE shedlock
 (
     name       VARCHAR(64)  NOT NULL PRIMARY KEY,
-    lock_until TIMESTAMP(3) NOT NULL,
-    locked_at  TIMESTAMP(3) NOT NULL,
+    lock_until TIMESTAMPTZ(3) NOT NULL,
+    locked_at  TIMESTAMPTZ(3) NOT NULL,
     locked_by  VARCHAR(255) NOT NULL
 );
 COMMENT ON TABLE shedlock IS 'ShedLock 분산 스케줄러 잠금 테이블';

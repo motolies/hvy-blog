@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.memo.application.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -16,8 +16,8 @@ public class MemoSearchResult {
   private Long categoryId;
   private String categoryName;
   private int categorySeq;
-  private LocalDateTime createdAt;
+  private Instant createdAt;
   private String createdBy;
-  private LocalDateTime updatedAt;
+  private Instant updatedAt;
   private String updatedBy;
 }

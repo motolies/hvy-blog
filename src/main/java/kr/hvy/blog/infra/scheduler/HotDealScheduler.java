@@ -23,7 +23,7 @@ public class HotDealScheduler extends AbstractScheduler {
 
   private final HotDealService hotDealService;
 
-  @Scheduled(cron = "${scheduler.hotdeal.cron-expression:0 */10 * * * ?}")
+  @Scheduled(cron = "${scheduler.hotdeal.cron-expression:0 */10 * * * ?}", zone = "UTC")
   @SchedulerLock(name = "${scheduler.hotdeal.lock-name:HOTDEAL-SYNC}", lockAtMostFor = "9m", lockAtLeastFor = "1m")
   public void run() {
     proceedScheduler("HOTDEAL-SCRAPE").accept(this::scrape);

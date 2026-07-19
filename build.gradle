@@ -59,7 +59,8 @@ dependencies {
 
     // Library
     if (env == "prod") {
-        implementation('io.github.motolies:hvy-common:0.1.27') {
+        // 0.2.0: 시간 타입 Instant 전면 전환 (breaking) — Maven Central 릴리스 후 배포 가능
+        implementation('io.github.motolies:hvy-common:0.2.1') {
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream'
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream-binder-kafka'
         }
@@ -132,4 +133,6 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // 테스트 JVM 타임존 고정 — 개발머신(KST)/CI 환경 차이에 의한 flaky 방지 (-Duser.timezone 으로 재정의 가능)
+    systemProperty 'user.timezone', System.getProperty('user.timezone', 'UTC')
 }

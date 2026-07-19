@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.jira.domain;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import lombok.Builder;
 import lombok.Value;
 
@@ -23,6 +23,6 @@ public class WorklogInfo {
   String timeSpent;
   BigDecimal timeHours;
   String comment;
-  LocalDateTime started;
+  Instant started;
   String worklogId;
 }

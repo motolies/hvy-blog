@@ -1,7 +1,7 @@
 package kr.hvy.blog.modules.hotdeal.application.service;
 
 import jakarta.persistence.EntityNotFoundException;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -108,7 +108,7 @@ public class HotDealService {
               .price(deal.getPrice())
               .dealCategory(deal.getDealCategory())
               .thumbnailUrl(deal.getThumbnailUrl())
-              .scrapedAt(LocalDateTime.now())
+              .scrapedAt(Instant.now())
               .build();
 
           item.markNotified();
@@ -139,7 +139,7 @@ public class HotDealService {
         .or(new RecommendationRatioSpecification(site.getMinRecommendation(), 0));
   }
 
-  public int deleteItemsOlderThan(LocalDateTime cutoffDate) {
+  public int deleteItemsOlderThan(Instant cutoffDate) {
     return itemRepository.deleteByCreatedAtBefore(cutoffDate);
   }
 

@@ -12,7 +12,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -75,14 +75,14 @@ public class HotDealItem {
   @Builder.Default
   private boolean notified = false;
 
-  private LocalDateTime notifiedAt;
+  private Instant notifiedAt;
 
   @Column(nullable = false)
-  private LocalDateTime scrapedAt;
+  private Instant scrapedAt;
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -90,7 +90,7 @@ public class HotDealItem {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default
@@ -102,7 +102,7 @@ public class HotDealItem {
 
   public void markNotified() {
     this.notified = true;
-    this.notifiedAt = LocalDateTime.now();
+    this.notifiedAt = Instant.now();
   }
 
   public void updateCounts(int recommendationCount, int unrecommendationCount, int viewCount, int commentCount) {

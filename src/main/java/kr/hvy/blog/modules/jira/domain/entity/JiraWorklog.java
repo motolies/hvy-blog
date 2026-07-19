@@ -14,7 +14,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -75,14 +75,14 @@ public class JiraWorklog {
   private String comment;
 
   @Column(nullable = false)
-  private LocalDateTime started;
+  private Instant started;
 
   @Column(unique = true, nullable = false, length = 256)
   private String worklogId;
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "createdAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "createdAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "createdBy"))
   })
   @Builder.Default
@@ -90,7 +90,7 @@ public class JiraWorklog {
 
   @Embedded
   @AttributeOverrides({
-      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", columnDefinition = "TIMESTAMP(6)", nullable = false)),
+      @AttributeOverride(name = "at", column = @Column(name = "updatedAt", nullable = false)),
       @AttributeOverride(name = "by", column = @Column(name = "updatedBy"))
   })
   @Builder.Default
@@ -101,7 +101,7 @@ public class JiraWorklog {
    */
   public void updateWorklogInfo(String issueType, String status, String summary,
       String components, String timeSpent, BigDecimal timeHours,
-      String comment, LocalDateTime started) {
+      String comment, Instant started) {
     this.issueType = issueType;
     this.status = status;
     this.summary = summary;

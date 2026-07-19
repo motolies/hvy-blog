@@ -1,6 +1,7 @@
 package kr.hvy.blog.infra.scheduler;
 
-import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.Instant;
 import kr.hvy.blog.modules.hotdeal.application.service.HotDealService;
 import kr.hvy.common.aop.logging.service.ApiLogService;
 import kr.hvy.common.aop.logging.service.SystemLogService;
@@ -25,7 +26,7 @@ public class LogCleanerScheduler extends AbstractScheduler {
   private static final int LOG_RETENTION_DAYS = 60;
   private static final int HOTDEAL_RETENTION_DAYS = 90;
 
-  @Scheduled(cron = "${scheduler.log-cleaner.cron-expression}")
+  @Scheduled(cron = "${scheduler.log-cleaner.cron-expression}", zone = "UTC")
   @SchedulerLock(name = "${scheduler.log-cleaner.lock-name}", lockAtLeastFor = "PT30S", lockAtMostFor = "PT5M")
   public void cleanLogs() {
     proceedScheduler("LOG-CLEANER")
@@ -33,7 +34,7 @@ public class LogCleanerScheduler extends AbstractScheduler {
   }
 
   private void deleteOldData() {
-    LocalDateTime logCutoffDate = LocalDateTime.now().minusDays(LOG_RETENTION_DAYS);
+    Instant logCutoffDate = Instant.now().minus(Duration.ofDays(LOG_RETENTION_DAYS));
 
     // ApiLogEntity 삭제
     int deletedApiLogs = apiLogService.deleteLogsOlderThan(logCutoffDate);
@@ -45,7 +46,7 @@ public class LogCleanerScheduler extends AbstractScheduler {
         LOG_RETENTION_DAYS, deletedApiLogs, deletedSystemLogs);
 
     // HotDealItem 삭제
-    LocalDateTime hotDealCutoffDate = LocalDateTime.now().minusDays(HOTDEAL_RETENTION_DAYS);
+    Instant hotDealCutoffDate = Instant.now().minus(Duration.ofDays(HOTDEAL_RETENTION_DAYS));
     int deletedHotDeals = hotDealService.deleteItemsOlderThan(hotDealCutoffDate);
 
     log.info("핫딜 정리 완료: {}일 이전 아이템 삭제 (삭제 건수: {})",

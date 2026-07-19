@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.log.application.dto;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import java.time.Instant;
 import kr.hvy.common.config.jackson.serializer.TsidToStringSerializer;
 import lombok.Builder;
 import lombok.Value;
@@ -23,7 +24,7 @@ public class ApiLogSearchResponse {
   String responseStatus;
   String responseBody;
   Long processTime;
-  String createdAt;
+  Instant createdAt;
   String createdBy;
 
 }

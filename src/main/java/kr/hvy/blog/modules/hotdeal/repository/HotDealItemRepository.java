@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.hotdeal.repository;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Optional;
 import kr.hvy.blog.modules.hotdeal.domain.entity.HotDealItem;
 import kr.hvy.blog.modules.hotdeal.domain.entity.HotDealSite;
@@ -17,5 +17,5 @@ public interface HotDealItemRepository extends JpaRepository<HotDealItem, Long> 
 
   @Modifying
   @Query("DELETE FROM HotDealItem h WHERE h.created.at < :cutoffDate")
-  int deleteByCreatedAtBefore(@Param("cutoffDate") LocalDateTime cutoffDate);
+  int deleteByCreatedAtBefore(@Param("cutoffDate") Instant cutoffDate);
 }

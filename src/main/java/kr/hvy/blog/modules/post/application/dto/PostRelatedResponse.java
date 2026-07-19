@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.post.application.dto;
 
+import java.time.Instant;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
@@ -12,6 +13,6 @@ public class PostRelatedResponse {
   long id;
   String subject;
   String categoryName;
-  java.sql.Timestamp createDate;
+  Instant createDate;
   int commonTagCount;
 }

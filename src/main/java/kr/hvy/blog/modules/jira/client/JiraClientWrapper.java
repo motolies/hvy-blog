@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.jira.client;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -40,6 +41,9 @@ import org.springframework.util.MultiValueMap;
 @Slf4j
 @Component
 public class JiraClientWrapper {
+
+  // Done 처리일 등 달력 날짜 판정의 기준 타임존
+  private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
   private final RestApi jiraRestApi;
   private final JiraProperties jiraProperties;
@@ -465,7 +469,7 @@ public class JiraClientWrapper {
             ? BigDecimal.valueOf(infraWorklogDto.getTimeSpentSeconds() / 3600.0)
             : BigDecimal.ZERO)
         .comment(ObjectUtils.isNotEmpty(infraWorklogDto.getComment()) ? infraWorklogDto.getComment().extractText() : "")
-        .started(ObjectUtils.isNotEmpty(infraWorklogDto.getStarted()) ? infraWorklogDto.getStarted().toLocalDateTime() : null)
+        .started(ObjectUtils.isNotEmpty(infraWorklogDto.getStarted()) ? infraWorklogDto.getStarted().toInstant() : null)
         .worklogId(infraWorklogDto.getSelf()) // self URL을 worklogId로 사용
         .build();
   }
@@ -549,8 +553,10 @@ public class JiraClientWrapper {
           if (ObjectUtils.isEmpty(history.getItems())) continue;
           for (ChangelogItemDto item : history.getItems()) {
             if ("status".equals(item.getField()) && doneStatuses.contains(item.getToString())) {
-              log.debug("이슈 {} Done 상태 변경일 발견: {}", issueKey, history.getCreated().toLocalDate());
-              return history.getCreated().toLocalDate();
+              // Done 처리일은 KST 달력 날짜 기준으로 확정한다 (Jira 응답 오프셋에 의존하지 않도록 명시)
+              LocalDate doneDate = history.getCreated().withZoneSameInstant(KST).toLocalDate();
+              log.debug("이슈 {} Done 상태 변경일 발견: {}", issueKey, doneDate);
+              return doneDate;
             }
           }
         }

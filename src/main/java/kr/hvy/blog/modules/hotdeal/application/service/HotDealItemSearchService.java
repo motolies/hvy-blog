@@ -2,8 +2,8 @@ package kr.hvy.blog.modules.hotdeal.application.service;
 
 import java.util.ArrayList;
 import java.util.List;
-import kr.hvy.blog.infra.time.BrowserDateTimeConverter;
-import kr.hvy.blog.infra.time.UtcDateRange;
+import kr.hvy.common.core.time.BrowserDateTimeConverter;
+import kr.hvy.common.core.time.UtcDateRange;
 import kr.hvy.blog.modules.hotdeal.application.dto.HotDealItemSearchCriteria;
 import kr.hvy.blog.modules.hotdeal.application.dto.HotDealItemSearchRequest;
 import kr.hvy.blog.modules.hotdeal.application.dto.HotDealItemSearchResponse;
@@ -60,8 +60,8 @@ public class HotDealItemSearchService {
         .title(request.getTitle())
         .notified(request.getNotified())
         .dealCategory(request.getDealCategory())
-        .scrapedAtFromUtc(scrapedRange.fromInclusive())
-        .scrapedAtToUtcExclusive(scrapedRange.toExclusive())
+        .scrapedAtFrom(scrapedRange.fromInclusive())
+        .scrapedAtToExclusive(scrapedRange.toExclusive())
         .minRecommendationCount(request.getMinRecommendationCount())
         .maxRecommendationCount(request.getMaxRecommendationCount())
         .minViewCount(request.getMinViewCount())

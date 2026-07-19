@@ -41,11 +41,11 @@
             <if test="dealCategory != null and dealCategory != ''">
                 AND i.deal_category = #{dealCategory}
             </if>
-            <if test="scrapedAtFromUtc != null">
-                AND i.scraped_at &gt;= #{scrapedAtFromUtc}
+            <if test="scrapedAtFrom != null">
+                AND i.scraped_at &gt;= #{scrapedAtFrom}
             </if>
-            <if test="scrapedAtToUtcExclusive != null">
-                AND i.scraped_at &lt; #{scrapedAtToUtcExclusive}
+            <if test="scrapedAtToExclusive != null">
+                AND i.scraped_at &lt; #{scrapedAtToExclusive}
             </if>
             <if test="minRecommendationCount != null">
                 AND i.recommendation_count &gt;= #{minRecommendationCount}

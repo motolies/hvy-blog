@@ -28,6 +28,9 @@ spring:
       hibernate:
         release_mode: AFTER_TRANSACTION
         dialect: org.hibernate.dialect.PostgreSQLDialect
+        # JDBC 시간 바인딩을 UTC로 고정 — JVM 기본 타임존 변동에 대한 안전벨트 (timestamptz 전환 후에도 무해)
+        jdbc:
+          time_zone: UTC
       hypersistence:
         utils:
           enable_types_contributor: false

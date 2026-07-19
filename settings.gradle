@@ -1,6 +1,12 @@
 rootProject.name = 'blog'
 def commonLibPath = file('../hvy-common')
 // 로컬 소스가 있는 경우 멀티모듈처럼 사용하기 위해 includeBuild을 사용합니다.
+// hvy-common의 group(kr.hvy)과 배포 좌표(io.github.motolies)가 달라 자동 치환이 동작하지 않으므로
+// 명시적 dependencySubstitution으로 바이너리 의존성을 로컬 소스 빌드로 치환합니다.
 if (commonLibPath.exists()) {
-   includeBuild(commonLibPath)
+   includeBuild(commonLibPath) {
+      dependencySubstitution {
+         substitute module('io.github.motolies:hvy-common') using project(':')
+      }
+   }
 }

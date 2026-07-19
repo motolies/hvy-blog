@@ -21,6 +21,24 @@ configurations {
 
 repositories {
     mavenLocal()
+    // GH Packages는 public 패키지도 읽기에 토큰이 필요하므로, 자격증명이 있을 때만 저장소를 추가한다.
+    // (토큰 없는 환경은 기존과 동일하게 mavenCentral로 폴백)
+    def gprUser = project.findProperty('gpr.user') ?: System.getenv('GHP_USER')
+    def gprKey = project.findProperty('gpr.key') ?: System.getenv('GHP_TOKEN')
+    if (gprUser && gprKey) {
+        maven {
+            name = 'GitHubPackages'
+            url = uri('https://maven.pkg.github.com/motolies/hvy-common')
+            credentials {
+                username = gprUser
+                password = gprKey
+            }
+            // 이 저장소에서는 hvy-common만 조회 → 다른 의존성 요청이 GH Packages로 새지 않음
+            content {
+                includeModule('io.github.motolies', 'hvy-common')
+            }
+        }
+    }
     mavenCentral()
 }
 

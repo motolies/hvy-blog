@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 ### STAGE 1: Build ###
 FROM gradle:8.12.1-jdk21-alpine AS builder
 WORKDIR /home/gradle/project
@@ -5,6 +6,9 @@ WORKDIR /home/gradle/project
 # Build time에 사용할 환경 변수 지정 (default: prod)
 ARG ENV_TYPE=prod
 ENV ENV_TYPE=${ENV_TYPE}
+
+# GH Packages 조회용 사용자명 (토큰은 secret mount로 주입되어 레이어에 남지 않음)
+ARG GHP_USER=motolies
 
 # Gradle 빌드 스크립트 및 Wrapper 파일 복사
 COPY build.gradle settings.gradle gradlew ./
@@ -14,11 +18,16 @@ RUN chmod +x gradlew
 # 의존성 미리 다운로드
 # 캐시 마운트(--mount=type=cache)를 제거해 다운로드 결과가 레이어에 남도록 한다.
 # 이래야 build.gradle 불변 시 gha 레이어 캐시가 이 레이어를 재사용하여 의존성 재다운로드를 막는다.
-RUN ./gradlew --no-daemon dependencies -Penv=${ENV_TYPE}
+# secret이 없으면 GHP_TOKEN이 비어 build.gradle의 조건부 로직이 mavenCentral로 폴백한다.
+RUN --mount=type=secret,id=ghp_token \
+    GHP_TOKEN=$(cat /run/secrets/ghp_token 2>/dev/null || true) GHP_USER=${GHP_USER} \
+    ./gradlew --no-daemon dependencies -Penv=${ENV_TYPE}
 
 # 소스 코드 복사 후 실행 가능한 부트 jar만 빌드 (테스트/플레인 jar 제외)
 COPY src src
-RUN ./gradlew --no-daemon bootJar -Penv=${ENV_TYPE}
+RUN --mount=type=secret,id=ghp_token \
+    GHP_TOKEN=$(cat /run/secrets/ghp_token 2>/dev/null || true) GHP_USER=${GHP_USER} \
+    ./gradlew --no-daemon bootJar -Penv=${ENV_TYPE}
 
 
 ### STAGE 2: Production Environment ###

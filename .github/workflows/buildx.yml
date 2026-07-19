@@ -62,6 +62,9 @@ jobs:
             VERSION=${{ env.COMMIT_HASH }}
             BUILD_TIMESTAMP=${{ github.run_id }}
             ENV_TYPE=prod
+          # GH Packages(hvy-common) 조회용 토큰 — BuildKit secret이라 이미지 레이어에 남지 않음
+          secrets: |
+            ghp_token=${{ secrets.GHCR_PAT }}
           outputs: type=image,"name=${{ env.DOCKER_IMAGE }},${{ env.GHCR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}

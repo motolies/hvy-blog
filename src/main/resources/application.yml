@@ -144,8 +144,18 @@ jira:
     batch-size: ${JIRA_SYNC_BATCH_SIZE:50}
 
 # browserless (Chromium sidecar for Cloudflare-protected sites)
+# v2 는 서버 전역 실행 옵션이 없어 요청마다 ?timeout= / ?launch=<base64 JSON> 으로 전달해야 한다 (upstream issue #4946)
+# content-url 에는 쿼리스트링을 붙이지 말 것 - timeout/launch/stealth 는 코드에서 replaceQueryParam 으로 덮어쓴다
+# 타임아웃 계층: request > session >= launch + goto + selector (BrowserProperties 가 기동 시 검증)
 browser:
   content-url: ${BROWSER_CONTENT_URL:http://192.168.0.100:3030/content}
+  # 아래 타임아웃은 모두 초 단위 (browserless/puppeteer 전송 시 코드에서 밀리초로 변환)
+  connect-timeout: ${BROWSER_CONNECT_TIMEOUT:10}    # TCP 연결
+  request-timeout: ${BROWSER_REQUEST_TIMEOUT:135}   # Java 응답 대기. session-timeout 보다 길어야 함
+  session-timeout: ${BROWSER_SESSION_TIMEOUT:120}   # ?timeout= : browserless 세션 전체 상한
+  launch-timeout: ${BROWSER_LAUNCH_TIMEOUT:60}      # launch.timeout : puppeteer 브라우저 기동(기본 30초)
+  goto-timeout: ${BROWSER_GOTO_TIMEOUT:30}          # gotoOptions.timeout
+  selector-timeout: ${BROWSER_SELECTOR_TIMEOUT:25}  # waitForSelector.timeout
 
 # scheduler
 scheduler:

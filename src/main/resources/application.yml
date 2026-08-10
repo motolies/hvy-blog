@@ -151,7 +151,7 @@ browser:
   content-url: ${BROWSER_CONTENT_URL:http://192.168.0.100:3030/content}
   # 아래 타임아웃은 모두 초 단위 (browserless/puppeteer 전송 시 코드에서 밀리초로 변환)
   connect-timeout: ${BROWSER_CONNECT_TIMEOUT:10}    # TCP 연결
-  request-timeout: ${BROWSER_REQUEST_TIMEOUT:135}   # Java 응답 대기. session-timeout 보다 길어야 함
+  request-timeout: ${BROWSER_REQUEST_TIMEOUT:135}   # 클라이언트 응답 대기. session-timeout 보다 길어야 함
   session-timeout: ${BROWSER_SESSION_TIMEOUT:120}   # ?timeout= : browserless 세션 전체 상한
   launch-timeout: ${BROWSER_LAUNCH_TIMEOUT:60}      # launch.timeout : puppeteer 브라우저 기동(기본 30초)
   goto-timeout: ${BROWSER_GOTO_TIMEOUT:30}          # gotoOptions.timeout

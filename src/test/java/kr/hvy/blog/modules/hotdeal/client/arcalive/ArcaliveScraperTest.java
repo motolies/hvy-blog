@@ -13,6 +13,7 @@ import java.util.regex.Pattern;
 import kr.hvy.blog.modules.hotdeal.client.BrowserProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClient;
 
 @DisplayName("ArcaliveScraper - browserless 요청 조립")
 class ArcaliveScraperTest {
@@ -33,6 +34,13 @@ class ArcaliveScraperTest {
     BrowserProperties properties = new BrowserProperties();
     properties.setContentUrl("http://chromium:3000/content");
     return properties;
+  }
+
+  /**
+   * 요청 본문 조립만 검증하므로 실제 호출이 일어나지 않는 기본 RestClient 로 충분하다.
+   */
+  private ArcaliveScraper newScraper() {
+    return new ArcaliveScraper(defaultProperties(), objectMapper, RestClient.create());
   }
 
   @Test
@@ -102,7 +110,7 @@ class ArcaliveScraperTest {
   @Test
   @DisplayName("URL 에 큰따옴표가 있어도 유효한 JSON 본문을 만든다")
   void buildRequestBody_따옴표포함URL() throws JsonProcessingException {
-    ArcaliveScraper scraper = new ArcaliveScraper(defaultProperties(), objectMapper);
+    ArcaliveScraper scraper = newScraper();
     String targetUrl = "https://arca.live/b/\"quoted\"?p=1";
 
     String body = scraper.buildRequestBody(targetUrl);
@@ -114,7 +122,7 @@ class ArcaliveScraperTest {
   @Test
   @DisplayName("설정된 goto/selector 타임아웃과 셀렉터를 본문에 반영한다")
   void buildRequestBody_타임아웃반영() throws JsonProcessingException {
-    ArcaliveScraper scraper = new ArcaliveScraper(defaultProperties(), objectMapper);
+    ArcaliveScraper scraper = newScraper();
 
     JsonNode node = objectMapper.readTree(scraper.buildRequestBody("https://arca.live/b/hotdeal?p=1"));
 

@@ -41,7 +41,7 @@ public class BrowserProperties {
   private Duration connectTimeout = Duration.ofSeconds(10);
 
   /**
-   * Java HttpClient 응답 대기 타임아웃. sessionTimeout 보다 길어야 한다
+   * 클라이언트 응답 대기 타임아웃. sessionTimeout 보다 길어야 한다
    */
   @DurationUnit(ChronoUnit.SECONDS)
   private Duration requestTimeout = Duration.ofSeconds(135);

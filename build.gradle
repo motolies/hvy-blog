@@ -60,7 +60,7 @@ dependencies {
     // Library
     if (env == "prod") {
         // 0.2.0: 시간 타입 Instant 전면 전환 (breaking) — Maven Central 릴리스 후 배포 가능
-        implementation('io.github.motolies:hvy-common:0.2.1') {
+        implementation('io.github.motolies:hvy-common:0.2.2') {
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream'
             exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream-binder-kafka'
         }

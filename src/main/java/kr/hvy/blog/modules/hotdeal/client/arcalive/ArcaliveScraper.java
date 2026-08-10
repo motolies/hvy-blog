@@ -5,9 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -29,7 +26,11 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 /**
@@ -58,21 +59,22 @@ public class ArcaliveScraper implements DealSiteScraper {
   private static final int HTTP_TOO_MANY_REQUESTS = 429;
   private static final int ERROR_BODY_MAX_LENGTH = 500;
 
-  private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
   private final BrowserProperties browserProperties;
+  /**
+   * browserless 전용 RestClient. 타임아웃/커넥션풀/api_log 적재 인터셉터가 이미 배선되어 있다
+   */
+  private final RestClient browserlessRestClient;
   /**
    * 모든 요청이 동일한 URI 이므로 기동 시 1회만 조립한다. 조립 실패 시 null
    */
   private final URI contentUri;
 
-  public ArcaliveScraper(BrowserProperties browserProperties, ObjectMapper objectMapper) {
+  public ArcaliveScraper(BrowserProperties browserProperties, ObjectMapper objectMapper,
+      @Qualifier("browserlessRestClient") RestClient browserlessRestClient) {
     this.browserProperties = browserProperties;
     this.objectMapper = objectMapper;
-    this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(browserProperties.getConnectTimeout())
-        .version(HttpClient.Version.HTTP_1_1)
-        .build();
+    this.browserlessRestClient = browserlessRestClient;
 
     URI uri = null;
     try {
@@ -173,31 +175,43 @@ public class ArcaliveScraper implements DealSiteScraper {
     String jsonBody = buildRequestBody(targetUrl);
     log.debug("browserless 요청: body={}", jsonBody);
 
-    HttpRequest request = HttpRequest.newBuilder()
-        .uri(contentUri)
-        .timeout(browserProperties.getRequestTimeout())
-        .header("Content-Type", "application/json")
-        .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
-        .build();
-
+    BrowserlessResponse result;
     try {
-      HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-      int status = response.statusCode();
-      if (status == HTTP_TOO_MANY_REQUESTS) {
-        // CONCURRENT 슬롯 초과 - browserless 자체는 정상이므로 다른 오류와 구분해 남긴다
-        log.warn("browserless 동시 실행 슬롯 초과: status={}, targetUrl={}", status, targetUrl);
-        throw new IOException("browserless 슬롯 초과: status=" + status);
-      }
-      if (status != HTTP_OK) {
-        log.error("browserless 응답 오류: status={}, uri={}, targetUrl={}, body={}",
-            status, contentUri, targetUrl, StringUtils.abbreviate(response.body(), ERROR_BODY_MAX_LENGTH));
-        throw new IOException("browserless 응답 오류: status=" + status);
-      }
-      return response.body();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new IOException("browserless 요청 중단", e);
+      result = browserlessRestClient.post()
+          .uri(contentUri)
+          .contentType(MediaType.APPLICATION_JSON)
+          .body(jsonBody)
+          .exchange((request, response) -> new BrowserlessResponse(
+              response.getStatusCode().value(),
+              new String(response.getBody().readAllBytes(), StandardCharsets.UTF_8)));
+    } catch (RestClientException e) {
+      // RestClient 는 연결 실패/타임아웃을 ResourceAccessException(RuntimeException)으로 감싼다.
+      // 그대로 두면 scrape() 의 '네트워크 오류 시 잔여 페이지 중단'이 아니라 '파싱 오류 → 다음 페이지 계속'
+      // 분기로 빠지므로 IOException 으로 되돌린다
+      throw new IOException("browserless 통신 오류: " + e.getMessage(), e);
     }
+
+    if (result.status() == HTTP_TOO_MANY_REQUESTS) {
+      // CONCURRENT 슬롯 초과 - browserless 자체는 정상이므로 다른 오류와 구분해 남긴다
+      log.warn("browserless 동시 실행 슬롯 초과: status={}, targetUrl={}", result.status(), targetUrl);
+      throw new IOException("browserless 슬롯 초과: status=" + result.status());
+    }
+    if (result.status() != HTTP_OK) {
+      log.error("browserless 응답 오류: status={}, uri={}, targetUrl={}, body={}",
+          result.status(), contentUri, targetUrl, StringUtils.abbreviate(result.body(), ERROR_BODY_MAX_LENGTH));
+      throw new IOException("browserless 응답 오류: status=" + result.status());
+    }
+    return result.body();
+  }
+
+  /**
+   * browserless 응답의 상태코드와 본문.
+   *
+   * 상태 분기를 exchange 람다 밖에서 하기 위한 전달 객체다. 람다 안에서 IOException 을 던지면
+   * RestClient 가 그것마저 ResourceAccessException 으로 감싸 '네트워크 오류'와 '응답 오류'를 구분할 수 없게 된다.
+   */
+  private record BrowserlessResponse(int status, String body) {
+
   }
 
   /**

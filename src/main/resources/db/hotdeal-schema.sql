@@ -118,6 +118,35 @@ COMMENT ON COLUMN tb_hot_deal_site.min_comment_count      IS 'Slack 알림 최�
 
 
 -- =============================================
+-- 핫딜 알림 키워드 테이블
+-- 제목이 키워드에 부분일치하면 추천/조회/댓글 임계값을 우회하여
+-- 저장하고 Slack @channel 멘션 알림을 보낸다.
+-- =============================================
+CREATE TABLE IF NOT EXISTS tb_hot_deal_keyword
+(
+    id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    keyword            VARCHAR(64)    NOT NULL,
+    normalized_keyword VARCHAR(64)    NOT NULL,
+    enabled            BOOLEAN        NOT NULL DEFAULT TRUE,
+    created_at         TIMESTAMPTZ(6) NOT NULL,
+    created_by         VARCHAR(255)            DEFAULT NULL,
+    updated_at         TIMESTAMPTZ(6) NOT NULL,
+    updated_by         VARCHAR(255)            DEFAULT NULL,
+    CONSTRAINT uk_hot_deal_keyword_normalized UNIQUE (normalized_keyword)
+);
+
+COMMENT ON TABLE  tb_hot_deal_keyword                    IS '핫딜 알림 키워드 (전역 공통, 사이트 구분 없음)';
+COMMENT ON COLUMN tb_hot_deal_keyword.id                 IS '키워드 ID';
+COMMENT ON COLUMN tb_hot_deal_keyword.keyword            IS '키워드 원문 (관리자 입력값, Slack 메시지 표기용)';
+COMMENT ON COLUMN tb_hot_deal_keyword.normalized_keyword IS '정규화 키워드 (소문자 변환 + 공백 전부 제거, 매칭 및 중복검사용)';
+COMMENT ON COLUMN tb_hot_deal_keyword.enabled            IS '활성화 여부 (비활성 시 매칭 대상에서 제외)';
+COMMENT ON COLUMN tb_hot_deal_keyword.created_at         IS '생성일시';
+COMMENT ON COLUMN tb_hot_deal_keyword.created_by         IS '생성자';
+COMMENT ON COLUMN tb_hot_deal_keyword.updated_at         IS '수정일시';
+COMMENT ON COLUMN tb_hot_deal_keyword.updated_by         IS '수정자';
+
+
+-- =============================================
 -- 초기 데이터: 뽐뿌 게시판
 -- =============================================
 INSERT INTO tb_hot_deal_site

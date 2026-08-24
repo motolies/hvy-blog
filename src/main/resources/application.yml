@@ -116,6 +116,10 @@ management:
   tracing:
     sampling:
       probability: 0.0
+    propagation:
+      # 프론트(blog-nextjs BFF)가 W3C traceparent 단일 헤더로 전파한다 — consume/produce 를 W3C 로 고정해
+      # 기본값(consume 에 B3 포함)의 비대칭을 없애고, tb_system_log.trace_id 가 프론트 traceId 와 같음을 보장한다
+      type: W3C
 
 # jwt
 jwt:

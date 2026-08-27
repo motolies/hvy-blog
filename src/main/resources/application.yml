@@ -26,7 +26,6 @@ spring:
   jpa:
     properties:
       hibernate:
-        release_mode: AFTER_TRANSACTION
         dialect: org.hibernate.dialect.PostgreSQLDialect
         # JDBC 시간 바인딩을 UTC로 고정 — JVM 기본 타임존 변동에 대한 안전벨트 (timestamptz 전환 후에도 무해)
         jdbc:
@@ -42,20 +41,11 @@ spring:
     multipart:
       max-file-size: 1GB
       max-request-size: 1GB
-  jackson:
-    deserialization:
-      fail-on-unknown-properties: false
-    serialization:
-      indent-output: true
   data:
     redis:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
       timeout: 3600
-  cloud:
-    stream:
-      kafka:
-        enabled: false # kafka 사용 여부
 
 hvy:
   master-code:
@@ -80,7 +70,7 @@ hvy:
 
 #Configure Mybatis
 mybatis:
-  type-aliases-package: kr.hvy.blog.modules,kr.hvy.common.mybatis.CountMapper # 많아지면 콤마로 구분
+  type-aliases-package: kr.hvy.blog.modules # 많아지면 콤마로 구분
   type-handlers-package: kr.hvy.common.core.code.converter
   mapper-locations: classpath:mybatis-mapper/**/*.xml
   configuration:
@@ -202,9 +192,9 @@ management:
   tracing:
     sampling:
       probability: 1.0
-  zipkin:
-    tracing:
-      endpoint: ${ZIPKIN_ENDPOINT:http://zipkin:9411/api/v2/spans}
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_ENDPOINT:http://zipkin:9411/api/v2/spans}
 # cache
 cache:
   logging:

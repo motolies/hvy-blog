@@ -29,8 +29,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.With;
 import org.hibernate.annotations.Formula;
-import org.hibernate.annotations.GenericGenerator;
-import org.hibernate.annotations.Parameter;
 
 @Entity
 @Getter
@@ -59,7 +57,6 @@ public class Category {
   private String fullPath;
 
   @Column(columnDefinition = "VARCHAR(32)")
-  @GenericGenerator(name = "CATEGORY_PID_CATEGORYID_GENERATOR", strategy = "foreign", parameters = @Parameter(name = "property", value = "parent"))
   private String parentId;
 
   @JsonBackReference

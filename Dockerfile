@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 ### STAGE 1: Build ###
-FROM gradle:8.12.1-jdk21-alpine AS builder
+FROM gradle:9.7.1-jdk25-alpine AS builder
 WORKDIR /home/gradle/project
 
 # Build time에 사용할 환경 변수 지정 (default: prod)
@@ -31,7 +31,7 @@ RUN --mount=type=secret,id=ghp_token \
 
 
 ### STAGE 2: Production Environment ###
-FROM amazoncorretto:21-al2023
+FROM amazoncorretto:25-al2023
 
 # 필요시 비루트 사용자 생성 (원래 Dockerfile의 주석 부분 참조)
 # RUN addgroup -g 1001 -S spring

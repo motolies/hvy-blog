@@ -1,7 +1,5 @@
 package kr.hvy.blog.modules.post.application;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
@@ -22,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.ObjectMapper;
 
 @RestController
 @RequestMapping("/api/post")
@@ -78,7 +77,7 @@ public class PostController {
    * 검색 상세(base64 인코딩한 파라미터(json object)
    */
   @GetMapping(value = {"/search"})
-  public PageResponse<PostNoBodyResponse> searchDetail(@RequestParam String query) throws JsonProcessingException {
+  public PageResponse<PostNoBodyResponse> searchDetail(@RequestParam String query) {
     // 프론트가 URL-safe base64(패딩 없음, +/- _/= 미사용)로 인코딩해 보내므로 getUrlDecoder로 디코딩
     String decodedQuery = new String(Base64.getUrlDecoder().decode(query), StandardCharsets.UTF_8);
 

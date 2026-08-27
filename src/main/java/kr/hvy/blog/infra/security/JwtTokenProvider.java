@@ -7,6 +7,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.security.SignatureException;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
@@ -64,10 +65,10 @@ public class JwtTokenProvider {
     final Date expirationDate = new Date(createdDate.getTime() + tokenValidSecond * 1000);
 
     return Jwts.builder()
-        .setClaims(claims)
-        .setSubject(user.getId().toString())
-        .setIssuedAt(createdDate)
-        .setExpiration(expirationDate)
+        .claims(claims)
+        .subject(user.getId().toString())
+        .issuedAt(createdDate)
+        .expiration(expirationDate)
         .signWith(getSecretKey(secretKey))
         .compact();
   }
@@ -121,7 +122,7 @@ public class JwtTokenProvider {
 
   private Claims getAllClaimsFromToken(String token) throws ExpiredJwtException {
     try {
-      return Jwts.parserBuilder().setSigningKey(getSecretKey(secretKey)).build().parseClaimsJws(token).getBody();
+      return Jwts.parser().verifyWith(getSecretKey(secretKey)).build().parseSignedClaims(token).getPayload();
     } catch (ExpiredJwtException e) {
       return null;
     }
@@ -149,9 +150,9 @@ public class JwtTokenProvider {
   // JWT 토큰 유효성 체크
   public boolean validateToken(String token) {
     try {
-      Jws<Claims> claims = Jwts.parserBuilder().setSigningKey(getSecretKey(secretKey)).build().parseClaimsJws(token);
-      return !claims.getBody().getExpiration().before(new Date());
-    } catch (SecurityException | MalformedJwtException | IllegalArgumentException exception) {
+      Jws<Claims> claims = Jwts.parser().verifyWith(getSecretKey(secretKey)).build().parseSignedClaims(token);
+      return !claims.getPayload().getExpiration().before(new Date());
+    } catch (SignatureException | MalformedJwtException | IllegalArgumentException exception) {
       log.error("잘못된 Jwt 토큰입니다");
     } catch (ExpiredJwtException exception) {
       log.error("만료된 Jwt 토큰입니다");

@@ -1,7 +1,5 @@
 package kr.hvy.blog.modules.hotdeal.client.arcalive;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -32,6 +30,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriComponentsBuilder;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 아카라이브 핫딜 게시판 스크래퍼.
@@ -219,7 +218,7 @@ public class ArcaliveScraper implements DealSiteScraper {
    * targetUrl 이 DB(site_url + board_url) 에서 오므로 문자열 연결 대신 Jackson 으로 직렬화해 파손을 막는다.
    * puppeteer 는 밀리초를 받으므로 설정(초)을 반드시 toMillis() 로 변환해 넘긴다.
    */
-  String buildRequestBody(String targetUrl) throws JsonProcessingException {
+  String buildRequestBody(String targetUrl) {
     Map<String, Object> gotoOptions = new LinkedHashMap<>();
     gotoOptions.put("waitUntil", "networkidle0");
     gotoOptions.put("timeout", browserProperties.getGotoTimeout().toMillis());

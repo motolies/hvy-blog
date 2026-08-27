@@ -1,6 +1,5 @@
 package kr.hvy.blog.modules.claude;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +13,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Claude Code 토큰 갱신 + ping 수동 진단 테스트 (Spring 컨텍스트 미사용).
@@ -64,7 +64,7 @@ class ClaudeCodePingManualTest {
   private static final String BILLING_HEADER = "cc_version=" + CLI_VERSION + "." + MODEL + "; cc_entrypoint=cli; cch=00000;";
 
   private final RestClient client = RestClient.builder().build();
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private final JsonMapper objectMapper = JsonMapper.builder().build();
 
   /** 토큰 갱신 → 새 access_token 으로 ping 까지 end-to-end 재현. */
   @Test

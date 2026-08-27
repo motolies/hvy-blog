@@ -1,6 +1,5 @@
 package kr.hvy.blog.modules.claude.application.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.json.JsonMapper;
 
 @Slf4j
 @Service
@@ -52,7 +52,7 @@ public class ClaudeCodeRefreshService {
   private static final int MAX_REFRESH_ATTEMPTS = 3;
   private static final long MAX_RETRY_BACKOFF_MILLIS = 120_000L; // Retry-After/백오프 상한 (2분)
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final JsonMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
   private final RestClient claudeRestClient;
   private final MasterCodeService masterCodeService;

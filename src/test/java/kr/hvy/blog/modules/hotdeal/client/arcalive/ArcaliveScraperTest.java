@@ -2,9 +2,6 @@ package kr.hvy.blog.modules.hotdeal.client.arcalive;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -14,6 +11,8 @@ import kr.hvy.blog.modules.hotdeal.client.BrowserProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 @DisplayName("ArcaliveScraper - browserless 요청 조립")
 class ArcaliveScraperTest {
@@ -25,7 +24,7 @@ class ArcaliveScraperTest {
   private static final Pattern BROWSERLESS_BASE64 =
       Pattern.compile("^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$");
 
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private final JsonMapper objectMapper = JsonMapper.builder().build();
 
   /**
    * 기본값이 채워진 BrowserProperties 를 만든다. (스프링 컨텍스트 없이 순수 객체 사용)
@@ -109,26 +108,26 @@ class ArcaliveScraperTest {
 
   @Test
   @DisplayName("URL 에 큰따옴표가 있어도 유효한 JSON 본문을 만든다")
-  void buildRequestBody_따옴표포함URL() throws JsonProcessingException {
+  void buildRequestBody_따옴표포함URL() {
     ArcaliveScraper scraper = newScraper();
     String targetUrl = "https://arca.live/b/\"quoted\"?p=1";
 
     String body = scraper.buildRequestBody(targetUrl);
 
     JsonNode node = objectMapper.readTree(body);
-    assertThat(node.get("url").asText()).isEqualTo(targetUrl);
+    assertThat(node.get("url").asString()).isEqualTo(targetUrl);
   }
 
   @Test
   @DisplayName("설정된 goto/selector 타임아웃과 셀렉터를 본문에 반영한다")
-  void buildRequestBody_타임아웃반영() throws JsonProcessingException {
+  void buildRequestBody_타임아웃반영() {
     ArcaliveScraper scraper = newScraper();
 
     JsonNode node = objectMapper.readTree(scraper.buildRequestBody("https://arca.live/b/hotdeal?p=1"));
 
-    assertThat(node.get("gotoOptions").get("waitUntil").asText()).isEqualTo("networkidle0");
+    assertThat(node.get("gotoOptions").get("waitUntil").asString()).isEqualTo("networkidle0");
     assertThat(node.get("gotoOptions").get("timeout").asInt()).isEqualTo(30000);
-    assertThat(node.get("waitForSelector").get("selector").asText()).isEqualTo("div.vrow.hybrid");
+    assertThat(node.get("waitForSelector").get("selector").asString()).isEqualTo("div.vrow.hybrid");
     assertThat(node.get("waitForSelector").get("timeout").asInt()).isEqualTo(25000);
   }
 

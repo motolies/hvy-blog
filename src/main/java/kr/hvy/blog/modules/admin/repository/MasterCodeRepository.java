@@ -37,7 +37,7 @@ public interface MasterCodeRepository extends JpaRepository<MasterCode, Long> {
   /**
    * Materialized Path를 이용한 서브트리 조회
    */
-  @Query("SELECT m FROM MasterCode m WHERE m.path LIKE :pathPrefix% AND m.isActive = true ORDER BY m.depth ASC, m.sort ASC, m.code ASC")
+  @Query("SELECT m FROM MasterCode m WHERE m.path LIKE CONCAT(:pathPrefix, '%') AND m.isActive = true ORDER BY m.depth ASC, m.sort ASC, m.code ASC")
   List<MasterCode> findSubtree(@Param("pathPrefix") String pathPrefix);
 
   /**

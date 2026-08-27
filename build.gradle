@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.4.3'
+    id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
 }
 
@@ -9,7 +9,7 @@ version = '0.0.1-SNAPSHOT'
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -42,16 +42,6 @@ repositories {
     mavenCentral()
 }
 
-ext {
-    set('springCloudVersion', "2024.0.0")
-}
-
-dependencyManagement {
-    imports {
-        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
-    }
-}
-
 // 기본 환경을 local로 설정 (커맨드라인에서 -Penv=prod로 변경 가능)
 def env = project.findProperty("env") ?: "local"
 
@@ -59,43 +49,37 @@ dependencies {
 
     // Library
     if (env == "prod") {
-        // 0.2.4: 트레이싱 Brave→OTel 브리지 교체 (ApiLogInterceptor 생성자 Tracer 타입 변경 — binary breaking)
-        implementation('io.github.motolies:hvy-common:0.2.4') {
-            exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream'
-            exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream-binder-kafka'
-        }
+        // 0.3.0: Spring Boot 4.1.1 / JDK 25 / Jackson 3 전환 (ObjectMapperConfigurer 반환형·RedisConfigurer 생성자 등 binary breaking, messaging 패키지 삭제)
+        implementation 'io.github.motolies:hvy-common:0.3.0'
     } else {
         // MavenLocal에 배포된 hvy-common을 사용
-        implementation('io.github.motolies:hvy-common:local') {
-            exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream'
-            exclude group: 'org.springframework.cloud', module: 'spring-cloud-stream-binder-kafka'
-        }
+        implementation 'io.github.motolies:hvy-common:local'
     }
 
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
-    implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.3'
+    implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.1.0'
 
     // jdbc driver
     implementation 'org.postgresql:postgresql'
 
-    // jwt
-    implementation 'io.jsonwebtoken:jjwt-api:0.11.2'
-    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.2'
-    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.2'
+    // jwt (Jackson 기반 jjwt 직렬화기는 0.13 에서도 Jackson 2 결합이므로 gson 직렬화기로 교체)
+    implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'
+    runtimeOnly 'io.jsonwebtoken:jjwt-gson:0.13.0'
 
     // shedlock
-    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.3.0'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.9.0'
 
     // html parsing (hot deal scraping)
-    implementation 'org.jsoup:jsoup:1.18.3'
+    implementation 'org.jsoup:jsoup:1.23.2'
 
 
     // redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
-    implementation 'org.redisson:redisson-spring-boot-starter:3.45.0'
+    implementation 'org.redisson:redisson-spring-boot-starter:4.7.0'
 
     // cache
     implementation 'org.springframework.boot:spring-boot-starter-cache'
@@ -103,9 +87,10 @@ dependencies {
     // logging
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
+
     // testContainer
     testImplementation 'org.testcontainers:testcontainers'
-    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 
     // H2 Database(나중엔 테스트만 남겨야 함)
     runtimeOnly 'com.h2database:h2'
@@ -117,14 +102,16 @@ dependencies {
     testAnnotationProcessor 'org.projectlombok:lombok'
 
     // mapstruct
-    implementation 'org.mapstruct:mapstruct:1.6.2'
-    annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.2' // mapstruct가 lombok 뒤에 있어야 함?
-    testAnnotationProcessor 'org.mapstruct:mapstruct-processor:1.6.2'
+    implementation 'org.mapstruct:mapstruct:1.6.3'
+    annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3' // mapstruct가 lombok 뒤에 있어야 함?
+    annotationProcessor 'org.projectlombok:lombok-mapstruct-binding:0.2.0'
+    testAnnotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3'
 
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter-test:3.0.3'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test' // @AutoConfigureMockMvc (Boot 4 에서 webmvc 테스트 스타터로 분리)
+    testImplementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter-test:4.1.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     testImplementation 'org.springframework.security:spring-security-test'
@@ -135,4 +122,13 @@ tasks.named('test') {
     useJUnitPlatform()
     // 테스트 JVM 타임존 고정 — 개발머신(KST)/CI 환경 차이에 의한 flaky 방지 (-Duser.timezone 으로 재정의 가능)
     systemProperty 'user.timezone', System.getProperty('user.timezone', 'UTC')
+    // Mockito inline mock maker 의 동적 에이전트 self-attach 경고 제거 (JDK 21+)
+    jvmArgs '-XX:+EnableDynamicAgentLoading'
+}
+
+// JDK 25 (JEP 472): Redisson/Netty 네이티브 전송이 restricted method 를 호출할 때 나는 경고 제거
+tasks.named('bootJar') {
+    manifest {
+        attributes 'Enable-Native-Access': 'ALL-UNNAMED'
+    }
 }

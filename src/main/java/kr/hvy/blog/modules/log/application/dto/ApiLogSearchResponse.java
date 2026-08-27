@@ -1,11 +1,11 @@
 package kr.hvy.blog.modules.log.application.dto;
 
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import java.time.Instant;
 import kr.hvy.common.config.jackson.serializer.TsidToStringSerializer;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
+import tools.jackson.databind.annotation.JsonSerialize;
 
 @Value
 @Jacksonized

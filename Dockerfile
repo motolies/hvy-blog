@@ -11,7 +11,12 @@ ENV ENV_TYPE=${ENV_TYPE}
 ARG GHP_USER=motolies
 
 # Gradle 빌드 스크립트 및 Wrapper 파일 복사
-COPY build.gradle settings.gradle gradlew ./
+# ⚠️ 루트에 있는 빌드 설정 파일은 빠짐없이 여기 나열한다 — 이 목록에 없으면 빌드 컨텍스트에 들어오지 않는다.
+#    lombok.config 가 누락되면 Lombok 이 Jackson2/3 을 구분하지 못하고(Jackson 3 은 databind 만
+#    tools.jackson 으로 옮기고 애노테이션은 com.fasterxml 좌표를 유지해 모호해진다)
+#    @Jacksonized 가 존재하지 않는 com.fasterxml.jackson.databind.annotation 을 참조해 컴파일이 깨진다.
+#    로컬 Gradle 빌드는 항상 이 파일을 읽으므로 이 부류의 누락은 Docker 빌드에서만 드러난다.
+COPY build.gradle settings.gradle gradlew lombok.config ./
 COPY gradle gradle
 RUN chmod +x gradlew
 

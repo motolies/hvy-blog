@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="kr.hvy.blog.modules.stats.repository.mapper.StatsLogMapper">
+
+    <!--
+      ⚠️ 이 파일의 쿼리는 스칼라 파라미터만 받으므로 PageInterceptor 가 개입하지 않는다.
+         ORDER BY / LIMIT 을 여기서 직접 써야 하며, 그것이 정상이다.
+      ⚠️ 컬럼 별칭은 전부 camelCase 로 명시한다 — @Value 생성자 자동 매핑에 의존하므로
+         자동 스네이크 변환에 기대지 않는다.
+    -->
+
+    <!-- 일별 요청·방문자·조회 3계열 (1패스). FILTER 절로 세 번 스캔을 한 번으로 줄인다. -->
+    <select id="findDailyTraffic" resultType="DailyTraffic">
+        SELECT CAST(created_at AT TIME ZONE #{zoneId} AS DATE)                AS date,
+               COUNT(*)                                                       AS requestCount,
+               COUNT(DISTINCT remote_addr)                                    AS visitorCount,
+               COUNT(*) FILTER (WHERE http_method_type = 'POST'
+                                  AND request_uri LIKE '/api/post/%/view')    AS postViewCount
+          FROM tb_system_log
+         WHERE created_at &gt;= #{from}
+           AND created_at &lt;  #{to}
+           AND status = 'SUCC'
+         GROUP BY 1
+         ORDER BY 1
+    </select>
+
+    <!--
+      최근 기간 인기 글 — beacon 로그 기반.
+
+      ★ 아래 WHERE 의 status / http_method_type / request_uri LIKE 세 줄은
+        idx_system_log_post_view 부분 인덱스의 정의와 문자열이 정확히 같아야 한다.
+        한 글자라도 바꾸면 플래너가 인덱스를 못 쓰고 조용히 seq scan 으로 퇴화한다.
+
+      substring(... from ...) 은 미매칭 시 NULL 을 반환하고, NULL 은 JOIN 에서 자동 탈락하므로
+      비정상 URI 방어가 함께 된다. 미존재 postId 로 온 beacon 도 JOIN tb_post 에서 걸러진다.
+    -->
+    <select id="findRecentPopularPosts" resultType="RecentPopularPost">
+        SELECT p.id                AS id,
+               p.subject           AS subject,
+               cat.name            AS categoryName,
+               v.view_count        AS viewCount,
+               v.visitor_count     AS visitorCount
+          FROM (
+                SELECT CAST(substring(l.request_uri from '^/api/post/([0-9]+)/view$') AS BIGINT) AS post_id,
+                       COUNT(*)                      AS view_count,
+                       COUNT(DISTINCT l.remote_addr) AS visitor_count
+                  FROM tb_system_log l
+                 WHERE l.created_at &gt;= #{from}
+                   AND l.created_at &lt;  #{to}
+                   AND l.status = 'SUCC'
+                   AND l.http_method_type = 'POST'
+                   AND l.request_uri LIKE '/api/post/%/view'
+                 GROUP BY 1
+               ) v
+          JOIN tb_post p        ON p.id = v.post_id
+          LEFT JOIN tb_category cat ON p.category_id = cat.id
+         WHERE p.status = 'PUB'
+           AND p.public_access = true
+         ORDER BY v.view_count DESC, p.id DESC
+         LIMIT #{limit}
+    </select>
+
+    <!-- 조회수 수집 개시 시각. 프론트가 "0건"과 "미측정"을 구분하는 근거. -->
+    <select id="findViewCollectionStartedAt" resultType="java.time.Instant">
+        SELECT MIN(created_at)
+          FROM tb_system_log
+         WHERE status = 'SUCC'
+           AND http_method_type = 'POST'
+           AND request_uri LIKE '/api/post/%/view'
+    </select>
+
+    <!--
+      경로별 트래픽 Top N.
+      정규화하지 않으면 /api/post/1, /api/post/2 … 로 흩어져 Top-N 자체가 무의미해진다.
+      request.getRequestURI() 는 쿼리스트링을 포함하지 않으므로 숫자 세그먼트 치환만으로 충분하다.
+    -->
+    <select id="findTopRequestUris" resultType="RequestUriStat">
+        SELECT regexp_replace(request_uri, '/[0-9]+', '/{id}', 'g') AS uriPattern,
+               COUNT(*)                                             AS requestCount,
+               COUNT(DISTINCT remote_addr)                          AS visitorCount,
+               COALESCE(ROUND(AVG(process_time)), 0)::bigint        AS avgProcessTime
+          FROM tb_system_log
+         WHERE created_at &gt;= #{from}
+           AND created_at &lt;  #{to}
+         GROUP BY 1
+         ORDER BY requestCount DESC, uriPattern
+         LIMIT #{limit}
+    </select>
+
+    <!-- 최근 창 / 직전 창 동시 집계. 에러 "비율"을 내려면 분모(요청 수)가 함께 필요하다. -->
+    <select id="findErrorSummary" resultType="ErrorSummary">
+        SELECT COUNT(*) FILTER (WHERE created_at &gt;= #{recentFrom})                    AS recentRequestCount,
+               COUNT(*) FILTER (WHERE created_at &gt;= #{recentFrom} AND status = 'FAIL') AS recentErrorCount,
+               COUNT(*) FILTER (WHERE created_at &lt;  #{recentFrom})                    AS previousRequestCount,
+               COUNT(*) FILTER (WHERE created_at &lt;  #{recentFrom} AND status = 'FAIL') AS previousErrorCount
+          FROM tb_system_log
+         WHERE created_at &gt;= #{previousFrom}
+           AND created_at &lt;  #{now}
+    </select>
+
+    <!--
+      최근 에러 N건. idx_system_log_status_created (status, created_at DESC) 를 탄다.
+      FAIL 은 전체 대비 극소수라 인덱스 스캔 후 LIMIT 에서 즉시 종료된다.
+      stack_trace 는 TEXT 이므로 원문을 절대 SELECT 하지 않고 첫 줄만 잘라 온다.
+    -->
+    <select id="findRecentErrors" resultType="RecentError">
+        SELECT id                                            AS id,
+               created_at                                    AS createdAt,
+               trace_id                                      AS traceId,
+               request_uri                                   AS requestUri,
+               controller_name                               AS controllerName,
+               method_name                                   AS methodName,
+               http_method_type                              AS httpMethodType,
+               remote_addr                                   AS remoteAddr,
+               process_time                                  AS processTime,
+               LEFT(split_part(stack_trace, E'\n', 1), 500)  AS stackTraceHead
+          FROM tb_system_log
+         WHERE status = 'FAIL'
+           AND created_at &gt;= #{from}
+         ORDER BY created_at DESC
+         LIMIT #{limit}
+    </select>
+
+    <!--
+      엔드포인트별 p95. PERCENTILE_CONT 는 그룹별 전체 값을 정렬 버퍼에 올리므로
+      집계 창을 24시간 수준으로 유지하는 것이 중요하다(더 늘리지 말 것).
+    -->
+    <select id="findSlowEndpoints" resultType="EndpointLatency">
+        SELECT regexp_replace(request_uri, '/[0-9]+', '/{id}', 'g')                 AS uriPattern,
+               http_method_type                                                     AS httpMethodType,
+               COUNT(*)                                                             AS requestCount,
+               ROUND(AVG(process_time))::bigint                                     AS avgProcessTime,
+               (PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY process_time))::bigint AS p95ProcessTime,
+               MAX(process_time)                                                    AS maxProcessTime
+          FROM tb_system_log
+         WHERE created_at &gt;= #{from}
+           AND created_at &lt;  #{to}
+           AND process_time IS NOT NULL
+         GROUP BY 1, 2
+        HAVING COUNT(*) &gt;= #{minSamples}
+         ORDER BY p95ProcessTime DESC
+         LIMIT #{limit}
+    </select>
+
+    <!-- shedlock 전체 (잡 5개 내외). 잡 카탈로그와는 자바에서 조인한다. -->
+    <select id="findSchedulerLocks" resultType="SchedulerLockRow">
+        SELECT name       AS name,
+               locked_at  AS lockedAt,
+               lock_until AS lockUntil,
+               locked_by  AS lockedBy
+          FROM shedlock
+    </select>
+
+    <!--
+      외부 API 실패 집계.
+      response_status 는 ApiLogInterceptor 가 String.valueOf(HttpStatusCode) 로 저장하므로
+      "200" 일 수도 "200 OK" 일 수도 있다. LEFT(...,1) 방식은 두 포맷을 모두 커버한다.
+      request_uri 에는 쿼리스트링·호스트가 포함되므로 split_part 로 잘라낸다.
+    -->
+    <select id="findExternalApiFailures" resultType="ExternalApiStat">
+        SELECT regexp_replace(split_part(request_uri, '?', 1), '/[0-9]+', '/{id}', 'g') AS uriPattern,
+               http_method_type                                                          AS httpMethodType,
+               COUNT(*)                                                                  AS callCount,
+               COUNT(*) FILTER (WHERE response_status IS NULL
+                                   OR LEFT(response_status, 1) NOT IN ('2','3'))         AS failureCount,
+               COALESCE(ROUND(AVG(process_time)), 0)::bigint                             AS avgProcessTime,
+               MAX(created_at)                                                           AS lastCalledAt
+          FROM tb_api_log
+         WHERE created_at &gt;= #{from}
+         GROUP BY 1, 2
+        HAVING COUNT(*) FILTER (WHERE response_status IS NULL
+                                   OR LEFT(response_status, 1) NOT IN ('2','3')) &gt; 0
+         ORDER BY failureCount DESC
+         LIMIT #{limit}
+    </select>
+
+</mapper>

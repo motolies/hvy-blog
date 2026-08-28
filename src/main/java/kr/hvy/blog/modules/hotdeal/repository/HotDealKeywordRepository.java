@@ -16,6 +16,11 @@ public interface HotDealKeywordRepository extends JpaRepository<HotDealKeyword, 
    */
   List<HotDealKeyword> findAllByOrderByKeywordAsc();
 
+  /**
+   * 관리자 대시보드 파이프라인 위젯용 — 활성 키워드 수.
+   */
+  long countByEnabledTrue();
+
   boolean existsByNormalizedKeyword(String normalizedKeyword);
 
   /**

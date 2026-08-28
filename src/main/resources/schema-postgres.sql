@@ -575,6 +575,15 @@ CREATE INDEX idx_api_log_span_id     ON tb_api_log (span_id);
 CREATE INDEX idx_api_log_created_at  ON tb_api_log (created_at);
 CREATE INDEX idx_api_log_request_uri ON tb_api_log (request_uri);
 
+-- 관리자 대시보드 집계 전용 인덱스 (db/migration_dashboard/V20260828_01__admin_dashboard.sql 와 동기화)
+-- [1] 조회 beacon 부분 인덱스 — 아래 3개 조건을 쿼리 WHERE 에 문자열 그대로 넣어야 플래너가 선택한다
+CREATE INDEX idx_system_log_post_view ON tb_system_log (created_at)
+ WHERE status = 'SUCC'
+   AND http_method_type = 'POST'
+   AND request_uri LIKE '/api/post/%/view';
+-- [2] 최근 에러 N건 — FAIL 은 극소수라 인덱스 스캔 후 LIMIT 에서 즉시 종료
+CREATE INDEX idx_system_log_status_created ON tb_system_log (status, created_at DESC);
+
 -- 한글, 영문대소문자 검색을 위한 gin_bigm_ops 적용
 -- LOWER(col) LIKE LOWER(?) 패턴으로 검색
 CREATE INDEX idx_post_subject_bigm ON tb_post USING GIN (LOWER(subject) gin_bigm_ops);

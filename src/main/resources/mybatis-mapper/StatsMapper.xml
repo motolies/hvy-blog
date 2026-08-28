@@ -4,94 +4,97 @@
 
 <mapper namespace="kr.hvy.blog.modules.stats.repository.mapper.StatsMapper">
 
-    <!-- 발행된 포스트 총 수 -->
-    <select id="countPublishedPosts" resultType="long">
-        SELECT COUNT(*)
+    <!--
+      콘텐츠 집계 전용. 로그 테이블 조회는 StatsLogMapper.xml 로 옮겼다.
+
+      제거된 쿼리와 그 이유:
+        countTodayViews / findDailyViewCounts
+          → request_uri ~ '^/api/post/[0-9]+$' 정규식은 btree 가 서빙할 수 없어
+            60일치 로그를 전부 훑으며 매 행에 정규식을 돌렸다.
+            beacon 도입으로 URI 접두사가 고정되어 부분 인덱스로 대체 가능해졌고,
+            해당 집계는 StatsLogMapper.findDailyTraffic 이 담당한다.
+        sumViewCounts / countPublishedPosts / countCategories / countTags
+          → findPostSummary / findTaxonomySummary 로 통합. 스캔 한 번으로 끝난다.
+    -->
+
+    <!-- 포스트 상태별 집계 — FILTER 절로 tb_post 를 한 번만 스캔한다. -->
+    <select id="findPostSummary" resultType="PostSummary">
+        SELECT COUNT(*)                                                      AS totalPosts,
+               COUNT(*) FILTER (WHERE status = 'PUB')                        AS publishedPosts,
+               COUNT(*) FILTER (WHERE status = 'TEM')                        AS temporaryPosts,
+               COUNT(*) FILTER (WHERE status = 'PUB' AND NOT public_access)  AS privatePosts,
+               COALESCE(SUM(view_count) FILTER (WHERE status = 'PUB'), 0)    AS totalViews,
+               COUNT(DISTINCT category_id) FILTER (WHERE status = 'PUB')     AS usedCategories,
+               MAX(created_at) FILTER (WHERE status = 'PUB')                 AS lastPublishedAt
           FROM tb_post
-         WHERE status = 'PUB'
     </select>
 
-    <!-- 전체 조회수 합계 (tb_post.view_count 기반) -->
-    <select id="sumViewCounts" resultType="long">
-        SELECT COALESCE(SUM(view_count), 0)
-          FROM tb_post
-         WHERE status = 'PUB'
+    <!--
+      분류 체계·첨부 집계.
+      totalCategories 는 tb_category 실제 행 수다 — 기존 countCategories 는
+      COUNT(DISTINCT category_id) 로 "사용 중인" 카테고리를 세면서 라벨은 "카테고리 수"였다.
+      두 값을 분리해 라벨이 거짓말하지 않게 한다(사용 중 수는 PostSummary.usedCategories).
+    -->
+    <select id="findTaxonomySummary" resultType="TaxonomySummary">
+        SELECT (SELECT COUNT(*) FROM tb_category)                                  AS totalCategories,
+               (SELECT COUNT(*) FROM tb_tag)                                       AS totalTags,
+               (SELECT COUNT(DISTINCT tag_id) FROM tb_post_tag_map)                AS usedTags,
+               (SELECT COUNT(*) FROM tb_tag)
+                 - (SELECT COUNT(DISTINCT tag_id) FROM tb_post_tag_map)            AS unusedTags,
+               (SELECT COUNT(*) FROM tb_post_draft)                                AS draftCount,
+               (SELECT COUNT(*) FROM tb_file WHERE NOT deleted)                    AS fileCount,
+               (SELECT COALESCE(SUM(file_size), 0) FROM tb_file WHERE NOT deleted) AS fileTotalSize
     </select>
 
-    <!-- 오늘 조회수 (tb_system_log 기반, 포스트 상세 조회 API 요청 수) -->
-    <select id="countTodayViews" resultType="long">
-        SELECT COUNT(*)
-          FROM tb_system_log
-         WHERE request_uri ~ '^/api/post/[0-9]+$'
-           AND http_method_type = 'GET'
-           AND status = 'SUCC'
-           AND created_at &gt;= #{todayStart}
-           AND created_at &lt; #{tomorrowStart}
-    </select>
-
-    <!-- 사용 중인 카테고리 수 -->
-    <select id="countCategories" resultType="long">
-        SELECT COUNT(DISTINCT category_id)
-          FROM tb_post
-         WHERE status = 'PUB'
-    </select>
-
-    <!-- 전체 태그 수 -->
-    <select id="countTags" resultType="long">
-        SELECT COUNT(*)
-          FROM tb_tag
-    </select>
-
-    <!-- 일별 조회수 추이 (tb_system_log 기반) — 클라이언트 타임존 기준 날짜 경계로 그룹핑 -->
-    <select id="findDailyViewCounts" resultType="DailyViewCount">
-        SELECT CAST(created_at AT TIME ZONE #{zoneId} AS DATE) AS date,
-               COUNT(*) AS count
-          FROM tb_system_log
-         WHERE request_uri ~ '^/api/post/[0-9]+$'
-           AND http_method_type = 'GET'
-           AND status = 'SUCC'
-           AND created_at &gt;= #{from}
-           AND created_at &lt; #{to}
-         GROUP BY CAST(created_at AT TIME ZONE #{zoneId} AS DATE)
-         ORDER BY date ASC
-    </select>
-
-    <!-- 인기 포스트 Top N (view_count 기준) -->
-    <select id="findPopularPosts" resultType="PopularPost">
-        SELECT p.id,
-               p.subject,
-               cat.name AS CATEGORY_NAME,
-               p.view_count AS VIEW_COUNT
-          FROM tb_post p
-          LEFT JOIN tb_category cat ON p.category_id = cat.id
-         WHERE p.status = 'PUB'
-           AND p.public_access = true
-         ORDER BY p.view_count DESC
-         LIMIT #{limit}
-    </select>
-
-    <!-- 카테고리별 포스트 분포 -->
     <select id="findCategoryDistribution" resultType="CategoryDistribution">
-        SELECT cat.name AS CATEGORY_NAME,
-               COUNT(p.id) AS POST_COUNT
+        SELECT cat.name  AS categoryName,
+               COUNT(p.id) AS postCount
           FROM tb_post p
          INNER JOIN tb_category cat ON p.category_id = cat.id
          WHERE p.status = 'PUB'
          GROUP BY cat.name
-         ORDER BY POST_COUNT DESC
+         ORDER BY postCount DESC, cat.name
     </select>
 
-    <!-- 태그별 포스트 분포 Top N -->
     <select id="findTagDistribution" resultType="TagDistribution">
-        SELECT t.name AS TAG_NAME,
-               COUNT(m.post_id) AS POST_COUNT
+        SELECT t.name          AS tagName,
+               COUNT(m.post_id) AS postCount
           FROM tb_post_tag_map m
-         INNER JOIN tb_tag t ON m.tag_id = t.id
+         INNER JOIN tb_tag t  ON m.tag_id = t.id
          INNER JOIN tb_post p ON m.post_id = p.id
          WHERE p.status = 'PUB'
          GROUP BY t.name
-         ORDER BY POST_COUNT DESC
+         ORDER BY postCount DESC, t.name
          LIMIT #{limit}
+    </select>
+
+    <!-- 동점 시 결정적 순서를 위해 id 를 2차 정렬키로 둔다. -->
+    <select id="findPopularPosts" resultType="PopularPost">
+        SELECT p.id         AS id,
+               p.subject    AS subject,
+               cat.name     AS categoryName,
+               p.view_count AS viewCount
+          FROM tb_post p
+          LEFT JOIN tb_category cat ON p.category_id = cat.id
+         WHERE p.status = 'PUB'
+           AND p.public_access = true
+         ORDER BY p.view_count DESC, p.id DESC
+         LIMIT #{limit}
+    </select>
+
+    <!--
+      월별 글 수.
+      ⚠️ tb_post 에 published_at 이 없어 created_at(= "새 글" 버튼을 누른 시각) 기준이다.
+         published_at 을 추가하면 COALESCE(published_at, created_at) 로 바꿀 것.
+    -->
+    <select id="findMonthlyPostCounts" resultType="MonthlyPostCount">
+        SELECT CAST(date_trunc('month', created_at AT TIME ZONE #{zoneId}) AS DATE) AS month,
+               COUNT(*)                                                              AS postCount
+          FROM tb_post
+         WHERE status = 'PUB'
+           AND created_at &gt;= #{from}
+         GROUP BY 1
+         ORDER BY 1
     </select>
 
 </mapper>

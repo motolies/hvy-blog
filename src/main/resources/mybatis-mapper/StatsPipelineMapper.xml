@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="kr.hvy.blog.modules.stats.repository.mapper.StatsPipelineMapper">
+
+    <!--
+      사이트별 핫딜 수집 현황.
+
+      LEFT JOIN 인 이유: 집계 창 안에 수집이 0건인 사이트야말로 알아야 할 이상 징후다.
+      INNER JOIN 이면 깨진 사이트가 결과에서 사라져 화면상 아무 문제 없어 보인다.
+
+      lastScrapedAt 을 상관 서브쿼리로 뺀 이유도 같다 — 창(from~to) 밖의 마지막 수집 시각을
+      알아야 "언제부터 멈췄나"를 답할 수 있다. JOIN 안에 두면 창 밖 값이 NULL 이 된다.
+      idx_hot_deal_item_site_scraped (site_id, scraped_at DESC) 가 이 서브쿼리를 서빙한다.
+    -->
+    <select id="findHotDealSiteStats" resultType="HotDealSiteStat">
+        SELECT s.site_code                                AS siteCode,
+               s.site_name                                AS siteName,
+               s.enabled                                  AS enabled,
+               COUNT(i.id)                                AS scrapedCount,
+               COUNT(i.id) FILTER (WHERE i.notified)      AS notifiedCount,
+               (SELECT MAX(i2.scraped_at)
+                  FROM tb_hot_deal_item i2
+                 WHERE i2.site_id = s.id)                 AS lastScrapedAt
+          FROM tb_hot_deal_site s
+          LEFT JOIN tb_hot_deal_item i
+                 ON i.site_id = s.id
+                AND i.scraped_at &gt;= #{from}
+                AND i.scraped_at &lt;  #{to}
+         GROUP BY s.id, s.site_code, s.site_name, s.enabled
+         ORDER BY s.site_code
+    </select>
+
+    <!-- idx_memo_deleted_created (deleted, created_at DESC) 로 커버된다. -->
+    <select id="findMemoStat" resultType="MemoStat">
+        SELECT COUNT(*) FILTER (WHERE NOT deleted)                              AS activeCount,
+               COUNT(*) FILTER (WHERE deleted)                                  AS deletedCount,
+               COUNT(*) FILTER (WHERE NOT deleted AND created_at &gt;= #{from}) AS recentCreatedCount,
+               MAX(created_at) FILTER (WHERE NOT deleted)                       AS lastCreatedAt
+          FROM tb_memo
+    </select>
+
+    <select id="findJiraStat" resultType="JiraStat">
+        SELECT (SELECT COUNT(*) FROM tb_jira_issue)       AS issueCount,
+               (SELECT COUNT(*) FROM tb_jira_worklog)     AS worklogCount,
+               (SELECT MAX(started) FROM tb_jira_worklog) AS lastWorklogAt
+    </select>
+
+</mapper>

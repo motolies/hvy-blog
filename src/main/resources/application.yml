@@ -209,7 +209,7 @@ scheduler:
     cron-expression: "0 */10 * * * ?"
   log-cleaner:
     lock-name: LOGCLEANER-PROD
-    cron-expression: "* * 0 * * ?"
+    cron-expression: "0 0 0 * * ?"
   jira:
     lock-name: JIRA-SYNC-PROD
     cron-expression: "0 0 * * * ?"

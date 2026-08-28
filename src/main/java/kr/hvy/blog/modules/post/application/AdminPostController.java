@@ -1,14 +1,18 @@
 package kr.hvy.blog.modules.post.application;
 
 import jakarta.validation.Valid;
+import kr.hvy.blog.modules.post.application.dto.PostAdminSearchRequest;
+import kr.hvy.blog.modules.post.application.dto.PostAdminSearchResponse;
 import kr.hvy.blog.modules.post.application.dto.PostCreate;
 import kr.hvy.blog.modules.post.application.dto.PostPublicRequest;
 import kr.hvy.blog.modules.post.application.dto.PostResponse;
 import kr.hvy.blog.modules.post.application.dto.PostUpdate;
+import kr.hvy.blog.modules.post.application.service.PostAdminSearchService;
 import kr.hvy.blog.modules.post.application.service.PostService;
 import kr.hvy.blog.modules.tag.application.dto.TagCreate;
 import kr.hvy.blog.modules.tag.application.dto.TagResponse;
 import kr.hvy.common.application.domain.dto.DeleteResponse;
+import kr.hvy.common.application.domain.dto.paging.PageResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -26,6 +30,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminPostController {
 
   private final PostService postService;
+  private final PostAdminSearchService postAdminSearchService;
+
+  /**
+   * 관리자 글 목록 검색 — 임시저장·비공개 글을 포함한다.
+   * 다른 관리자 그리드(system-log·api-log·memo·hot-deal-items)와 동일하게
+   * POST + PageRequest 바디 규약을 따른다.
+   */
+  @PostMapping("/search")
+  public PageResponse<PostAdminSearchResponse> search(
+      @RequestBody @Valid PostAdminSearchRequest request) {
+    return postAdminSearchService.search(request);
+  }
 
   /**
    * 신규 포스트 작성 할 때

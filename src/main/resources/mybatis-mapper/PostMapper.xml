@@ -70,6 +70,77 @@
 
     </select>
 
+    <!--
+      관리자 글 목록 검색.
+
+      ⚠️ 이 쿼리는 PostAdminSearchCriteria(= PageRequest 상속)를 받으므로 PageInterceptor 가
+         ORDER BY / LIMIT / OFFSET 과 COUNT 쿼리를 자동 부착한다. 여기에 직접 쓰면 안 된다.
+         (반대로 StatsLogMapper.xml 은 스칼라 파라미터만 받아 인터셉터가 개입하지 않으므로
+          거기서는 ORDER BY / LIMIT 을 직접 쓰는 것이 정상이다.)
+
+      tb_post_draft 는 post_id 가 PK 라 LEFT JOIN 이 행을 늘리지 않는다.
+      태그는 EXISTS/서브쿼리로 세어 map 조인이 행을 부풀리지 않게 한다.
+    -->
+    <select id="findByAdminSearchCriteria" resultType="PostAdminSearchResponse">
+        SELECT
+        p.id                                AS id,
+        p.subject                           AS subject,
+        p.category_id                       AS categoryId,
+        cat.name                            AS categoryName,
+        p.status                            AS status,
+        p.public_access                     AS publicAccess,
+        p.main_page                         AS mainPage,
+        (d.post_id IS NOT NULL)             AS hasDraft,
+        p.view_count                        AS viewCount,
+        (SELECT COUNT(*) FROM tb_post_tag_map m WHERE m.post_id = p.id) AS tagCount,
+        p.created_at                        AS createdAt,
+        p.updated_at                        AS updatedAt
+        FROM tb_post AS p
+        LEFT JOIN tb_category cat  ON p.category_id = cat.id
+        LEFT JOIN tb_post_draft d  ON d.post_id = p.id
+        <where>
+            <if test='subject != null and subject != ""'>
+                AND LOWER(p.subject) LIKE CONCAT('%', LOWER(#{subject}), '%')
+            </if>
+            <if test='categoryId != null and categoryId != ""'>
+                AND cat.full_path LIKE CONCAT('%/', #{categoryId}, '/%')
+            </if>
+            <if test='status != null and status != ""'>
+                AND p.status = #{status}
+            </if>
+            <if test='publicAccess != null'>
+                AND p.public_access = #{publicAccess}
+            </if>
+            <if test='hasDraft != null and hasDraft == true'>
+                AND d.post_id IS NOT NULL
+            </if>
+            <if test='hasDraft != null and hasDraft == false'>
+                AND d.post_id IS NULL
+            </if>
+            <if test='minViewCount != null'>
+                AND p.view_count &gt;= #{minViewCount}
+            </if>
+            <if test='maxViewCount != null'>
+                AND p.view_count &lt;= #{maxViewCount}
+            </if>
+            <if test='createdAtFrom != null'>
+                AND p.created_at &gt;= #{createdAtFrom}
+            </if>
+            <if test='createdAtToExclusive != null'>
+                AND p.created_at &lt; #{createdAtToExclusive}
+            </if>
+            <if test='tagName != null and tagName != ""'>
+                AND EXISTS (
+                    SELECT 1
+                      FROM tb_post_tag_map m
+                      JOIN tb_tag t ON t.id = m.tag_id
+                     WHERE m.post_id = p.id
+                       AND LOWER(t.name) LIKE CONCAT('%', LOWER(#{tagName}), '%')
+                )
+            </if>
+        </where>
+    </select>
+
   <select id="findPrevNextById" resultType="PostPrevNextResponse">
     SELECT
     COALESCE(prev_post.id, 0) AS PREV

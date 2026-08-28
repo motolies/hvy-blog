@@ -5,18 +5,15 @@ import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
 
+/** GET /api/stats/admin/summary — 콘텐츠 현황(로그 테이블을 조회하지 않는다). */
 @Value
 @Builder
 @Jacksonized
-public class StatsOverview {
+public class StatsSummary {
 
-  long totalPosts;
-  long totalViews;
-  long todayViews;
-  long totalCategories;
-  long totalTags;
-  List<DailyViewCount> viewTrend;
-  List<PopularPost> popularPosts;
+  PostSummary posts;
+  TaxonomySummary taxonomy;
   List<CategoryDistribution> categoryDistribution;
   List<TagDistribution> tagDistribution;
+  List<MonthlyPostCount> monthlyPostCounts;
 }

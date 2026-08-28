@@ -102,6 +102,10 @@ CREATE INDEX IF NOT EXISTS idx_hot_deal_item_site_notified
     ON tb_hot_deal_item (site_id, notified);
 CREATE INDEX IF NOT EXISTS idx_hot_deal_item_scraped_at
     ON tb_hot_deal_item (scraped_at DESC);
+-- 관리자 대시보드: 사이트별 마지막 수집 시각 (MAX(scraped_at) per site).
+-- idx_hot_deal_item_site_notified (site_id, notified) 로는 서빙되지 않는다.
+CREATE INDEX IF NOT EXISTS idx_hot_deal_item_site_scraped
+    ON tb_hot_deal_item (site_id, scraped_at DESC);
 
 
 -- =============================================

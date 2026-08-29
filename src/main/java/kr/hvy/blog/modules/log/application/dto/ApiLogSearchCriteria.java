@@ -25,6 +25,8 @@ public class ApiLogSearchCriteria extends PageRequest {
   private String requestBody;
   private String responseStatus;
   private String responseBody;
+  /** 성공 여부 3상태. TRUE=성공만 · FALSE=실패만 · null=전체. 판정식은 ApiLogMapper.xml 이 갖는다. */
+  private Boolean responseSuccess;
   private Instant createdAtFrom;
   private Instant createdAtToExclusive;
 }

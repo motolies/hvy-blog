@@ -49,6 +49,35 @@
             <if test="responseStatus != null and responseStatus != ''">
                 AND response_status = #{responseStatus}
             </if>
+            <!--
+              성공/실패 필터. tb_api_log 에는 status 컬럼이 없어 response_status 로 파생 판정한다.
+              ApiLogInterceptor 가 String.valueOf(HttpStatusCode) 로 저장하므로 "200" 일 수도
+              "200 OK" 일 수도 있다 — prefix 매칭이라 두 포맷을 모두 커버한다.
+              NULL 은 응답 자체를 못 받은 호출이라 실패로 센다.
+
+              LEFT(response_status,1) 이 아니라 LIKE 인 이유: LEFT() 는 함수라 표현식 인덱스가 아니면
+              절대 인덱스를 못 타지만, prefix LIKE 는 일반 B-tree 로도 탈 수 있는 형태다.
+              (실제로 타려면 인덱스 추가 + locale 이 C 가 아니면 text_pattern_ops 가 필요하다.)
+              request_uri LIKE '/api/post/%/view' 를 쓰는 StatsLogMapper 와 같은 관용구이기도 하다.
+
+              판정을 enum 이 아니라 Boolean 으로 받는 이유는 ApiLogSearchService.toResponseSuccess 주석 참조.
+
+              ⚠️ StatsLogMapper.findExternalApiFailures 는 같은 판정을 LEFT(...,1) NOT IN ('2','3') 로 쓴다.
+                 표현은 달라도 결과는 동치다(빈 문자열·NULL 포함). 한쪽 기준을 바꾸면 반드시 다른 쪽도
+                 바꿀 것 — 어긋나면 대시보드 숫자와 목록 건수가 조용히 달라진다.
+            -->
+            <if test="responseSuccess != null">
+                <choose>
+                    <when test="responseSuccess">
+                        AND response_status IS NOT NULL
+                        AND (response_status LIKE '2%' OR response_status LIKE '3%')
+                    </when>
+                    <otherwise>
+                        AND (response_status IS NULL
+                             OR (response_status NOT LIKE '2%' AND response_status NOT LIKE '3%'))
+                    </otherwise>
+                </choose>
+            </if>
             <if test="responseBody != null and responseBody != ''">
                 AND response_body ILIKE CONCAT('%', #{responseBody}, '%')
             </if>

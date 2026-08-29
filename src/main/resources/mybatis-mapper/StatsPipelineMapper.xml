@@ -15,7 +15,8 @@
       idx_hot_deal_item_site_scraped (site_id, scraped_at DESC) 가 이 서브쿼리를 서빙한다.
     -->
     <select id="findHotDealSiteStats" resultType="HotDealSiteStat">
-        SELECT s.site_code                                AS siteCode,
+        SELECT s.id                                       AS siteId,
+               s.site_code                                AS siteCode,
                s.site_name                                AS siteName,
                s.enabled                                  AS enabled,
                COUNT(i.id)                                AS scrapedCount,
@@ -29,7 +30,10 @@
                 AND i.scraped_at &gt;= #{from}
                 AND i.scraped_at &lt;  #{to}
          GROUP BY s.id, s.site_code, s.site_name, s.enabled
-         ORDER BY s.site_code
+         <!-- s.id 를 tie-breaker 로 둔다 — 같은 site_code 가 여러 게시판을 가질 수 있어
+              (뽐뿌 국내/해외) site_code 만으로는 동률 시 순서가 미정이고,
+              60초마다 재조회되는 위젯이라 행 위치가 깜빡 바뀐다. -->
+         ORDER BY s.site_code, s.id
     </select>
 
     <!-- idx_memo_deleted_created (deleted, created_at DESC) 로 커버된다. -->

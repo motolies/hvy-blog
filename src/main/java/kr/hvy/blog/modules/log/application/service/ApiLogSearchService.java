@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.log.application.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import kr.hvy.common.core.code.ApiResponseStatus;
 import kr.hvy.common.core.time.BrowserDateTimeConverter;
 import kr.hvy.common.core.time.UtcDateRange;
 import kr.hvy.blog.modules.log.application.dto.ApiLogSearchCriteria;
@@ -70,8 +71,21 @@ public class ApiLogSearchService {
         .requestBody(request.getRequestBody())
         .responseStatus(request.getResponseStatus())
         .responseBody(request.getResponseBody())
+        .responseSuccess(toResponseSuccess(request.getStatus()))
         .createdAtFrom(createdAtRange.fromInclusive())
         .createdAtToExclusive(createdAtRange.toExclusive())
         .build();
+  }
+
+  /**
+   * 성공/실패 요청 어휘를 SQL 이 바로 쓸 수 있는 3상태 Boolean 으로 접는다.
+   * 같은 메서드가 LocalDate→Instant, createdAtTo→ToExclusive 를 접는 것과 같은 이유 —
+   * 매퍼가 enum 을 알 필요가 없고, OGNL 에서 문자열을 비교하는 일도 사라진다.
+   */
+  private Boolean toResponseSuccess(ApiResponseStatus status) {
+    if (status == null) {
+      return null;
+    }
+    return status == ApiResponseStatus.SUCCESS;
   }
 }

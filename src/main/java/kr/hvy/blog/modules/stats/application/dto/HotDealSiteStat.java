@@ -18,6 +18,12 @@ import lombok.extern.jackson.Jacksonized;
 @Jacksonized
 public class HotDealSiteStat {
 
+  /**
+   * 게시판 행의 PK. <b>siteCode 는 스크래퍼 종류라 고유하지 않다</b> —
+   * 뽐뿌는 국내/해외 게시판이 같은 PPOMPPU 코드를 공유한다(db/hotdeal-schema.sql 시드 참조).
+   * 목록 렌더링의 행 식별자는 반드시 이 값을 써야 한다.
+   */
+  Long siteId;
   String siteCode;
   String siteName;
   boolean enabled;

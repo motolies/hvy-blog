@@ -2,9 +2,15 @@ package kr.hvy.blog.modules.admin.application.service;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import kr.hvy.blog.modules.admin.application.MasterCodeAttributeSanitizer;
+import kr.hvy.blog.modules.admin.application.dto.MasterCodeChildrenOrderRequest;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeCreate;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeMoveRequest;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeUpdate;
@@ -243,6 +249,79 @@ public class MasterCodeService {
     }
 
     return masterCodeDtoMapper.toResponse(saved);
+  }
+
+  /**
+   * 한 부모의 자식 정렬순서를 <b>한 트랜잭션에서</b> 일괄 재부여한다.
+   * <p>
+   * 배열 위치가 곧 sort(1..n) 다. 형제마다 PUT 을 날리던 기존 방식은 중간에 실패하면 순서가 반쯤
+   * 어긋난 상태로 남았고, 같은 캐시 무효화를 형제 수만큼 반복했다. 여기서는 evict 가 <b>정확히 1회</b>다
+   * (정렬은 부모를 바꾸지 않으므로 rootCode 가 불변이다).
+   * <p>
+   * depth 를 보지 않는다 — parentId 가 루트면 그룹 재정렬, 그룹이면 링크 재정렬이다.
+   * <p>
+   * <b>벌크 JPQL UPDATE 를 쓰지 않는 이유</b>: {@code MasterCode} 의 {@code @PreUpdate} 가
+   * updatedAt/updatedBy 를 채우는데 벌크 UPDATE 는 콜백을 타지 않아 감사 이력이 조용히 빈다.
+   * 형제 수가 수십 수준이라 정확성이 성능보다 비싼 구간이다.
+   */
+  public List<MasterCodeResponse> reorderChildren(String parentId, MasterCodeChildrenOrderRequest orderRequest) {
+    MasterCode parent = findById(parentId);
+    List<String> orderedIds = orderRequest.getOrderedIds();
+
+    // 1) 중복 검사. 중복이 있으면 두 노드가 같은 sort 를 받아 순서가 code 폴백으로 조용히 무너진다.
+    Set<String> requested = new LinkedHashSet<>(orderedIds);
+    if (requested.size() != orderedIds.size()) {
+      throw new IllegalArgumentException("정렬 요청에 중복된 ID 가 있습니다");
+    }
+
+    // 2) 자식 전체 로딩(비활성 포함). 관리 화면이 보지 못하는 비활성 형제까지 함께 재부여해야
+    //    나중에 다시 활성화됐을 때 sort 가 겹치지 않는다.
+    List<MasterCode> children = masterCodeRepository.findByParentIdOrderBySortAscCodeAsc(parentId);
+    Map<String, MasterCode> byId = children.stream()
+        .collect(Collectors.toMap(MasterCode::getId, Function.identity()));
+
+    // 3) 이 부모의 자식이 아닌 ID 를 두 부류로 가른다.
+    //    · DB 에 아예 없다 → 그 사이 삭제된 것. 다른 탭에서 지우고 드래그하면 나는 평범한 레이스다.
+    //      이 프로젝트는 400/500 을 가리지 않고 모든 예외가 Slack #hvy-error 를 울리므로 던지지 않는다.
+    //    · DB 엔 있으나 부모가 다르다 → 클라이언트 버그이거나 조작된 요청. 거부한다.
+    List<String> unknownIds = orderedIds.stream().filter(id -> !byId.containsKey(id)).toList();
+    if (!unknownIds.isEmpty()) {
+      List<String> foreignIds = unknownIds.stream().filter(masterCodeRepository::existsById).toList();
+      if (!foreignIds.isEmpty()) {
+        throw new IllegalArgumentException("이 노드의 자식이 아닌 ID 가 포함되어 있습니다: " + foreignIds);
+      }
+      log.warn("정렬 요청에 이미 삭제된 ID 가 있어 건너뜁니다: parentId={}, ids={}", parentId, unknownIds);
+    }
+
+    // 4) sort 재부여. 요청 순서대로 1..n 이고, 요청에 없던 형제(비활성·동시 생성분)는 기존 상대 순서를
+    //    지킨 채 뒤에 이어붙인다. dirty checking 이라 @PreUpdate 가 정상 동작한다.
+    int nextSort = 1;
+    for (String id : orderedIds) {
+      MasterCode child = byId.get(id);
+      if (child != null) {
+        child.setSort(nextSort++);
+      }
+    }
+    for (MasterCode child : children) {
+      if (!requested.contains(child.getId())) {
+        child.setSort(nextSort++);
+      }
+    }
+
+    // 5) flush 를 evict 앞에 둔다 — 제약 위반이 있다면 캐시를 비우기 전에 드러나야 한다.
+    entityManager.flush();
+
+    log.info("MasterCode 정렬 변경: parentId={}, code={}, count={}",
+        parentId, parent.getCode(), orderedIds.size());
+
+    // 6) 캐시 무효화 1회. 정렬은 부모를 바꾸지 않아 rootCode 가 불변이다.
+    //    ⚠️ findRootCode 는 LAZY parent 를 타므로 반드시 트랜잭션 안에서 호출해야 한다.
+    evictCacheForNode(parent);
+
+    return children.stream()
+        .sorted(Comparator.comparing(MasterCode::getSort).thenComparing(MasterCode::getCode))
+        .map(masterCodeDtoMapper::toResponse)
+        .toList();
   }
 
   @Transactional(readOnly = true)

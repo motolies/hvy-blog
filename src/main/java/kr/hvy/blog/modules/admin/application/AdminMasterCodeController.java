@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.admin.application;
 
 import jakarta.validation.Valid;
 import java.util.List;
+import kr.hvy.blog.modules.admin.application.dto.MasterCodeChildrenOrderRequest;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeCreate;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeMoveRequest;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeUpdate;
@@ -107,6 +108,14 @@ public class AdminMasterCodeController {
       @PathVariable String id,
       @Valid @RequestBody MasterCodeMoveRequest moveRequest) {
     return masterCodeService.moveNode(id, moveRequest);
+  }
+
+  /** 자식 노드 정렬순서 일괄 변경 (배열 위치 = sort). 부모 하나의 형제 전체를 한 트랜잭션에서 재부여한다. */
+  @PutMapping("/nodes/{parentId}/children/order")
+  public List<MasterCodeResponse> reorderChildren(
+      @PathVariable String parentId,
+      @Valid @RequestBody MasterCodeChildrenOrderRequest orderRequest) {
+    return masterCodeService.reorderChildren(parentId, orderRequest);
   }
 
   // ========== 캐시 관리 ==========

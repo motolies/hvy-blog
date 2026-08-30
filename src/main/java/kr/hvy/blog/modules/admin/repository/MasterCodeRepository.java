@@ -25,6 +25,16 @@ public interface MasterCodeRepository extends JpaRepository<MasterCode, String> 
   List<MasterCode> findByParentIdAndIsActiveTrueOrderBySortAscCodeAsc(String parentId);
 
   /**
+   * 특정 부모의 자식 노드 <b>전체</b> 조회 (비활성 포함).
+   * <p>
+   * ⚠️ 정렬 재부여에는 위의 {@code ...AndIsActiveTrue...} 를 쓸 수 없다. 관리 화면조차
+   * {@link #findSubtree(String)} 가 비활성 노드를 걸러 <b>애초에 보지 못하므로</b>, 활성만 renumber 하면
+   * 화면에 없던 비활성 형제의 sort 가 1..n 블록과 겹쳐 {@code @OrderBy("sort ASC, code ASC")} 의
+   * code 폴백으로 순서가 무너진다. 비활성까지 함께 정규화해야 나중에 다시 켰을 때 충돌이 없다.
+   */
+  List<MasterCode> findByParentIdOrderBySortAscCodeAsc(String parentId);
+
+  /**
    * 루트 코드값으로 루트 노드 조회
    */
   Optional<MasterCode> findByCodeAndParentIsNullAndIsActiveTrue(String code);

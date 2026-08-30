@@ -96,7 +96,7 @@ public class MasterCodeService {
   }
 
   @Transactional(readOnly = true)
-  public MasterCodeResponse getNode(Long id) {
+  public MasterCodeResponse getNode(String id) {
     MasterCode entity = findById(id);
     return masterCodeDtoMapper.toResponse(entity);
   }
@@ -113,7 +113,7 @@ public class MasterCodeService {
 
       if (masterCodeRepository.existsByParentIdAndCode(parent.getId(), createDto.getCode())) {
         throw new IllegalArgumentException(
-            String.format("이미 존재하는 코드입니다: %s (부모 ID: %d)", createDto.getCode(), parent.getId()));
+            String.format("이미 존재하는 코드입니다: %s (부모 ID: %s)", createDto.getCode(), parent.getId()));
       }
     } else {
       if (masterCodeRepository.existsByCodeAndParentIsNull(createDto.getCode())) {
@@ -140,21 +140,20 @@ public class MasterCodeService {
         .isActive(createDto.getIsActive() != null ? createDto.getIsActive() : true)
         .build();
 
+    // id 를 @PrePersist 에서 만들기 때문에 path 도 같은 시점에 확정된다 —
+    // 예전의 save → flush → refresh → recalculateTreeFields → save (2회 저장)가 필요 없다.
+    // 그 두 번째 저장을 빠뜨리면 path 가 NULL 로 남아 서브트리 조회가 죽었었다.
     MasterCode saved = masterCodeRepository.save(entity);
-    entityManager.flush();
-    entityManager.refresh(saved);
 
-    saved.recalculateTreeFields();
-    masterCodeRepository.save(saved);
-
-    log.info("MasterCode 생성: code={}, depth={}, parentId={}", saved.getCode(), saved.getDepth(),
+    log.info("MasterCode 생성: id={}, code={}, depth={}, path={}, parentId={}",
+        saved.getId(), saved.getCode(), saved.getDepth(), saved.getPath(),
         parent != null ? parent.getId() : "ROOT");
 
     evictCacheForNode(saved);
     return masterCodeDtoMapper.toResponse(saved);
   }
 
-  public MasterCodeResponse updateNode(Long id, MasterCodeUpdate updateDto) {
+  public MasterCodeResponse updateNode(String id, MasterCodeUpdate updateDto) {
     MasterCode entity = findById(id);
 
     if (ObjectUtils.isNotEmpty(updateDto.getCode()) && !updateDto.getCode().trim().isEmpty()
@@ -166,7 +165,7 @@ public class MasterCodeService {
       } else {
         if (masterCodeRepository.existsByParentIdAndCode(entity.getParent().getId(), updateDto.getCode())) {
           throw new IllegalArgumentException(
-              String.format("이미 존재하는 코드입니다: %s (부모 ID: %d)", updateDto.getCode(), entity.getParent().getId()));
+              String.format("이미 존재하는 코드입니다: %s (부모 ID: %s)", updateDto.getCode(), entity.getParent().getId()));
         }
       }
     }
@@ -187,7 +186,7 @@ public class MasterCodeService {
     return masterCodeDtoMapper.toResponse(saved);
   }
 
-  public DeleteResponse<Long> deleteNode(Long id) {
+  public DeleteResponse<String> deleteNode(String id) {
     MasterCode entity = findById(id);
 
     long childCount = masterCodeRepository.countByParentIdAndIsActiveTrue(id);
@@ -195,19 +194,19 @@ public class MasterCodeService {
       throw new IllegalArgumentException("하위 노드가 존재하여 삭제할 수 없습니다. 하위 노드 수: " + childCount);
     }
 
-    Long deletedId = entity.getId();
+    String deletedId = entity.getId();
     masterCodeRepository.delete(entity);
 
     log.info("MasterCode 삭제: id={}, code={}", deletedId, entity.getCode());
 
     evictCacheForNode(entity);
 
-    return DeleteResponse.<Long>builder()
+    return DeleteResponse.<String>builder()
         .id(deletedId)
         .build();
   }
 
-  public MasterCodeResponse moveNode(Long id, MasterCodeMoveRequest moveRequest) {
+  public MasterCodeResponse moveNode(String id, MasterCodeMoveRequest moveRequest) {
     MasterCode entity = findById(id);
 
     MasterCode newParent = null;
@@ -254,7 +253,7 @@ public class MasterCodeService {
 
   // ========== 내부 헬퍼 ==========
 
-  private MasterCode findById(Long id) {
+  private MasterCode findById(String id) {
     return masterCodeRepository.findById(id)
         .orElseThrow(() -> new DataNotFoundException("마스터코드를 찾을 수 없습니다: ID " + id));
   }

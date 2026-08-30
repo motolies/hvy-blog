@@ -285,12 +285,19 @@ COMMENT ON COLUMN tb_user_authority_map.authority_id IS '권한 ID (FK)';
 
 CREATE TABLE tb_master_code
 (
-    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- TSID 문자열(Crockford Base32 13자). IDENTITY 를 쓰지 않는 이유는 path 때문이다 —
+    -- path 가 '/부모path/자기id' 라서 INSERT 전에 id 를 알아야 한다. IDENTITY 는 INSERT 후에야
+    -- id 가 정해져 path 를 뒤따르는 UPDATE 로 채워야 했고, 그 UPDATE 를 빠뜨리면 path 가 NULL 로
+    -- 남아 서브트리 조회가 통째로 죽었다. 애플리케이션이 id 를 만들면 path 를 같은 INSERT 에 넣을 수
+    -- 있어 아래 NOT NULL 이 그 사고를 DB 레벨에서 거부한다. (tb_category 가 쓰는 방식과 같다.)
+    id               VARCHAR(13)  NOT NULL PRIMARY KEY,
 
     -- 트리 구조
-    parent_id        BIGINT       NULL,
+    parent_id        VARCHAR(13)  NULL,
     depth            INTEGER      NOT NULL DEFAULT 0,
-    path             VARCHAR(512) NULL,
+    -- ★ NOT NULL. 서브트리 조회(findSubtree)가 전적으로 이 값에 의존한다.
+    --   세그먼트가 14자(구분자 포함)라 512 안에 36단계까지 들어간다.
+    path             VARCHAR(512) NOT NULL,
 
     -- 코드 정보
     code             VARCHAR(64)  NOT NULL,
@@ -315,10 +322,10 @@ CREATE TABLE tb_master_code
     CONSTRAINT fk_master_code_parent      FOREIGN KEY (parent_id) REFERENCES tb_master_code (id)
 );
 COMMENT ON TABLE  tb_master_code                   IS '마스터코드 (자기참조 트리 구조)';
-COMMENT ON COLUMN tb_master_code.id                IS '마스터코드 ID (PK)';
+COMMENT ON COLUMN tb_master_code.id                IS '마스터코드 ID (PK, TSID 13자)';
 COMMENT ON COLUMN tb_master_code.parent_id         IS '부모 노드 ID (NULL이면 루트)';
 COMMENT ON COLUMN tb_master_code.depth             IS '트리 깊이 (0=루트, 1+=하위)';
-COMMENT ON COLUMN tb_master_code.path              IS 'Materialized Path (예: /1/5/12)';
+COMMENT ON COLUMN tb_master_code.path              IS 'Materialized Path (예: /0RF87Y7EXVPB9/0RF880A9HVQCF)';
 COMMENT ON COLUMN tb_master_code.code              IS '코드값';
 COMMENT ON COLUMN tb_master_code.name              IS '코드명';
 COMMENT ON COLUMN tb_master_code.description       IS '설명';

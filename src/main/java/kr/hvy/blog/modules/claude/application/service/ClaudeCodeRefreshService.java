@@ -373,7 +373,7 @@ public class ClaudeCodeRefreshService {
         });
   }
 
-  private void updateTokenAttributes(Long nodeId, Map<String, Object> currentAttributes,
+  private void updateTokenAttributes(String nodeId, Map<String, Object> currentAttributes,
       String accessToken, String refreshToken, long expiresAt) {
     Map<String, Object> updatedAttributes = new HashMap<>(currentAttributes);
     updatedAttributes.put(ATTR_ACCESS_TOKEN, accessToken);

@@ -50,7 +50,7 @@ dependencies {
     // Library
     if (env == "prod") {
         // 0.3.0: Spring Boot 4.1.1 / JDK 25 / Jackson 3 전환 (ObjectMapperConfigurer 반환형·RedisConfigurer 생성자 등 binary breaking, messaging 패키지 삭제)
-        implementation 'io.github.motolies:hvy-common:0.3.0'
+        implementation 'io.github.motolies:hvy-common:0.3.1'
     } else {
         // MavenLocal에 배포된 hvy-common을 사용
         implementation 'io.github.motolies:hvy-common:local'

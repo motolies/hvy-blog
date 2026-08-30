@@ -7,8 +7,6 @@ import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.ForeignKey;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -16,12 +14,12 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
-import jakarta.persistence.Table;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.common.application.domain.embeddable.EventLogEntity;
+import kr.hvy.common.core.converter.TsidUtils;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -43,9 +41,21 @@ import org.hibernate.type.SqlTypes;
 @AllArgsConstructor
 public class MasterCode {
 
+  /**
+   * TSID 문자열 PK (Crockford Base32 고정 13자).
+   * <p>
+   * IDENTITY 를 쓰지 않는 이유는 <b>INSERT 전에 id 를 알아야 하기 때문</b>이다. path 가
+   * {@code /부모path/자기id} 라서, id 를 INSERT 후에야 알면 path 를 뒤따르는 UPDATE 로 채울 수밖에
+   * 없고 그 UPDATE 를 빠뜨리면 path 가 NULL 로 남아 서브트리 조회가 통째로 죽는다(실제 사고).
+   * 애플리케이션이 id 를 만들면 path 를 같은 INSERT 에 넣을 수 있어 {@code path NOT NULL} 로
+   * DB 가 직접 그 사고를 거부한다.
+   * <p>
+   * 고정 13자라 Materialized Path 의 prefix 충돌({@code '/6%'} 가 {@code /60...} 을 삼키는 문제)도
+   * 구조적으로 생기지 않는다. 같은 구조인 {@code Category} 엔티티가 이미 이 방식을 쓴다.
+   */
   @Id
-  @GeneratedValue(strategy = GenerationType.IDENTITY)
-  private Long id;
+  @Column(nullable = false, length = 13)
+  private String id;
 
   /**
    * 부모 노드 (NULL이면 루트)
@@ -71,9 +81,13 @@ public class MasterCode {
   private Integer depth = 0;
 
   /**
-   * Materialized Path (예: /1/5/12)
+   * Materialized Path (예: /0RF87Y7EXVPB9/0RF880A9HVQCF)
+   * <p>
+   * ★ NOT NULL 이다. 이 제약이 "path 를 채우는 UPDATE 를 빠뜨림"을 DB 레벨에서 거부한다 —
+   * 서브트리 조회({@code findSubtree})가 전적으로 이 값에 의존하기 때문이다.
+   * 세그먼트가 14자(구분자 포함)라 512 안에 36단계까지 들어간다.
    */
-  @Column(length = 512)
+  @Column(nullable = false, length = 512)
   private String path;
 
   /**
@@ -149,6 +163,12 @@ public class MasterCode {
 
   @PrePersist
   private void prePersist() {
+    // id 를 여기서 만들기 때문에 같은 시점에 path 까지 확정할 수 있다.
+    // (IDENTITY 였을 때는 save→flush→refresh→recalculate→save 로 두 번 저장해야 했다.)
+    if (ObjectUtils.isEmpty(this.id)) {
+      this.id = TsidUtils.getTsid().toString();
+    }
+    recalculateTreeFields();
     if (ObjectUtils.isEmpty(this.created)) {
       this.created = EventLogEntity.defaultValues();
     }
@@ -218,7 +238,12 @@ public class MasterCode {
   }
 
   /**
-   * depth와 path를 부모 기준으로 재계산
+   * depth와 path를 부모 기준으로 재계산.
+   * <p>
+   * {@code @PrePersist} 가 INSERT 직전에 부르므로 신규 노드는 따로 호출할 필요가 없다.
+   * 부모가 바뀌는 이동({@code moveNode})에서만 명시적으로 부른다.
+   * <p>
+   * 부모 path 는 NOT NULL 이라 예전처럼 {@code "null/..."} 문자열이 만들어질 수 없다.
    */
   public void recalculateTreeFields() {
     if (this.parent == null) {

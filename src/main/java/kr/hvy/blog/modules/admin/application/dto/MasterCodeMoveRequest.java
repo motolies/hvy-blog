@@ -15,5 +15,5 @@ public class MasterCodeMoveRequest {
   /**
    * 새로운 부모 노드 ID (NULL이면 루트로 이동)
    */
-  Long newParentId;
+  String newParentId;
 }

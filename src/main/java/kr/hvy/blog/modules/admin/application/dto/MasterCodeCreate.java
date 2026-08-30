@@ -19,7 +19,7 @@ public class MasterCodeCreate {
   /**
    * 부모 노드 ID (NULL이면 루트 생성)
    */
-  Long parentId;
+  String parentId;
 
   /**
    * 코드값

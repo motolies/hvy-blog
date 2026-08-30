@@ -61,7 +61,7 @@ public class JpaMasterCodeLoader implements MasterCodeLoader {
    * depth ASC 순서로 정렬된 엔티티 목록을 메모리에서 트리로 재구성.
    */
   private List<MasterCodeTreeResponse> buildTree(List<MasterCode> nodes) {
-    Map<Long, MasterCodeTreeResponse> map = new LinkedHashMap<>();
+    Map<String, MasterCodeTreeResponse> map = new LinkedHashMap<>();
     List<MasterCodeTreeResponse> roots = new ArrayList<>();
 
     for (MasterCode entity : nodes) {

@@ -67,7 +67,7 @@ public class AdminMasterCodeController {
 
   /** 노드 상세 조회 */
   @GetMapping("/nodes/{id}")
-  public MasterCodeResponse getNode(@PathVariable Long id) {
+  public MasterCodeResponse getNode(@PathVariable String id) {
     return masterCodeService.getNode(id);
   }
 
@@ -89,7 +89,7 @@ public class AdminMasterCodeController {
   /** 노드 수정 */
   @PutMapping("/nodes/{id}")
   public MasterCodeResponse updateNode(
-      @PathVariable Long id,
+      @PathVariable String id,
       @Valid @RequestBody MasterCodeUpdate updateDto) {
     return masterCodeService.updateNode(id, updateDto);
   }
@@ -97,14 +97,14 @@ public class AdminMasterCodeController {
   /** 노드 삭제 */
   @DeleteMapping("/nodes/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  public void deleteNode(@PathVariable Long id) {
+  public void deleteNode(@PathVariable String id) {
     masterCodeService.deleteNode(id);
   }
 
   /** 노드 이동 (부모 변경) */
   @PutMapping("/nodes/{id}/move")
   public MasterCodeResponse moveNode(
-      @PathVariable Long id,
+      @PathVariable String id,
       @Valid @RequestBody MasterCodeMoveRequest moveRequest) {
     return masterCodeService.moveNode(id, moveRequest);
   }

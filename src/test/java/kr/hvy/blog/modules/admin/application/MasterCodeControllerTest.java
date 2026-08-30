@@ -80,6 +80,17 @@ class MasterCodeControllerTest {
   }
 
   @Test
+  @DisplayName("PLATFORM 은 화이트리스트 밖이라 공개 조회로 노출되지 않는다(관리자 전용 유지)")
+  void platformRoot_isNotPubliclyExposed() {
+    // 홈의 관리자 전용 "플랫폼" 섹션은 PLATFORM 이 public-roots 에 없다는 사실 하나에 기대어 있다.
+    // 누군가 화이트리스트 기본값이나 컨트롤러 로직을 건드리면 내부 인프라 주소가 그대로 공개되므로
+    // 그 회귀를 CI 에서 잡는다. (운영 env MASTER_CODE_PUBLIC_ROOTS 오염은 여기서 잡을 수 없다.)
+    assertThat(controller.getSubTree("PLATFORM")).isEmpty();
+    assertThat(controller.getSubTree("platform")).isEmpty();
+    verifyNoInteractions(masterCodeService);
+  }
+
+  @Test
   @DisplayName("null 루트코드는 호출 없이 빈 목록을 반환한다")
   void nullRoot_returnsEmpty() {
     List<MasterCodeTreeResponse> result = controller.getSubTree(null);

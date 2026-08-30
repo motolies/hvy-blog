@@ -23,14 +23,14 @@ class MasterCodeAttributeSanitizerTest {
         Map.of("key", "secret", "label", "Secret", "type", "text", "sensitive", "true"));
 
     MasterCodeTreeResponse child = MasterCodeTreeResponse.builder()
-        .id(2L).code("CHILD").name("자식")
+        .id("0000000000002").code("CHILD").name("자식")
         .attributes(mutableMap("url", "child-url", "secret", "child-secret"))
         .attributeSchema(List.of())
         .children(List.of())
         .build();
 
     MasterCodeTreeResponse root = MasterCodeTreeResponse.builder()
-        .id(1L).code("FAVORITE").name("즐겨찾기")
+        .id("0000000000001").code("FAVORITE").name("즐겨찾기")
         .attributes(mutableMap("url", "root-url", "secret", "root-secret", "unknown", "x"))
         .attributeSchema(schema)
         .children(List.of(child))
@@ -55,14 +55,14 @@ class MasterCodeAttributeSanitizerTest {
   void sanitize_emptySchema_stripsAllAttributes() {
     // Given: 스키마 미정의(CLAUDE 루트처럼) + 토큰 attribute
     MasterCodeTreeResponse account = MasterCodeTreeResponse.builder()
-        .id(20L).code("acc1").name("계정1")
+        .id("0000000000020").code("acc1").name("계정1")
         .attributes(mutableMap("refreshToken", "rt", "accessToken", "at"))
         .attributeSchema(List.of())
         .children(List.of())
         .build();
 
     MasterCodeTreeResponse root = MasterCodeTreeResponse.builder()
-        .id(10L).code("CLAUDE").name("Claude")
+        .id("0000000000010").code("CLAUDE").name("Claude")
         .attributes(mutableMap("refreshToken", "root-rt"))
         .attributeSchema(List.of()) // 공개 key 없음
         .children(List.of(account))
@@ -83,7 +83,7 @@ class MasterCodeAttributeSanitizerTest {
     List<Map<String, String>> schema = List.of(Map.of("key", "url"));
     Map<String, Object> originalAttrs = mutableMap("url", "u", "secret", "s");
     MasterCodeTreeResponse root = MasterCodeTreeResponse.builder()
-        .id(1L).code("FAVORITE").name("즐겨찾기")
+        .id("0000000000001").code("FAVORITE").name("즐겨찾기")
         .attributes(originalAttrs)
         .attributeSchema(schema)
         .children(List.of())

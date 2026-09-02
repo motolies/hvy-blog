@@ -47,7 +47,7 @@ public class HotDealItemSearchService {
   }
 
   private HotDealItemSearchCriteria toCriteria(HotDealItemSearchRequest request) {
-    UtcDateRange scrapedRange = browserDateTimeConverter.toUtcDateRange(
+    UtcDateRange scrapedRange = browserDateTimeConverter.toUtcDateTimeRange(
         request.getScrapedAtFrom(),
         request.getScrapedAtTo()
     );

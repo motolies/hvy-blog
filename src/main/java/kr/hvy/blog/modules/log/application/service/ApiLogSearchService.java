@@ -52,7 +52,7 @@ public class ApiLogSearchService {
   }
 
   private ApiLogSearchCriteria toCriteria(ApiLogSearchRequest request) {
-    UtcDateRange createdAtRange = browserDateTimeConverter.toUtcDateRange(
+    UtcDateRange createdAtRange = browserDateTimeConverter.toUtcDateTimeRange(
         request.getCreatedAtFrom(),
         request.getCreatedAtTo()
     );

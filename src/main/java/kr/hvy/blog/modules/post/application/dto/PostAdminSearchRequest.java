@@ -1,6 +1,6 @@
 package kr.hvy.blog.modules.post.application.dto;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import kr.hvy.common.application.domain.dto.paging.PageRequest;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -28,6 +28,10 @@ import lombok.experimental.SuperBuilder;
 @SuperBuilder(toBuilder = true)
 public class PostAdminSearchRequest extends PageRequest {
 
+  /** {@link #dateField} 허용값 — 프론트 select 의 value 와 매퍼 XML 의 choose 가 같은 문자열을 쓴다. */
+  public static final String DATE_FIELD_CREATED_AT = "createdAt";
+  public static final String DATE_FIELD_UPDATED_AT = "updatedAt";
+
   private String subject;
   private String categoryId;
   private String tagName;
@@ -38,6 +42,13 @@ public class PostAdminSearchRequest extends PageRequest {
   private Boolean hasDraft;
   private Integer minViewCount;
   private Integer maxViewCount;
-  private LocalDate createdAtFrom;
-  private LocalDate createdAtTo;
+  /** 기간이 걸리는 날짜 — {@code createdAt}(기본) | {@code updatedAt}. 그 밖의 값(null 포함)은 작성일로 취급한다. */
+  private String dateField;
+  /**
+   * 브라우저 로컬 일시 기준 구간 — {@link #dateField} 가 가리키는 날짜에 적용된다. 종료는 <b>포함</b>이며
+   * {@code BrowserDateTimeConverter} 가 클라이언트 존을 적용해 UTC 반개구간으로 바꾼다.
+   * 값은 ISO-8601 로컬 일시(예: {@code 2026-09-02T13:45:30}) — 존 표기가 붙으면 안 된다.
+   */
+  private LocalDateTime dateFrom;
+  private LocalDateTime dateTo;
 }

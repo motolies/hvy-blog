@@ -51,7 +51,7 @@ public class SystemLogSearchService {
   }
 
   private SystemLogSearchCriteria toCriteria(SystemLogSearchRequest request) {
-    UtcDateRange createdAtRange = browserDateTimeConverter.toUtcDateRange(
+    UtcDateRange createdAtRange = browserDateTimeConverter.toUtcDateTimeRange(
         request.getCreatedAtFrom(),
         request.getCreatedAtTo()
     );

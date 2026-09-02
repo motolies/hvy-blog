@@ -81,6 +81,15 @@
       tb_post_draft 는 post_id 가 PK 라 LEFT JOIN 이 행을 늘리지 않는다.
       태그는 EXISTS/서브쿼리로 세어 map 조인이 행을 부풀리지 않게 한다.
     -->
+    <!-- 관리자 글 목록의 기간 기준 컬럼 — updatedAt 만 수정일, 나머지(null 포함)는 작성일.
+         컬럼명을 ${} 로 치환하지 않고 choose 로 고정한다(ORDER BY 와 같은 인젝션 차단 원칙). -->
+    <sql id="adminDateColumn">
+        <choose>
+            <when test='"updatedAt".equals(dateField)'>p.updated_at</when>
+            <otherwise>p.created_at</otherwise>
+        </choose>
+    </sql>
+
     <select id="findByAdminSearchCriteria" resultType="PostAdminSearchResponse">
         SELECT
         p.id                                AS id,
@@ -123,11 +132,11 @@
             <if test='maxViewCount != null'>
                 AND p.view_count &lt;= #{maxViewCount}
             </if>
-            <if test='createdAtFrom != null'>
-                AND p.created_at &gt;= #{createdAtFrom}
+            <if test='dateFrom != null'>
+                AND <include refid="adminDateColumn"/> &gt;= #{dateFrom}
             </if>
-            <if test='createdAtToExclusive != null'>
-                AND p.created_at &lt; #{createdAtToExclusive}
+            <if test='dateToExclusive != null'>
+                AND <include refid="adminDateColumn"/> &lt; #{dateToExclusive}
             </if>
             <if test='tagName != null and tagName != ""'>
                 AND EXISTS (

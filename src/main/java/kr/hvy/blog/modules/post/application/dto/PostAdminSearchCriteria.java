@@ -24,6 +24,8 @@ public class PostAdminSearchCriteria extends PageRequest {
   private Boolean hasDraft;
   private Integer minViewCount;
   private Integer maxViewCount;
-  private Instant createdAtFrom;
-  private Instant createdAtToExclusive;
+  /** 기간이 걸리는 날짜 컬럼 — 매퍼가 {@code updatedAt} 이면 updated_at, 그 밖엔 created_at 을 고른다. */
+  private String dateField;
+  private Instant dateFrom;
+  private Instant dateToExclusive;
 }

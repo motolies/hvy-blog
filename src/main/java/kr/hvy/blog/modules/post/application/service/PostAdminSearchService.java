@@ -35,9 +35,11 @@ public class PostAdminSearchService {
     PostAdminSearchCriteria criteria = toCriteria(request);
 
     // 기본 정렬: 최근 수정 순 — 글 목록의 일차 용도가 "방금 건드린 글 찾기"다
+    // 조인된 tb_post_draft 에도 updated_at 이 있어 테이블 별칭이 필수다(HotDealItemSearchService 와 동일 패턴).
+    // 프론트가 보내는 camelCase 정렬 키는 SELECT 별칭으로 해석되므로 별도 매핑은 필요 없다.
     if (CollectionUtils.isEmpty(criteria.getOrderBy())) {
       criteria.getOrderBy().add(
-          OrderBy.builder().column("updated_at").direction(Direction.DESCENDING).build());
+          OrderBy.builder().column("p.updated_at").direction(Direction.DESCENDING).build());
     }
 
     // PageInterceptor 가 totalCount 를 채운다
@@ -52,8 +54,8 @@ public class PostAdminSearchService {
   }
 
   private PostAdminSearchCriteria toCriteria(PostAdminSearchRequest request) {
-    UtcDateRange createdAtRange = browserDateTimeConverter.toUtcDateRange(
-        request.getCreatedAtFrom(), request.getCreatedAtTo());
+    UtcDateRange dateRange = browserDateTimeConverter.toUtcDateTimeRange(
+        request.getDateFrom(), request.getDateTo());
 
     return PostAdminSearchCriteria.builder()
         .page(request.getPage())
@@ -68,8 +70,10 @@ public class PostAdminSearchService {
         .hasDraft(request.getHasDraft())
         .minViewCount(request.getMinViewCount())
         .maxViewCount(request.getMaxViewCount())
-        .createdAtFrom(createdAtRange.fromInclusive())
-        .createdAtToExclusive(createdAtRange.toExclusive())
+        .dateField(request.getDateField() == null
+            ? PostAdminSearchRequest.DATE_FIELD_CREATED_AT : request.getDateField())
+        .dateFrom(dateRange.fromInclusive())
+        .dateToExclusive(dateRange.toExclusive())
         .build();
   }
 }

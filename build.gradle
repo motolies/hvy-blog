@@ -91,6 +91,8 @@ dependencies {
     // testContainer
     testImplementation 'org.testcontainers:testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    // 주식 수집 모듈: H2 로 검증 불가한 PG 전용 SQL(ON CONFLICT, 부분 유니크 인덱스)을 실제 PG 컨테이너로 검증
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
 
     // H2 Database(나중엔 테스트만 남겨야 함)
     runtimeOnly 'com.h2database:h2'

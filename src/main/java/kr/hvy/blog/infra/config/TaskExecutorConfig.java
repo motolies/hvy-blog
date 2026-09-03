@@ -11,6 +11,7 @@ import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.SchedulingConfigurer;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @Profile("!test")
@@ -33,7 +34,7 @@ public class TaskExecutorConfig extends TaskExecutorConfigurer {
   @Bean(name = "platformTaskScheduler")
   public ThreadPoolTaskScheduler platformTaskScheduler() {
     var ts = new ThreadPoolTaskScheduler();
-    ts.setPoolSize(2); // ShedLock 처리를 위해 증가
+    ts.setPoolSize(4); // 주식 일일 수집(최대 20분)이 1스레드를 장기 점유하므로 2 → 4 로 확대 (나머지 5개 잡은 3스레드로 충분)
     ts.setThreadNamePrefix("sched-"); // 스케줄러 스레드 식별
     ts.setRemoveOnCancelPolicy(true);
     ts.setAwaitTerminationSeconds(30); // ShedLock 해제 대기 시간 증가
@@ -44,6 +45,26 @@ public class TaskExecutorConfig extends TaskExecutorConfigurer {
     });
     ts.initialize(); // 명시적 초기화
     return ts;
+  }
+
+  /**
+   * 주식 백필 전용 실행기.
+   * <p>
+   * 백필은 3시간 이상 실행되므로 platformTaskScheduler(pool 4)를 점유하면 다른 스케줄러가 굶는다.
+   * 관리자 REST 트리거가 여기에 제출하고 즉시 202 로 응답한다. 단일 스레드로 두어 백필끼리도 직렬화한다
+   * (KIS 레이트 리미터를 공유하므로 병렬 실행에 이득이 없다). 중복 실행 차단은 tb_stock_collect_run 의
+   * RUNNING 부분 유니크 인덱스가 담당한다. 백필은 체크포인트로 재개 가능하므로 종료 시 완료를 기다리지 않는다.
+   */
+  @Bean(name = "kisBackfillExecutor", destroyMethod = "shutdown")
+  public ThreadPoolTaskExecutor kisBackfillExecutor() {
+    var executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(1);
+    executor.setMaxPoolSize(1);
+    executor.setQueueCapacity(10);
+    executor.setThreadNamePrefix("kis-backfill-");
+    executor.setWaitForTasksToCompleteOnShutdown(false);
+    executor.initialize();
+    return executor;
   }
 
   // 스케줄러 강제 지정 (여러 스케줄러/Executor가 있을 때 안전)

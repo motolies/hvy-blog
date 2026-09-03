@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
  *       하드코딩하면 dev/prod 중 하나에서 반드시 깨진다 → {@code Environment} 로 해석한다.</li>
  * </ul>
  * {@code ScheduledAnnotationBeanPostProcessor} 인트로스펙션으로 자동 수집하는 방법도 동작하지만
- * Spring 내부 API 의존이라 부트 업그레이드 때 조용히 깨진다. 잡이 5개뿐이므로 명시가 낫다.
+ * Spring 내부 API 의존이라 부트 업그레이드 때 조용히 깨진다. 잡이 9개뿐이므로 명시가 낫다.
  */
 @Slf4j
 @Component
@@ -51,7 +51,16 @@ public class SchedulerCatalog {
       // Claude 만 yml 에 cron 이 없다 — ClaudeTokenRefreshScheduler 의 하드코딩값을 그대로 옮긴다
       new Definition("scheduler.claude.lock-name", "Claude 토큰 갱신",
           null, List.of("0 5 6 * * ?", "0 5 11 * * ?", "0 5 16 * * ?"),
-          "scheduler.claude.enabled", "Asia/Seoul"));
+          "scheduler.claude.enabled", "Asia/Seoul"),
+      // 주식(KIS) 수집 4종 — cron 은 yml, 타임존은 KST. 백필 완료 전까지 enabled:false
+      new Definition("scheduler.stock-master.lock-name", "주식 마스터·휴장일 갱신",
+          "scheduler.stock-master.cron-expression", List.of("0 30 5 * * MON-FRI"), "scheduler.stock-master.enabled", "Asia/Seoul"),
+      new Definition("scheduler.stock-daily.lock-name", "주식 일일 증분 수집",
+          "scheduler.stock-daily.cron-expression", List.of("0 30 18 * * MON-FRI"), "scheduler.stock-daily.enabled", "Asia/Seoul"),
+      new Definition("scheduler.stock-overseas.lock-name", "해외 지표 증분 수집",
+          "scheduler.stock-overseas.cron-expression", List.of("0 30 6 * * TUE-SAT"), "scheduler.stock-overseas.enabled", "Asia/Seoul"),
+      new Definition("scheduler.stock-weekly.lock-name", "주식 주간 수집(기업행사·계수·재무)",
+          "scheduler.stock-weekly.cron-expression", List.of("0 0 3 * * SUN"), "scheduler.stock-weekly.enabled", "Asia/Seoul"));
 
   /** shedlock 의 lock_at 이 예상 주기의 이 배수를 넘도록 갱신되지 않으면 지연으로 본다. */
   private static final int STALE_MULTIPLIER = 3;

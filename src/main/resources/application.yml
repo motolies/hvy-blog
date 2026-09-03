@@ -152,6 +152,70 @@ browser:
   goto-timeout: ${BROWSER_GOTO_TIMEOUT:30}          # gotoOptions.timeout
   selector-timeout: ${BROWSER_SELECTOR_TIMEOUT:25}  # waitForSelector.timeout
 
+# 한국투자증권(KIS) Open API — 실전 계좌 앱키. 시크릿은 env 로만 주입하며 기본값을 두지 않는다
+# 한도: 실전 약 20건/초 → 200ms 창 × 3건 = 15건/초로 운용. 토큰은 24h 유효, 발급은 1분 1회 제한
+kis:
+  base-url: https://openapi.koreainvestment.com:9443
+  app-key: ${KIS_APP_KEY:}
+  app-secret: ${KIS_APP_SECRET:}
+  cust-type: P
+  http:
+    connect-timeout: 5        # 초
+    response-timeout: 15      # 초
+    max-connections: 16
+  rate-limit:
+    window-ms: 200
+    permits: 3
+    recovery-streak: 200      # EGW00201 로 낮춘 한도를 원복하기까지 필요한 연속 성공 수
+  token:
+    refresh-buffer: 10        # 분. 만료 10분 전부터 갱신
+    issue-interval: 60        # 초. 이 안에 재발급 요청이 오면 기존 토큰 유지
+  backfill:
+    start-date: "2015-01-01"
+    window-days: 140          # 일봉 100건 ≈ 캘린더 140일
+    max-windows: 40           # 종목당 최대 윈도우 수 (무한 루프 안전장치)
+    concurrency: 3
+    max-attempts: 5           # 체크포인트 시도 임계, 초과 시 FAILED 확정
+  run:
+    reconcile-all-on-startup: true   # 단일 인스턴스: 기동 시 RUNNING run 전부 FAILED 처리 (체크포인트는 유지되어 재트리거로 재개)
+    stale-after: 6            # 시간. reconcile-all-on-startup=false(다중 인스턴스)일 때만, 이보다 오래된 RUNNING 정리
+  calendar:
+    max-pages: 15             # 휴장일 API 연속조회 페이지 상한 (startDate 지정 시에만 사용, 평소 1페이지)
+  stats:
+    enabled: false            # DAILY 에 P1 통계(공매도·신용·프로그램) 단계 포함 여부 (종목당 3호출 추가)
+  overseas:
+    # "구분:거래소:심볼" — N 지수, X 환율(FHKST03030100), EQ 개별주·ETF(HHDFS76240000, NAS/NYS/AMS). 스펙 §4.4 매핑
+    symbols:
+      - "N::.DJI"
+      - "N::COMP"
+      - "N::SPX"
+      - "N::SOX"
+      - "X::FX@KRW"
+      - "EQ:NAS:SOXX"
+      - "EQ:NAS:SMH"
+      - "EQ:NAS:NVDA"
+      - "EQ:NAS:AMD"
+      - "EQ:NAS:MU"
+      - "EQ:NYS:TSM"
+      - "EQ:NAS:ASML"
+      - "EQ:NAS:TSLA"
+      - "EQ:NAS:MSFT"
+      - "EQ:NAS:GOOGL"
+      - "EQ:NAS:AMZN"
+      - "EQ:NYS:ALB"
+      - "EQ:AMS:LIT"
+      - "EQ:AMS:XBI"
+      - "EQ:NAS:IBB"
+      - "EQ:AMS:ITA"
+      - "EQ:NYS:LMT"
+      - "EQ:NYS:RTX"
+      - "EQ:NYS:NOC"
+      - "EQ:AMS:XLF"
+      - "EQ:AMS:KRE"
+      - "EQ:AMS:XLE"
+      - "EQ:NAS:BOTZ"
+      - "EQ:AMS:ROBO"
+
 # scheduler
 scheduler:
   public-ip:
@@ -168,6 +232,23 @@ scheduler:
     cron-expression: "0 0 0 1 * ?"
   claude:
     lock-name: CLAUDE-REFRESH-TEST
+    enabled: false
+  # 주식(KIS) 수집 — 백필 완료 전까지 enabled: false 로 둔다 (cron 은 zone=Asia/Seoul 로 해석)
+  stock-master:
+    lock-name: STOCK-MASTER-TEST
+    cron-expression: "0 30 5 * * MON-FRI"
+    enabled: false
+  stock-daily:
+    lock-name: STOCK-DAILY-TEST
+    cron-expression: "0 30 18 * * MON-FRI"
+    enabled: false
+  stock-overseas:
+    lock-name: STOCK-OVERSEAS-TEST
+    cron-expression: "0 30 6 * * TUE-SAT"
+    enabled: false
+  stock-weekly:
+    lock-name: STOCK-WEEKLY-TEST
+    cron-expression: "0 0 3 * * SUN"
     enabled: false
 
 cookie:
@@ -213,6 +294,23 @@ scheduler:
   claude:
     lock-name: CLAUDE-REFRESH-PROD
     enabled: true
+  # 주식(KIS) 수집 — 백필 완료 전까지 enabled: false 로 둔다 (cron 은 zone=Asia/Seoul 로 해석)
+  stock-master:
+    lock-name: STOCK-MASTER-PROD
+    cron-expression: "0 30 5 * * MON-FRI"
+    enabled: false
+  stock-daily:
+    lock-name: STOCK-DAILY-PROD
+    cron-expression: "0 30 18 * * MON-FRI"
+    enabled: false
+  stock-overseas:
+    lock-name: STOCK-OVERSEAS-PROD
+    cron-expression: "0 30 6 * * TUE-SAT"
+    enabled: false
+  stock-weekly:
+    lock-name: STOCK-WEEKLY-PROD
+    cron-expression: "0 0 3 * * SUN"
+    enabled: false
 
 cookie:
   same-site: NONE

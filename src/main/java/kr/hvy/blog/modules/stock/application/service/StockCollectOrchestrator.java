@@ -109,7 +109,7 @@ public class StockCollectOrchestrator {
     log.info("### 주식 수집 시작: runId={}, job={} ###", runId, jobType);
     try {
       job.execute(execution);
-      execution.flush();
+      flushOrRecord(execution);
       CollectStatus status = notifier.decideStatus(execution);
       runService.updateMetadata(runId, execution.metadataSnapshot());
       if (execution.isCancelRequested()) {
@@ -122,23 +122,29 @@ public class StockCollectOrchestrator {
         return;
       }
       runService.finish(runId, status, execution.failureSummary());
-      log.info("### 주식 수집 종료: runId={}, job={}, status={}, processed={}, rows={}, failures={} ###",
-          runId, jobType, status, execution.processedCount(), execution.totalRows(), execution.failureCount());
+      log.info("### 주식 수집 종료: runId={}, job={}, status={}, processed={}, rows={}, failures={}, flushFailures={} ###",
+          runId, jobType, status, execution.processedCount(), execution.totalRows(), execution.failureCount(),
+          execution.flushFailures());
       notifier.afterRun(runService.get(runId), execution, status);
     } catch (Exception e) {
       log.error("### 주식 수집 실패: runId={}, job={} ###", runId, jobType, e);
-      safeFlush(execution);
+      flushOrRecord(execution);
       runService.updateMetadata(runId, execution.metadataSnapshot());
       runService.finish(runId, CollectStatus.FAILED, e.toString());
       notifier.afterFailure(runService.get(runId), execution, e);
     }
   }
 
-  private void safeFlush(CollectExecution execution) {
-    try {
-      execution.flush();
-    } catch (Exception e) {
-      log.warn("카운터 flush 실패(무시): {}", e.getMessage());
+  /**
+   * 최종 flush. 실패하면 값이 보존돼 있으므로 즉시 한 번 더 시도하고(순간 끊김 흡수), 그래도 안 되면 단계 실패로 기록해
+   * PARTIAL 판정과 알림에 드러나게 한다. 예외를 던지지 않으므로 잡 본문이 성공한 run 을 FAILED 로 만들지 않는다.
+   */
+  private void flushOrRecord(CollectExecution execution) {
+    if (execution.flush() || execution.flush()) {
+      return;
     }
+    RuntimeException cause = execution.lastFlushError();
+    execution.recordFailure("STEP:FLUSH", "run 카운터 반영 실패: " + cause);
+    log.error("run 카운터 최종 flush 실패: runId={}, flushFailures={}", execution.runId(), execution.flushFailures(), cause);
   }
 }

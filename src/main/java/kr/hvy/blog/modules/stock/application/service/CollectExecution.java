@@ -10,13 +10,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import kr.hvy.blog.modules.stock.application.dto.BackfillRequest;
 import kr.hvy.blog.modules.stock.client.KisCallContext;
+import kr.hvy.blog.modules.stock.client.KisCallStats;
 import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 /**
  * 실행 중인 run 의 컨텍스트. 잡 본문이 행 수·실패·메타데이터를 여기에 쌓고, 주기적으로 run 카운터에 flush 한다.
+ * flush 는 best-effort 라 실패해도 잡을 멈추지 않고 값을 보존해 다음 flush 에서 재시도한다.
  * 여러 가상 스레드에서 동시에 쓰이므로 스레드 안전하게 만든다.
  */
+@Slf4j
 public final class CollectExecution {
 
   /** 취소 여부 DB 조회 최소 간격 — 종목마다 조회하면 3시간 백필에 수천 번이라 캐시한다 */
@@ -34,6 +38,8 @@ public final class CollectExecution {
   private final AtomicLong pendingRows = new AtomicLong();
   private final AtomicLong totalRows = new AtomicLong();
   private final AtomicInteger processed = new AtomicInteger();
+  private final AtomicInteger flushFailures = new AtomicInteger();
+  private volatile RuntimeException lastFlushError;
   private volatile long lastCancelCheck = 0L;
   private volatile boolean canceled = false;
   private volatile boolean canceledByParent = false;
@@ -102,11 +108,48 @@ public final class CollectExecution {
   }
 
   /**
-   * 누적 행 수와 호출 통계를 run 카운터에 반영한다.
+   * 누적 행 수와 호출 통계를 run 카운터에 반영한다 (best-effort).
+   * <p>
+   * 실패해도 예외를 던지지 않고 비워 둔 값을 되돌려, 다음 flush 가 누적값으로 자연 재시도한다. drain·restore 를
+   * 트랜잭션 밖(이 객체)에서 하므로 커밋 시점 실패까지 덮는다. 커밋은 됐는데 응답이 유실된 경우엔 restore 로 소량
+   * 과계상될 수 있으나, 관측용 카운터라 유실보다 과계상(at-least-once)을 택한다.
+   *
+   * @return 반영했거나 반영할 값이 없으면 true, 실패해 값을 보존했으면 false
    */
-  public void flush() {
+  public boolean flush() {
     long rows = pendingRows.getAndSet(0);
-    runService.flushStats(run.getRunId(), rows, callContext.stats());
+    KisCallStats.Snapshot snapshot = callContext.stats().drain();
+    if (rows == 0 && snapshot.isEmpty()) {
+      return true;
+    }
+    try {
+      runService.addCounters(run.getRunId(), rows, snapshot.apiCalls(), snapshot.apiFails());
+      return true;
+    } catch (RuntimeException e) {
+      pendingRows.addAndGet(rows);
+      callContext.stats().restore(snapshot);
+      lastFlushError = e;
+      // 종목마다 flush 하므로 첫 실패만 스택을 남기고 이후는 카운터로만 센다 (요약은 오케스트레이터 종료 로그)
+      if (flushFailures.incrementAndGet() == 1) {
+        log.warn("run 카운터 flush 실패(값 보존, 다음 flush 에서 재시도): runId={}, rows={}, apiCalls={}, apiFails={}",
+            run.getRunId(), rows, snapshot.apiCalls(), snapshot.apiFails(), e);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * flush 가 실패한 횟수 (재시도로 결국 반영됐어도 센다).
+   */
+  public int flushFailures() {
+    return flushFailures.get();
+  }
+
+  /**
+   * 마지막 flush 실패 원인 (없으면 null).
+   */
+  public RuntimeException lastFlushError() {
+    return lastFlushError;
   }
 
   /**
@@ -183,6 +226,15 @@ public final class CollectExecution {
     snapshot.put("processed", processed.get());
     snapshot.put("rows", totalRows.get());
     snapshot.put("failures", failures.size());
+    int flushFailed = flushFailures.get();
+    if (flushFailed > 0) {
+      // 카운터 컬럼이 얼마나 덜 반영됐는지 남긴다 — 메타데이터는 벌크 UPDATE 가 아니라 결함 종류가 달라도 살아남을 수 있다
+      snapshot.put("flushFailures", flushFailed);
+      snapshot.put("lastFlushError", StringUtils.abbreviate(String.valueOf(lastFlushError), 300));
+      snapshot.put("unflushedRows", pendingRows.get());
+      snapshot.put("unflushedApiCalls", callContext.stats().getApiCalls().get());
+      snapshot.put("unflushedApiFails", callContext.stats().getApiFails().get());
+    }
     if (!failures.isEmpty()) {
       List<Map<String, String>> sample = new ArrayList<>();
       for (CollectFailure failure : failures.subList(0, Math.min(FAILURE_SAMPLE, failures.size()))) {

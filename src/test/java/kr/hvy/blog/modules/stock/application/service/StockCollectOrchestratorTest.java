@@ -4,10 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,6 +28,7 @@ import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 /**
  * 오케스트레이터의 run 생명주기 규칙 (Spring 없이 Mockito 로).
@@ -75,7 +80,25 @@ class StockCollectOrchestratorTest {
 
     assertThat(result.async()).isFalse();
     verify(runService).finish(eq(7L), eq(CollectStatus.SUCCESS), isNull());
-    verify(runService).flushStats(eq(7L), eq(10L), any());
+    verify(runService).addCounters(7L, 10L, 0L, 0L);
+  }
+
+  @Test
+  @DisplayName("잡 본문이 성공했는데 최종 flush 만 실패하면 재시도 후 PARTIAL(STEP:FLUSH) 로 닫고 FAILED 로 만들지 않는다")
+  void finalFlushFailureIsPartialNotFailed() {
+    doThrow(new DataAccessResourceFailureException("db down"))
+        .when(runService).addCounters(eq(7L), anyLong(), anyLong(), anyLong());
+    CollectJob job = job(CollectJobType.MASTER, exec -> {
+      exec.addRows(10); // 반영할 값이 있어야 addCounters 가 호출된다
+      exec.targetDone();
+    });
+
+    orchestrator(job, Runnable::run).trigger(CollectJobType.MASTER, null, TriggerType.API);
+
+    verify(runService, times(2)).addCounters(7L, 10L, 0L, 0L); // 최종 flush + 즉시 재시도
+    verify(runService).finish(eq(7L), eq(CollectStatus.PARTIAL), contains("STEP:FLUSH"));
+    verify(runService, never()).finish(eq(7L), eq(CollectStatus.FAILED), any());
+    verify(runService).updateMetadata(eq(7L), argThat(metadata -> metadata.containsKey("flushFailures")));
   }
 
   @Test

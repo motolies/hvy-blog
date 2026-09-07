@@ -6,7 +6,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import kr.hvy.blog.modules.stock.client.KisCallStats;
 import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
 import kr.hvy.blog.modules.stock.domain.code.CollectStatus;
 import kr.hvy.blog.modules.stock.domain.code.TriggerType;
@@ -69,7 +68,10 @@ public class CollectRunService {
   }
 
   /**
-   * 카운터를 누적한다. 백필 루프가 윈도우마다 호출하므로 원자적 UPDATE 로 처리한다.
+   * 카운터를 누적한다. 백필 루프가 종목마다 호출하므로 원자적 UPDATE 로 처리한다.
+   * <p>{@link CollectExecution#flush()} 가 프록시를 거쳐 직접 부르는 유일한 진입점이다. drain/restore 는 호출자가
+   * 트랜잭션 밖에서 책임지고, 여기는 {@code @Modifying} 벌크 UPDATE 에 필요한 트랜잭션 경계만 제공한다.
+   * 0 단락은 방어용이다 (실제 단락은 flush 쪽에서 트랜잭션을 열기 전에 한다).
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void addCounters(Long runId, long rows, long apiCalls, long apiFails) {
@@ -77,14 +79,6 @@ public class CollectRunService {
       return;
     }
     repository.addCounters(runId, rows, apiCalls, apiFails, Instant.now());
-  }
-
-  /**
-   * 호출 통계를 비우면서 run 카운터에 반영한다.
-   */
-  public void flushStats(Long runId, long rows, KisCallStats stats) {
-    KisCallStats.Snapshot snapshot = stats.drain();
-    addCounters(runId, rows, snapshot.apiCalls(), snapshot.apiFails());
   }
 
   /**

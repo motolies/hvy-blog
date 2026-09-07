@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
  *   <li>실패율 &lt; 1%: run 에 PARTIAL 만 기록</li>
  *   <li>1% ~ 5%: #hvy-notify</li>
  *   <li>≥ 5% 또는 잡 자체 실패: #hvy-error + 멘션</li>
+ *   <li>run 카운터 flush 실패: 종목 비율과 무관한 인프라 신호라 비율 미만이어도 최소 #hvy-notify</li>
  * </ul>
  * 메시지에는 종목을 나열하지 않고 대표 오류 3건과 EGW00201 횟수만 넣는다.
  */
@@ -50,7 +51,7 @@ public class CollectNotifier {
     String text = summary(run, execution, status, failures, total);
     if (ratio >= ERROR_RATIO) {
       send(SlackChannel.ERROR, text, true);
-    } else if (ratio >= NOTIFY_RATIO) {
+    } else if (ratio >= NOTIFY_RATIO || execution.flushFailures() > 0) {
       send(SlackChannel.NOTIFY, text, false);
     } else {
       log.info("수집 부분 실패(임계 미만, 알림 생략): {}", text.replace('\n', ' '));
@@ -61,22 +62,32 @@ public class CollectNotifier {
    * 잡 자체가 예외로 죽었을 때.
    */
   public void afterFailure(StockCollectRun run, CollectExecution execution, Exception cause) {
-    String text = String.format("[주식 수집 실패] run=%d %s(%s)%n원인: %s%n처리 %d건, 행 %d, EGW00201 %d회",
+    String text = String.format("[주식 수집 실패] run=%d %s(%s)%n원인: %s%n처리 %d건, 행 %d, EGW00201 %d회%s",
         run.getRunId(), run.getJobType(), run.getJobType().getDesc(),
-        cause.toString(), execution.processedCount(), execution.totalRows(), execution.rateLimitHits());
+        cause.toString(), execution.processedCount(), execution.totalRows(), execution.rateLimitHits(),
+        flushNote(execution));
     send(SlackChannel.ERROR, text, true);
   }
 
   private String summary(StockCollectRun run, CollectExecution execution, CollectStatus status, int failures, int total) {
     StringBuilder sb = new StringBuilder();
-    sb.append(String.format("[주식 수집 %s] run=%d %s(%s)%n실패 %d / %d (%.1f%%), 행 %d, EGW00201 %d회",
+    sb.append(String.format("[주식 수집 %s] run=%d %s(%s)%n실패 %d / %d (%.1f%%), 행 %d, EGW00201 %d회%s",
         status, run.getRunId(), run.getJobType(), run.getJobType().getDesc(),
-        failures, total, failures * 100.0 / total, execution.totalRows(), execution.rateLimitHits()));
+        failures, total, failures * 100.0 / total, execution.totalRows(), execution.rateLimitHits(),
+        flushNote(execution)));
     List<CollectExecution.CollectFailure> sample = execution.failures();
     for (CollectExecution.CollectFailure failure : sample.subList(0, Math.min(3, sample.size()))) {
       sb.append("\n- ").append(failure.target()).append(": ").append(failure.message());
     }
     return sb.toString();
+  }
+
+  /**
+   * 카운터 flush 실패가 있었으면 메시지에 붙일 토막.
+   */
+  private static String flushNote(CollectExecution execution) {
+    int flushFailures = execution.flushFailures();
+    return flushFailures > 0 ? ", flush 실패 " + flushFailures + "회" : "";
   }
 
   /**

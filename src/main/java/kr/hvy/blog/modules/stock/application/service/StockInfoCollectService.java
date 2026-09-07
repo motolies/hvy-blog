@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import kr.hvy.blog.modules.stock.client.KisMarketDataPort;
 import kr.hvy.blog.modules.stock.client.KisValues;
 import kr.hvy.blog.modules.stock.client.dto.KisStockInfoResponse;
@@ -20,8 +21,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * 종목 기본정보(STOCK_INFO 잡, CTPF1002R): 상장일·상장폐지일·K200 을 마스터에 보강한다.
  * <p>
- * 마스터 파일에 없는 종목코드를 tickers 로 지정해 호출하면 상장폐지 종목이 조회되는지 실측할 수 있다.
+ * 마스터 파일에 없는 종목코드를 tickers 로 지정해 호출하면 상장폐지 종목이 조회된다(2026-09-07 실측).
  * 상장폐지일이 있는 미지 종목은 비활성 마스터 행으로 만들어 생존편향을 줄인다(삭제 금지 원칙과 같은 방향).
+ * <p>
+ * 마스터 키는 항상 <b>요청에 쓴 종목코드</b>다. 응답의 {@code pdno} 는 12자 상품번호({@code 00000A082640})라
+ * 키로 쓰면 varchar(10) 을 넘고 기존 행도 못 찾는다. 응답 코드가 요청 코드로 끝나지 않으면 metadata {@code pdnoMismatch} 에 센다.
  */
 @Slf4j
 @Service
@@ -42,6 +46,12 @@ public class StockInfoCollectService implements CollectJob {
     this.transactionTemplate = new TransactionTemplate(transactionManager);
   }
 
+  /**
+   * 요청한 종목코드와 KIS 응답 쌍. 마스터 키는 ticker(요청값)이고 output.productNo() 는 참고용이다.
+   */
+  record Fetched(String ticker, KisStockInfoResponse.Output output) {
+  }
+
   @Override
   public CollectJobType jobType() {
     return CollectJobType.STOCK_INFO;
@@ -50,12 +60,17 @@ public class StockInfoCollectService implements CollectJob {
   @Override
   public void execute(CollectExecution execution) {
     List<String> tickers = targetResolver.resolveTickers(execution.request());
-    List<KisStockInfoResponse.Output> fetched = Collections.synchronizedList(new ArrayList<>());
+    List<Fetched> fetched = Collections.synchronizedList(new ArrayList<>());
+    AtomicInteger mismatch = new AtomicInteger();
     runner.run(execution, tickers, ticker -> {
       try {
         KisStockInfoResponse.Output output = marketDataPort.fetchStockInfo(ticker, execution.context(ticker));
-        if (output != null && StringUtils.isNotBlank(output.ticker())) {
-          fetched.add(output);
+        if (output != null && StringUtils.isNotBlank(output.productNo())) {
+          if (!isSameProduct(ticker, output.productNo())) {
+            mismatch.incrementAndGet();
+            log.warn("주식기본조회 응답 상품번호가 요청 종목코드와 다름: ticker={}, pdno={}", ticker, output.productNo());
+          }
+          fetched.add(new Fetched(ticker, output));
         }
         execution.targetDone();
       } catch (RuntimeException e) {
@@ -67,16 +82,20 @@ public class StockInfoCollectService implements CollectJob {
     execution.putMetadata("targets", tickers.size());
     execution.putMetadata("fetched", fetched.size());
     execution.putMetadata("applied", applied);
+    if (mismatch.get() > 0) {
+      execution.putMetadata("pdnoMismatch", mismatch.get());
+    }
     execution.flush();
   }
 
   /**
    * 조회 결과를 마스터에 반영한다. 기존 종목은 상장일 보강·상장폐지 반영, 미지 종목은 상폐일이 있을 때만 비활성 행으로 생성.
    */
-  int apply(List<KisStockInfoResponse.Output> outputs) {
+  int apply(List<Fetched> outputs) {
     int applied = 0;
-    for (KisStockInfoResponse.Output info : outputs) {
-      String ticker = info.ticker().trim();
+    for (Fetched item : outputs) {
+      String ticker = item.ticker();
+      KisStockInfoResponse.Output info = item.output();
       LocalDate listing = firstDate(info.kospiListingDate(), info.kosdaqListingDate());
       LocalDate delisting = KisValues.date(info.delistingDate());
       StockMaster master = masterRepository.findById(ticker).orElse(null);
@@ -111,6 +130,13 @@ public class StockInfoCollectService implements CollectJob {
       }
     }
     return applied;
+  }
+
+  /**
+   * 응답 상품번호(12자, 예 00000A082640)가 요청 종목코드(082640)로 끝나는지. 다르면 KIS 가 다른 상품을 돌려준 것이다.
+   */
+  private static boolean isSameProduct(String ticker, String productNo) {
+    return productNo.trim().endsWith(ticker);
   }
 
   private static LocalDate firstDate(String a, String b) {

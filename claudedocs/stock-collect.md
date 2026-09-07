@@ -142,7 +142,7 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 | 항목 | 가정 | 확인 방법 |
 |---|---|---|
 | 일봉 소급 한계 | 2015년까지 제공 | `PRICE_BACKFILL` 후 `EXHAUSTED` 체크포인트의 `earliest_loaded` 분포 |
-| 상폐 종목 조회 가능 여부 | CTPF1002R 이 `lstg_abol_dt` 를 준다 | `POST /STOCK_INFO {"tickers":["<상폐코드>"]}` → 비활성 마스터 행 생성 여부 |
+| 상폐 종목 조회 가능 여부 | **확인됨(2026-09-07)** — 동양생명 082640 에 `lstg_abol_dt=20260831` 이 옴. 단, 응답 `pdno` 는 12자 상품번호(`00000A082640`)라 ticker 로 쓰면 varchar(10) 초과 → 요청 종목코드를 키로 쓰도록 수정. `pdno` 가 요청 코드로 끝나지 않으면 run metadata `pdnoMismatch` 에 센다 | `POST /STOCK_INFO {"tickers":["<상폐코드>"]}` → `is_active=false` 행이 6자 ticker 로 생성되는지 |
 | 수정주가 모드 거래량 보정 | 미정 | `ADJUST_FACTOR` run metadata `verification` 의 volume 오차 |
 | 투자자 일별 소급 깊이·페이징 | 기준일 하나로 최근 N일, tr_cont 최대 5페이지 | `INVESTOR_BACKFILL` 체크포인트 `windows`/`earliest_loaded` |
 | 투자자·재무 금액 단위 | 응답 그대로(원 / 억원 추정) | 삼성전자 1건을 HTS 값과 비교 |

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +39,7 @@ class FullBackfillJobTest {
   }
 
   @Test
-  @DisplayName("12단계를 순서대로 상위 runId 를 붙여 동기 실행하고, 실패 단계는 기록한 뒤 계속 간다")
+  @DisplayName("ORDER 의 전 단계를 순서대로 상위 runId 를 붙여 동기 실행하고, 실패 단계는 기록한 뒤 계속 간다")
   @SuppressWarnings("unchecked")
   void runsAllStepsInOrder() {
     when(provider.getObject()).thenReturn(orchestrator);
@@ -63,15 +64,38 @@ class FullBackfillJobTest {
 
     job.execute(exec);
 
-    assertThat(called).containsExactlyElementsOf(FullBackfillJob.ORDER);
-    assertThat(exec.processedCount()).isEqualTo(11); // 409 로 건너뛴 1단계 제외
-    assertThat(exec.failureCount()).isEqualTo(2);    // INVESTOR(409) + FINANCIAL(FAILED)
-    assertThat(exec.totalRows()).isEqualTo(110);
+    List<CollectJobType> order = FullBackfillJob.ORDER;
+    assertThat(called).containsExactlyElementsOf(order);
+    assertThat(exec.processedCount()).isEqualTo(order.size() - 1); // 409 로 건너뛴 1단계 제외
+    assertThat(exec.failureCount()).isEqualTo(2);                   // INVESTOR(409) + FINANCIAL(FAILED)
+    assertThat(exec.totalRows()).isEqualTo((order.size() - 1) * 10L);
     List<Map<String, Object>> steps = (List<Map<String, Object>>) exec.metadataSnapshot().get("steps");
-    assertThat(steps).hasSize(12);
-    assertThat(steps.get(7).get("status")).isEqualTo("SKIPPED_RUNNING");
-    assertThat(steps.get(7).get("runId")).isEqualTo(55L);
-    assertThat(steps.get(8).get("status")).isEqualTo("FAILED");
+    assertThat(steps).hasSize(order.size());
+    int investor = order.indexOf(CollectJobType.INVESTOR_BACKFILL);
+    assertThat(steps.get(investor).get("status")).isEqualTo("SKIPPED_RUNNING");
+    assertThat(steps.get(investor).get("runId")).isEqualTo(55L);
+    assertThat(steps.get(order.indexOf(CollectJobType.FINANCIAL_BACKFILL)).get("status")).isEqualTo("FAILED");
+  }
+
+  @Test
+  @DisplayName("밸류에이션·시장통계 하위 요청은 날짜·지수·리셋을 떼고 종목 필터·force 만 넘긴다 (endDate 가 스냅샷 날짜로 오인되지 않게)")
+  void snapshotSubRequestDropsDates() {
+    BackfillRequest request = new BackfillRequest(LocalDate.of(2015, 1, 1), LocalDate.of(2026, 9, 4), "000000", "099999",
+        List.of("005930"), List.of("0001"), true, true);
+
+    for (CollectJobType type : List.of(CollectJobType.VALUATION, CollectJobType.MARKET_STAT)) {
+      BackfillRequest sub = FullBackfillJob.subRequest(type, request);
+      assertThat(sub.startDate()).isNull();
+      assertThat(sub.endDate()).isNull();
+      assertThat(sub.indexCodes()).isNull();
+      assertThat(sub.resetCheckpoint()).isNull();
+      assertThat(sub.tickers()).containsExactly("005930");
+      assertThat(sub.tickerFrom()).isEqualTo("000000");
+      assertThat(sub.force()).isTrue();
+    }
+    assertThat(FullBackfillJob.subRequest(CollectJobType.PRICE_BACKFILL, request)).isSameAs(request);
+    assertThat(FullBackfillJob.ORDER).containsSubsequence(CollectJobType.INVESTOR_BACKFILL, CollectJobType.VALUATION,
+        CollectJobType.MARKET_STAT, CollectJobType.FINANCIAL_BACKFILL);
   }
 
   @Test
@@ -93,6 +117,6 @@ class FullBackfillJobTest {
     List<Map<String, Object>> steps = (List<Map<String, Object>>) exec.metadataSnapshot().get("steps");
     assertThat(steps.get(0).get("status")).isEqualTo("SUCCESS");
     assertThat(steps.get(1).get("status")).isEqualTo("SUCCESS");
-    assertThat(steps.subList(2, 12)).allSatisfy(s -> assertThat(s.get("status")).isEqualTo("CANCELED"));
+    assertThat(steps.subList(2, FullBackfillJob.ORDER.size())).allSatisfy(s -> assertThat(s.get("status")).isEqualTo("CANCELED"));
   }
 }

@@ -16,7 +16,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
- * 전체 백필(BACKFILL_ALL): 계획 §4.1 의 12단계를 순서대로 하위 run 으로 실행한다.
+ * 전체 백필(BACKFILL_ALL): ORDER 의 단계를 순서대로 하위 run 으로 실행한다 (문서 §4).
  * <p>
  * 하위 잡마다 run 행이 따로 생기므로 단계별 진행·카운터·409 규칙은 그대로다. 한 단계가 실패해도 다음 단계로 넘어가고
  * (체크포인트가 있어 재트리거로 이어받는다), 상위 run 을 취소하면 진행 중인 하위 잡이 종목 경계에서 멈춘 뒤 나머지를 건너뛴다.
@@ -30,7 +30,8 @@ public class FullBackfillJob implements CollectJob {
   static final List<CollectJobType> ORDER = List.of(
       CollectJobType.MASTER, CollectJobType.HOLIDAY, CollectJobType.INDEX_BACKFILL, CollectJobType.PRICE_BACKFILL,
       CollectJobType.STOCK_INFO, CollectJobType.CORP_ACTION, CollectJobType.ADJUST_FACTOR,
-      CollectJobType.INVESTOR_BACKFILL, CollectJobType.FINANCIAL_BACKFILL, CollectJobType.OVERSEAS_BACKFILL,
+      CollectJobType.INVESTOR_BACKFILL, CollectJobType.VALUATION, CollectJobType.MARKET_STAT,
+      CollectJobType.FINANCIAL_BACKFILL, CollectJobType.OVERSEAS_BACKFILL,
       CollectJobType.DERIVED_REFRESH, CollectJobType.VALIDATE);
 
   private final ObjectProvider<StockCollectOrchestrator> orchestratorProvider;
@@ -83,12 +84,15 @@ public class FullBackfillJob implements CollectJob {
 
   /**
    * 하위 잡에 넘길 요청. 휴장일은 백필 시작일과 무관하게 오늘부터 1년치를 받도록 startDate=오늘로 바꾼다.
+   * 밸류에이션·시장통계는 당일 스냅샷이라(endDate 를 스냅샷 날짜로 쓰므로) 날짜·지수·리셋을 떼고 종목 필터와 force 만 넘긴다.
    */
   static BackfillRequest subRequest(CollectJobType type, BackfillRequest request) {
-    if (type == CollectJobType.HOLIDAY) {
-      return new BackfillRequest(MarketClock.today(), null, null, null, null, null, null, null);
-    }
-    return request;
+    return switch (type) {
+      case HOLIDAY -> new BackfillRequest(MarketClock.today(), null, null, null, null, null, null, null);
+      case VALUATION, MARKET_STAT -> new BackfillRequest(null, null, request.tickerFrom(), request.tickerTo(),
+          request.tickers(), null, null, request.force());
+      default -> request;
+    };
   }
 
   private static Map<String, Object> step(CollectJobType type, Long runId, String status, long rows, long apiCalls,

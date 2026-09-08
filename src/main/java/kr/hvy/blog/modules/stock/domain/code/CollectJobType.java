@@ -12,7 +12,7 @@ import lombok.Getter;
 @Getter
 @AllArgsConstructor
 public enum CollectJobType implements EnumCode<String> {
-  BACKFILL_ALL("BACKFILL_ALL", "전체 백필 (12단계 순차)", true),
+  BACKFILL_ALL("BACKFILL_ALL", "전체 백필 (순차 하위 run)", true),
   MASTER("MASTER", "종목 마스터 갱신", false),
   HOLIDAY("HOLIDAY", "휴장일 수집", false),
   INDEX_BACKFILL("INDEX_BACKFILL", "지수 일봉 백필", true),

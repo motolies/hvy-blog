@@ -39,11 +39,11 @@
 요청 본문 `BackfillRequest`(모두 선택): `startDate`, `endDate`, `tickerFrom`, `tickerTo`, `tickers[]`, `indexCodes[]`, `resetCheckpoint`, `force`.
 응답 코드: 같은 잡이 RUNNING 이면 **409**(`runningRunId` 포함), 형식·전제조건 오류는 **400**. 둘 다 Slack 을 울리지 않는다.
 
-잡 유형(`CollectJobType`): `BACKFILL_ALL`(아래 12단계 순차), `MASTER`, `HOLIDAY`, `INDEX_BACKFILL`, `PRICE_BACKFILL`, `STOCK_INFO`, `VALUATION`, `MARKET_STAT`, `CORP_ACTION`, `ADJUST_FACTOR`, `INVESTOR_BACKFILL`, `FINANCIAL_BACKFILL`, `OVERSEAS_BACKFILL`, `DERIVED_REFRESH`, `VALIDATE`, `DAILY`, `WEEKLY`, `OVERSEAS_DAILY`, `RELOAD`.
+잡 유형(`CollectJobType`): `BACKFILL_ALL`(아래 §4 단계 순차), `MASTER`, `HOLIDAY`, `INDEX_BACKFILL`, `PRICE_BACKFILL`, `STOCK_INFO`, `VALUATION`, `MARKET_STAT`, `CORP_ACTION`, `ADJUST_FACTOR`, `INVESTOR_BACKFILL`, `FINANCIAL_BACKFILL`, `OVERSEAS_BACKFILL`, `DERIVED_REFRESH`, `VALIDATE`, `DAILY`, `WEEKLY`, `OVERSEAS_DAILY`, `RELOAD`.
 
 ## 4. 최초 백필 순서 (장 마감 후 19:00 KST 이후 권장)
 
-한 번에 돌리려면 `BACKFILL_ALL` 하나면 된다. 아래 12단계를 이 순서로 하위 run 으로 실행하며(상위 run 의 `metadata_json.steps[]` 에 단계별 runId·상태·행 수),
+한 번에 돌리려면 `BACKFILL_ALL` 하나면 된다. 아래 14단계를 이 순서로 하위 run 으로 실행하며(상위 run 의 `metadata_json.steps[]` 에 단계별 runId·상태·행 수),
 한 단계가 실패해도 다음으로 넘어가고 재트리거하면 체크포인트부터 이어받는다. 상위 run 을 cancel 하면 진행 중인 하위 잡이 종목 경계에서 멈춘다.
 
 ```bash
@@ -63,6 +63,8 @@ curl -X POST $B/STOCK_INFO                               # 상장일·상폐일 
 curl -X POST $B/CORP_ACTION                              # 예탁원 7종 2015~ (전 종목 기간 조회라 호출 수 적음)
 curl -X POST $B/ADJUST_FACTOR                            # 계수 산출 → MV → KIS 수정주가 표본 20종목 대조
 curl -X POST $B/INVESTOR_BACKFILL                        # 소급 깊이 실측 (EXHAUSTED 분포 확인)
+curl -X POST $B/VALUATION                                # 오늘 스냅샷(시총·PER·PBR). 당일만 제공되므로 DAILY 로 누적 (BACKFILL_ALL 은 날짜 필터를 떼고 넘김)
+curl -X POST $B/MARKET_STAT                              # 공매도·신용·프로그램 최근 window-days
 curl -X POST $B/FINANCIAL_BACKFILL                       # 종목당 6호출
 curl -X POST $B/OVERSEAS_BACKFILL                        # kis.overseas.symbols
 curl -X POST $B/DERIVED_REFRESH                          # MV 4개 갱신 (소요 시간 3분 룰 실측)
@@ -78,7 +80,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | 스케줄러 | cron | 잡 | lockAtMostFor |
 |---|---|---|---|
 | `StockMasterScheduler` | 평일 05:30 | MASTER → HOLIDAY(1페이지) | 15m |
-| `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → STATS(`kis.stats.enabled`) → CA_HINT → VALIDATE → DERIVED | 40m |
+| `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED (총 ≈19분) | 40m |
 | `StockOverseasScheduler` | 화~토 06:30 | OVERSEAS_DAILY | 15m |
 | `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → ADJUST_FACTOR → FINANCIAL(정정 감지) | 2h |
 
@@ -181,5 +183,5 @@ H2 로는 `ON CONFLICT`·부분 유니크·MV 가 검증되지 않으므로 PG �
 - 예탁원 `stock_split` API 는 없고 `rev_split`(액면교체)이 분할·병합을 모두 담는다.
 - 투자자 일별은 FHPTJ04160001 하나로 백필·증분을 모두 처리(FHKST01010900 미사용).
 - 재무는 핵심 3종(손익·대차·재무비율)만 호출하고 성장성·수익성·안정성은 미수집(호출 수 절감, 필요 시 `FinancialKind` 추가).
-- P1 통계는 구현했으나 DAILY 에서는 `kis.stats.enabled=false` 기본(깊은 소급 미지원).
+- P1 통계는 깊은 소급이 없어 BACKFILL_ALL 에서는 최근 창 1회, DAILY 에서 매일 누적(`kis.stats.enabled` 기본 true, 2026-09-08 부터).
 - 실시간 웹소켓·Python 분석 환경은 범위 밖(계획대로). `KisMarketDataPort` 가 확장 경계.

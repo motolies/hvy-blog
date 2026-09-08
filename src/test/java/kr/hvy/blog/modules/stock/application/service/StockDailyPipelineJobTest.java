@@ -87,12 +87,13 @@ class StockDailyPipelineJobTest {
     List<Map<String, Object>> steps = (List<Map<String, Object>>) exec.metadataSnapshot().get("steps");
     assertThat(steps).extracting(s -> s.get("step")).containsExactly("INDEX", "PRICE", "VALUATION", "INVESTOR", "STATS", "CA_HINT", "VALIDATE", "DERIVED");
     assertThat(steps.get(1).get("status")).isEqualTo("FAILED");
-    assertThat(steps.get(4).get("status")).isEqualTo("SKIPPED"); // kis.stats.enabled=false
+    assertThat(steps.get(4).get("status")).isEqualTo("OK"); // kis.stats.enabled 기본 true
     assertThat(steps.get(7).get("status")).isEqualTo("SKIPPED");
   }
 
   @Test
-  @DisplayName("정상 경로에서는 7단계가 모두 OK 이고 힌트가 기업행사 후보로 넘어간다")
+  @DisplayName("정상 경로에서는 8단계가 모두 OK 이고 힌트가 기업행사 후보로 넘어간다 (통계는 기본 on, 끄면 SKIPPED)")
+  @SuppressWarnings("unchecked")
   void happyPath() {
     when(calendar.isTradingDay(any(LocalDate.class))).thenReturn(true);
     CollectExecution exec = execution(BackfillRequest.empty());
@@ -101,12 +102,14 @@ class StockDailyPipelineJobTest {
 
     verify(derived).refreshAll(exec);
     verify(corpAction).recordChartHints(anyList());
-    verify(stats, never()).collectRecent(any(), anyList());
+    verify(stats).collectRecent(eq(exec), anyList());
     assertThat(exec.failureCount()).isZero();
 
-    properties.getStats().setEnabled(true);
-    CollectExecution withStats = execution(BackfillRequest.empty());
-    job.execute(withStats);
-    verify(stats).collectRecent(eq(withStats), anyList());
+    properties.getStats().setEnabled(false);
+    CollectExecution withoutStats = execution(BackfillRequest.empty());
+    job.execute(withoutStats);
+    verify(stats, never()).collectRecent(eq(withoutStats), anyList());
+    List<Map<String, Object>> steps = (List<Map<String, Object>>) withoutStats.metadataSnapshot().get("steps");
+    assertThat(steps.get(4).get("status")).isEqualTo("SKIPPED");
   }
 }

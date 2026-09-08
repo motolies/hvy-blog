@@ -153,7 +153,7 @@ public class KisProperties {
   public static class Stats {
 
     /** DAILY 파이프라인에서 P1 통계(공매도·신용·프로그램) 단계를 돌릴지. 종목당 3호출이 추가된다 */
-    private boolean enabled = false;
+    private boolean enabled = true;
   }
 
   @Data

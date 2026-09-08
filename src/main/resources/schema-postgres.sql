@@ -1339,6 +1339,7 @@ CREATE INDEX IF NOT EXISTS idx_stock_kis_api_failure_occurred
 -- ---------------------------------------------
 -- 누적 수정계수: 이벤트 보유 종목만 펼친다 (전 종목 대비 약 1/200 크기).
 -- 효력일(effective_date) 이전 거래일에 그 이후의 모든 이벤트 계수를 곱한다. EXP(SUM(LN(x))) = 곱.
+-- 효력일이 KST 오늘 이후인 이벤트(예정 권리락)는 제외한다. DAILY 가 매일 REFRESH 하므로 효력일 당일 자동 반영된다.
 -- ---------------------------------------------
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stock_adjust_factor AS
 SELECT p.ticker,
@@ -1346,8 +1347,11 @@ SELECT p.ticker,
        COALESCE(EXP(SUM(LN(x.price_factor))), 1.0)::double precision  AS cum_price_factor,
        COALESCE(EXP(SUM(LN(x.volume_factor))), 1.0)::double precision AS cum_volume_factor
 FROM tb_stock_daily_price p
-         JOIN (SELECT DISTINCT ticker FROM tb_stock_adjust_event) t ON t.ticker = p.ticker
-         LEFT JOIN tb_stock_adjust_event x ON x.ticker = p.ticker AND x.effective_date > p.trade_date
+         JOIN (SELECT DISTINCT ticker FROM tb_stock_adjust_event
+               WHERE effective_date <= (now() AT TIME ZONE 'Asia/Seoul')::date) t ON t.ticker = p.ticker
+         LEFT JOIN tb_stock_adjust_event x ON x.ticker = p.ticker
+                                           AND x.effective_date > p.trade_date
+                                           AND x.effective_date <= (now() AT TIME ZONE 'Asia/Seoul')::date
 GROUP BY p.ticker, p.trade_date
 WITH DATA;
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY 에 유니크 인덱스가 필요하다

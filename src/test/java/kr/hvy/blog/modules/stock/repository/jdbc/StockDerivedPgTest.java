@@ -13,6 +13,7 @@ import kr.hvy.blog.modules.stock.domain.model.AdjustEventRow;
 import kr.hvy.blog.modules.stock.domain.model.CorporateActionRow;
 import kr.hvy.blog.modules.stock.domain.model.DailyPriceRow;
 import kr.hvy.blog.modules.stock.domain.model.InvestorDailyRow;
+import kr.hvy.blog.modules.stock.domain.model.MarketClock;
 import kr.hvy.blog.modules.stock.domain.model.ValuationRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -100,6 +101,47 @@ class StockDerivedPgTest {
     Boolean verified = jdbc.queryForObject("SELECT verified FROM tb_stock_adjust_event WHERE ticker = ? AND action_type = 'SPLIT'", Boolean.class, TICKER);
     assertThat(verified).isFalse();
     assertThat(eventWriter.tickersWithEvents(10)).containsExactly(TICKER);
+  }
+
+  @Test
+  @DisplayName("수정계수 MV: 효력일이 오늘(KST) 이후인 이벤트는 계수에 들어가지 않고, 효력일이 지난 이벤트만 곱해진다")
+  void futureEventIsIgnored() {
+    LocalDate today = LocalDate.now(MarketClock.KST);
+    StockDailyPriceWriter priceWriter = new StockDailyPriceWriter(support);
+    List<DailyPriceRow> prices = new ArrayList<>();
+    for (int i = 10; i >= 1; i--) {
+      prices.add(flatPrice(TICKER, today.minusDays(i)));
+      prices.add(flatPrice("000660", today.minusDays(i)));
+    }
+    priceWriter.upsert(prices);
+
+    AdjustEventWriter eventWriter = new AdjustEventWriter(jdbc, support);
+    eventWriter.upsert(List.of(
+        new AdjustEventRow(TICKER, today.minusDays(3), CorporateActionType.SPLIT, new BigDecimal("0.5"), new BigDecimal("2")),      // 효력 지남
+        new AdjustEventRow(TICKER, today.plusDays(10), CorporateActionType.BONUS_ISSUE, new BigDecimal("0.5"), new BigDecimal("2")), // 예정
+        new AdjustEventRow("000660", today.plusDays(5), CorporateActionType.BONUS_ISSUE, new BigDecimal("0.5"), new BigDecimal("2")))); // 예정만
+    DerivedViewRefresher refresher = new DerivedViewRefresher(jdbc);
+    refresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, true);
+
+    List<DerivedViewRefresher.AdjustedClose> rows = refresher.adjustedCloses(TICKER, today.minusDays(10), today.minusDays(1));
+    assertThat(rows).hasSize(10);
+    for (DerivedViewRefresher.AdjustedClose row : rows) {
+      double expected = row.tradeDate().isBefore(today.minusDays(3)) ? 50d : 100d; // 미래 무상증자 0.5 는 곱해지지 않는다
+      assertThat(row.adjClose().doubleValue()).as("%s", row.tradeDate()).isCloseTo(expected, within(1e-6));
+    }
+    // 예정 이벤트만 있는 종목은 MV 에 없고 뷰에서는 원주가 그대로
+    Integer mvOther = jdbc.queryForObject("SELECT COUNT(*) FROM mv_stock_adjust_factor WHERE ticker = '000660'", Integer.class);
+    assertThat(mvOther).isZero();
+    assertThat(refresher.adjustedCloses("000660", today.minusDays(1), today.minusDays(1)).get(0).adjClose().doubleValue())
+        .isCloseTo(100d, within(1e-6));
+  }
+
+  /**
+   * 종가 100·거래량 100 인 일봉 1행.
+   */
+  private static DailyPriceRow flatPrice(String ticker, LocalDate date) {
+    BigDecimal close = new BigDecimal("100");
+    return new DailyPriceRow(ticker, date, close, close, close, close, 100L, 1L, null, null, null, null, null, "N", null);
   }
 
   @Test

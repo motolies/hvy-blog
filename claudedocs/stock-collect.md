@@ -124,6 +124,8 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 
 검증: `ADJUST_FACTOR` 잡이 이벤트 보유 종목 20개(또는 `tickers`)를 KIS 수정주가(`FID_ORG_ADJ_PRC=0`) 최근 3윈도우와 대조해 상대오차 ≤ 0.5% 면 `verified=true`. 거래량 오차는 run 메타데이터(`verification`)에 남는다 → **KIS 가 거래량도 보정하는지의 실측값**.
 
+효력일 상한(2026-09-08): 예탁원 일정은 오늘 +90일까지 들어오므로 `mv_stock_adjust_factor` 는 **효력일 ≤ 오늘(KST)** 인 이벤트만 곱한다. DAILY 가 매일 REFRESH 하므로 효력일 당일 자동 반영된다. 비율이 사전에 확정되는 분할·병합·무상증자·감자는 미리 계수를 만들어 두고, **유상증자만 권리락 전일 종가가 필요해 효력일이 지난 뒤(WEEKLY ADJUST_FACTOR)에 산출**한다 → 유상증자는 효력일~다음 일요일 최대 6일 미반영(run 메타 `eventsDeferred`).
+
 ## 8. Slack 임계 (`CollectNotifier`)
 
 - 종목 단위 실패율 < 1%: run `PARTIAL` 만 기록 / 1~5%: `#hvy-notify` / ≥ 5% 또는 잡 자체 실패: `#hvy-error` + 멘션. 메시지에는 대표 오류 3건과 EGW00201 횟수만.
@@ -136,6 +138,12 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 - 체크포인트 FAILED 5회 초과 → 건너뜀. 되돌리려면 `{"tickers":[…],"resetCheckpoint":true}`.
 - KIS 장애로 하루 결손: 다음 날 DAILY 가 최근 100건 윈도우를 재수집하므로 자동 복구. 2일 이상은 reload.
 - MV 미적용 상태(psql 전): `ADJUST_FACTOR`·`DERIVED_REFRESH` 는 경고만 남기고 건너뛴다.
+- MV 정의를 바꿨을 때(파생 재구축): `CREATE MATERIALIZED VIEW IF NOT EXISTS` 는 기존 MV 를 바꾸지 못하므로 의존 역순 DROP 후 재생성한다. 한 트랜잭션이라 소비자가 뷰 부재를 보지 않지만 수 분 락이 걸리므로 DAILY 18:30 창 밖에서 실행한다.
+  ```bash
+  cat src/main/resources/db/stock-derived-rebuild.sql src/main/resources/db/stock-derived.sql | psql -1 "$DATABASE_URL"
+  curl -X POST $B/ADJUST_FACTOR    # 계수 재산출·대조. 최신 거래일 adj_close == raw_close 확인
+  ```
+- 2026-09-08 효력일 상한 도입 이전에 적재된 **미래 유상증자 계수 행**은 효력일에 잘못된 계수(최근 종가 기준)로 켜질 수 있어 1회 수기 삭제한다(다른 유형의 미래 행은 MV 술어로 무해): `DELETE FROM tb_stock_adjust_event WHERE action_type='RIGHTS_ISSUE' AND effective_date > (now() AT TIME ZONE 'Asia/Seoul')::date`.
 
 ## 10. 실측이 필요한 항목 (실전 키 필요, 코드가 가정한 값)
 

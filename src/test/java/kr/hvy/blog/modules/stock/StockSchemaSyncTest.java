@@ -24,6 +24,9 @@ class StockSchemaSyncTest {
   private static final List<String> SOURCES = List.of(
       "db/stock-schema.sql", "db/stock-derived.sql", "db/stock-seed.sql");
   private static final Pattern CREATE_TABLE = Pattern.compile("^CREATE TABLE IF NOT EXISTS (\\w+)");
+  private static final String REBUILD = "db/stock-derived-rebuild.sql";
+  private static final Pattern CREATE_MV = Pattern.compile("^CREATE MATERIALIZED VIEW IF NOT EXISTS (\\w+)");
+  private static final Pattern CREATE_VIEW = Pattern.compile("^CREATE OR REPLACE VIEW (\\w+)");
 
   @Test
   @DisplayName("마커 사이 내용이 원본 세 파일과 줄 단위로 같다")
@@ -73,6 +76,27 @@ class StockSchemaSyncTest {
           .as("%s 의 DROP 이 마커 앞 DROP 블록에 없다", table)
           .contains("DROP TABLE IF EXISTS " + table + " CASCADE;");
     }
+  }
+
+  @Test
+  @DisplayName("파생 재구축 스크립트가 stock-derived.sql 의 MV·뷰 전부를 DROP 한다 (IF NOT EXISTS 는 기존 MV 를 못 바꾼다)")
+  void rebuildScriptDropsEveryDerivedObject() throws IOException {
+    List<String> rebuild = lines(REBUILD);
+    int objects = 0;
+    for (String line : lines("db/stock-derived.sql")) {
+      Matcher mv = CREATE_MV.matcher(line);
+      Matcher view = CREATE_VIEW.matcher(line);
+      if (mv.find()) {
+        objects++;
+        assertThat(rebuild).as("%s 의 DROP 이 %s 에 없다", mv.group(1), REBUILD)
+            .contains("DROP MATERIALIZED VIEW IF EXISTS " + mv.group(1) + ";");
+      } else if (view.find()) {
+        objects++;
+        assertThat(rebuild).as("%s 의 DROP 이 %s 에 없다", view.group(1), REBUILD)
+            .contains("DROP VIEW IF EXISTS " + view.group(1) + ";");
+      }
+    }
+    assertThat(objects).isEqualTo(7);
   }
 
   /**

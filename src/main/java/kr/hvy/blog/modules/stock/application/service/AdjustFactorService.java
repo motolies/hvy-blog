@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
  * <p>
  * 원주가 정본 + 계수 분리 모델의 핵심. 계수 단위 오해(배정율 %/주수)는 대조에서 오차로 드러나므로
  * verified=false 인 이벤트가 남아 있으면 소비자가 알 수 있게 run 메타데이터에 남긴다.
+ * 효력일이 미래인 이벤트는 MV 술어(효력일 <= KST 오늘)가 걸러 현재 시세에 미리 적용되지 않는다.
  */
 @Slf4j
 @Service
@@ -60,9 +61,10 @@ public class AdjustFactorService implements CollectJob {
 
   @Override
   public void execute(CollectExecution execution) {
-    int events = deriveEvents();
-    execution.addRows(events);
-    execution.putMetadata("eventsUpserted", events);
+    DeriveResult derived = deriveEvents(MarketClock.today());
+    execution.addRows(derived.upserted());
+    execution.putMetadata("eventsUpserted", derived.upserted());
+    execution.putMetadata("eventsDeferred", derived.deferred());
     execution.putMetadata("eventsTotal", eventWriter.count());
 
     boolean refreshed = refreshFactorView();
@@ -99,10 +101,15 @@ public class AdjustFactorService implements CollectJob {
     execution.flush();
   }
 
+  /** 계수 이벤트 산출 결과: upsert 된 행, 보류(미래 유상증자), 해석 불가로 건너뛴 행 */
+  public record DeriveResult(int upserted, int deferred, int skipped) {
+  }
+
   /**
    * KSD 기업행사 중 가격 보정 유형을 계수 이벤트로 바꿔 upsert 한다.
+   * 비율이 사전에 확정되는 유형은 효력일이 미래여도 미리 만들고(MV 술어가 효력일에 활성화), 유상증자만 asOf 이후 효력분을 보류한다.
    */
-  public int deriveEvents() {
+  public DeriveResult deriveEvents(LocalDate asOf) {
     EnumSet<CorporateActionType> types = EnumSet.noneOf(CorporateActionType.class);
     for (CorporateActionType type : CorporateActionType.values()) {
       if (type.isAdjustsPrice()) {
@@ -112,7 +119,12 @@ public class AdjustFactorService implements CollectJob {
     List<CorporateActionRow> actions = actionWriter.find(CorporateActionSource.KSD, types);
     List<AdjustEventRow> events = new ArrayList<>();
     int skipped = 0;
+    int deferred = 0;
     for (CorporateActionRow action : actions) {
+      if (!derivable(action, asOf)) {
+        deferred++;
+        continue;
+      }
       BigDecimal previousClose = action.actionType() == CorporateActionType.RIGHTS_ISSUE
           ? previousClose(action.ticker(), action.effectiveDate()) : null;
       Optional<AdjustEventRow> event = AdjustFactorCalculator.toEvent(action, previousClose);
@@ -123,8 +135,17 @@ public class AdjustFactorService implements CollectJob {
       }
     }
     int upserted = eventWriter.upsert(events);
-    log.info("수정계수 이벤트 산출: actions={}, events={}, upserted={}, skipped={}", actions.size(), events.size(), upserted, skipped);
-    return upserted;
+    log.info("수정계수 이벤트 산출: actions={}, events={}, upserted={}, deferred={}, skipped={}",
+        actions.size(), events.size(), upserted, deferred, skipped);
+    return new DeriveResult(upserted, deferred, skipped);
+  }
+
+  /**
+   * 유상증자는 권리락 전일 종가가 확정된 뒤(효력일 <= asOf)에만 계수를 만든다. 효력 전에는 previousClose 가 최근 종가를 집어 계수가 틀린다.
+   * 비율이 사전에 알려진 나머지 유형은 미리 만들고 mv_stock_adjust_factor 의 효력일 술어가 당일에 활성화한다.
+   */
+  static boolean derivable(CorporateActionRow action, LocalDate asOf) {
+    return action.actionType() != CorporateActionType.RIGHTS_ISSUE || !action.effectiveDate().isAfter(asOf);
   }
 
   /**

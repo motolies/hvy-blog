@@ -50,7 +50,7 @@ class StockDerivedPgTest {
   void setUp() {
     jdbc = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
     support = new BatchUpsertSupport(jdbc);
-    jdbc.update("TRUNCATE tb_stock_daily_price, tb_stock_adjust_event, tb_stock_corporate_action, tb_stock_investor_daily, tb_stock_valuation_daily");
+    jdbc.update("TRUNCATE tb_stock_daily_price, tb_stock_adjust_event, tb_stock_corporate_action, tb_stock_investor_daily, tb_stock_valuation_daily, tb_stock_master");
   }
 
   @Test
@@ -162,6 +162,13 @@ class StockDerivedPgTest {
     String jsonType = jdbc.queryForObject(
         "SELECT raw_json->>'sht_cd' FROM tb_stock_corporate_action WHERE source = 'KSD'", String.class);
     assertThat(jsonType).isEqualTo("005930");
+
+    // 기업행사에만 있고 마스터에 없는 종목(상폐 후보)만 돌려준다
+    jdbc.update("INSERT INTO tb_stock_master (ticker, stock_name, market_type, security_group, is_active, is_suspended, created_at, updated_at) "
+        + "VALUES ('005930','삼성전자','KOSPI','ST',TRUE,FALSE,NOW(),NOW())");
+    writer.upsert(List.of(new CorporateActionRow("003410", SPLIT_DATE, CorporateActionType.BONUS_ISSUE, null,
+        new BigDecimal("0.1"), null, CorporateActionSource.KSD, "{}")));
+    assertThat(writer.tickersMissingFromMaster()).containsExactly("003410");
   }
 
   @Test

@@ -123,6 +123,21 @@ class StockInfoCollectServiceTest {
     verify(masterRepository, never()).save(any());
   }
 
+  @Test
+  @DisplayName("collect 는 카운트만 돌려주고 run 메타데이터 키(targets 등)는 쓰지 않는다 — WEEKLY 단계가 자기 키로 기록한다")
+  void collect_returnsCountsWithoutWritingMetadata() {
+    when(masterRepository.findById("082640")).thenReturn(Optional.empty());
+    when(marketDataPort.fetchStockInfo(eq("082640"), any()))
+        .thenReturn(output("00000A082640", "KR7082640004", "20091008", "", "20260831"));
+    CollectExecution execution = execution(List.of("082640"));
+
+    StockInfoCollectService.InfoResult result = service.collect(execution, List.of("082640"));
+
+    assertThat(result).isEqualTo(new StockInfoCollectService.InfoResult(1, 1, 1, 0));
+    assertThat(execution.metadataSnapshot()).doesNotContainKeys("targets", "fetched", "applied");
+    assertThat(execution.totalRows()).isEqualTo(1);
+  }
+
   private CollectExecution execution(List<String> tickers) {
     StockCollectRun run = StockCollectRun.builder().runId(7L).jobType(CollectJobType.STOCK_INFO)
         .triggerType(TriggerType.API).build();

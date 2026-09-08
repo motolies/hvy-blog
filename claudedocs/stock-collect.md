@@ -82,7 +82,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | `StockMasterScheduler` | 평일 05:30 | MASTER → HOLIDAY(1페이지) | 15m |
 | `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED (총 ≈19분) | 40m |
 | `StockOverseasScheduler` | 화~토 06:30 | OVERSEAS_DAILY | 15m |
-| `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → ADJUST_FACTOR → FINANCIAL(정정 감지) | 2h |
+| `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → STOCK_INFO(기업행사에만 있는 종목을 조회해 상폐일 있는 것만 비활성 마스터 행으로, 메타 `stockInfoCandidates`/`stockInfoApplied`) → ADJUST_FACTOR → FINANCIAL(정정 감지) | 2h |
 
 - DAILY 는 휴장일이면 run 만 남기고 끝난다(`force:true` 로 무시). PRICE 단계 실패 시 DERIVED 만 건너뛴다. 단계별 상태·소요는 run `metadata_json.steps[]`.
 - `/admin` 스케줄러 카탈로그(`SchedulerCatalog`)에 4개가 등록되어 있다.

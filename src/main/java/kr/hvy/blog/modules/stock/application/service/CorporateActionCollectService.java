@@ -5,6 +5,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import kr.hvy.blog.modules.stock.application.dto.BackfillRequest;
 import kr.hvy.blog.modules.stock.client.KisMarketDataPort;
 import kr.hvy.blog.modules.stock.client.KisProperties;
 import kr.hvy.blog.modules.stock.client.KsdInfoKind;
@@ -55,6 +56,14 @@ public class CorporateActionCollectService implements CollectJob {
   public void collectRecent(CollectExecution execution) {
     LocalDate today = MarketClock.today();
     collect(execution, today.minusDays(FUTURE_DAYS), today.plusDays(FUTURE_DAYS), null);
+  }
+
+  /**
+   * 기업행사에는 있지만 마스터에 없는 종목코드. STOCK_INFO 로 조회하면 상폐일이 있는 것만 비활성 마스터 행이 된다(생존편향 보강).
+   * 수동 REST 가 거부하는 형식(6자 영숫자 밖)은 자동 경로에서도 보내지 않는다.
+   */
+  public List<String> tickersMissingFromMaster() {
+    return actionWriter.tickersMissingFromMaster().stream().filter(BackfillRequest::isTicker).toList();
   }
 
   /**

@@ -79,6 +79,15 @@ public class CorporateActionWriter {
   }
 
   /**
+   * 기업행사에는 있지만 마스터에 없는 종목코드 (상폐·KONEX·비상장 혼재). 상폐 이력 보강(STOCK_INFO) 후보다.
+   */
+  public List<String> tickersMissingFromMaster() {
+    return jdbcTemplate.queryForList(
+        "SELECT DISTINCT c.ticker FROM tb_stock_corporate_action c "
+            + "LEFT JOIN tb_stock_master m ON m.ticker = c.ticker WHERE m.ticker IS NULL ORDER BY c.ticker", String.class);
+  }
+
+  /**
    * 종목의 기업행사 전체 (검증·조회용).
    */
   public List<CorporateActionRow> findByTicker(String ticker) {

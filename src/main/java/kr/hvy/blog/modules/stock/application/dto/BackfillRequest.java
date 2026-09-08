@@ -44,6 +44,13 @@ public record BackfillRequest(
   /**
    * 종목 목록만 담은 요청.
    */
+  /**
+   * 종목코드 형식(6자 영숫자). REST 검증과 자동 경로(주간 상폐 보강)가 같은 규칙을 쓴다.
+   */
+  public static boolean isTicker(String ticker) {
+    return ticker != null && TICKER.matcher(ticker).matches();
+  }
+
   public static BackfillRequest forTickers(List<String> tickers) {
     return new BackfillRequest(null, null, null, null, tickers, null, null, null);
   }

@@ -57,9 +57,26 @@ public class StockInfoCollectService implements CollectJob {
     return CollectJobType.STOCK_INFO;
   }
 
+  /** 조회·반영 결과 (WEEKLY 상폐 보강 단계가 메타데이터 키를 따로 쓰기 위해 돌려준다) */
+  public record InfoResult(int targets, int fetched, int applied, int pdnoMismatch) {
+  }
+
   @Override
   public void execute(CollectExecution execution) {
-    List<String> tickers = targetResolver.resolveTickers(execution.request());
+    InfoResult result = collect(execution, targetResolver.resolveTickers(execution.request()));
+    execution.putMetadata("targets", result.targets());
+    execution.putMetadata("fetched", result.fetched());
+    execution.putMetadata("applied", result.applied());
+    if (result.pdnoMismatch() > 0) {
+      execution.putMetadata("pdnoMismatch", result.pdnoMismatch());
+    }
+    execution.flush();
+  }
+
+  /**
+   * 종목 목록을 조회해 마스터에 반영한다. 카운터(행·완료·실패)는 execution 에 쌓고 메타데이터는 호출자가 쓴다.
+   */
+  public InfoResult collect(CollectExecution execution, List<String> tickers) {
     List<Fetched> fetched = Collections.synchronizedList(new ArrayList<>());
     AtomicInteger mismatch = new AtomicInteger();
     runner.run(execution, tickers, ticker -> {
@@ -79,13 +96,7 @@ public class StockInfoCollectService implements CollectJob {
     });
     int applied = transactionTemplate.execute(status -> apply(fetched));
     execution.addRows(applied);
-    execution.putMetadata("targets", tickers.size());
-    execution.putMetadata("fetched", fetched.size());
-    execution.putMetadata("applied", applied);
-    if (mismatch.get() > 0) {
-      execution.putMetadata("pdnoMismatch", mismatch.get());
-    }
-    execution.flush();
+    return new InfoResult(tickers.size(), fetched.size(), applied, mismatch.get());
   }
 
   /**

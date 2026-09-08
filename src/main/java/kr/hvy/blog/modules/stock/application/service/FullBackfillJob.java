@@ -31,6 +31,7 @@ public class FullBackfillJob implements CollectJob {
       CollectJobType.MASTER, CollectJobType.HOLIDAY, CollectJobType.INDEX_BACKFILL, CollectJobType.PRICE_BACKFILL,
       CollectJobType.STOCK_INFO, CollectJobType.CORP_ACTION, CollectJobType.ADJUST_FACTOR,
       CollectJobType.INVESTOR_BACKFILL, CollectJobType.VALUATION, CollectJobType.MARKET_STAT,
+      CollectJobType.ETF_NAV_BACKFILL,
       CollectJobType.FINANCIAL_BACKFILL, CollectJobType.OVERSEAS_BACKFILL,
       CollectJobType.DERIVED_REFRESH, CollectJobType.VALIDATE);
 

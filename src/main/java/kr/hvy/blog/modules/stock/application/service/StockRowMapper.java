@@ -5,13 +5,17 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import kr.hvy.blog.modules.stock.client.KisValues;
 import kr.hvy.blog.modules.stock.client.dto.KisDailyChartResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisEtfNavResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisHolidayResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisPriceResponse;
 import kr.hvy.blog.modules.stock.domain.model.DailyPriceRow;
+import kr.hvy.blog.modules.stock.domain.model.EtfNavRow;
 import kr.hvy.blog.modules.stock.domain.model.HolidayRow;
 import kr.hvy.blog.modules.stock.domain.model.IndexDailyRow;
 import kr.hvy.blog.modules.stock.domain.model.InvestorDailyRow;
@@ -130,6 +134,25 @@ public final class StockRowMapper {
     return new ValuationRow(ticker, tradeDate, marketCap, KisValues.longValue(o.listedShares()),
         KisValues.decimal(o.per()), KisValues.decimal(o.pbr()), KisValues.decimal(o.eps()), KisValues.decimal(o.bps()),
         KisValues.decimal(o.week52High()), KisValues.decimal(o.week52Low()), KisValues.decimal(o.foreignHoldRate()));
+  }
+
+  /**
+   * ETF NAV 비교추이 → 행. 날짜·종가가 없는 행은 버리고, 같은 날짜가 겹치면 앞 것을 남긴다.
+   */
+  public static List<EtfNavRow> toEtfNavRows(String ticker, List<KisEtfNavResponse.Row> rows) {
+    Map<LocalDate, EtfNavRow> byDate = new LinkedHashMap<>();
+    for (KisEtfNavResponse.Row r : rows) {
+      LocalDate date = KisValues.date(r.tradeDate());
+      BigDecimal close = KisValues.decimal(r.close());
+      if (date == null || close == null) {
+        continue;
+      }
+      byDate.putIfAbsent(date, new EtfNavRow(ticker, date, close, KisValues.decimal(r.prevDiff()), blankToNull(r.prevDiffSign()),
+          KisValues.decimal(r.changeRate()), KisValues.longValue(r.volume()), KisValues.decimal(r.nav()),
+          KisValues.decimal(r.navPrevDiff()), blankToNull(r.navPrevDiffSign()), KisValues.decimal(r.navChangeRate()),
+          KisValues.decimal(r.navDiff()), KisValues.decimal(r.disparityRate())));
+    }
+    return new ArrayList<>(byDate.values());
   }
 
   /**

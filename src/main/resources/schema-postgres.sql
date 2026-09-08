@@ -46,6 +46,7 @@ DROP TABLE IF EXISTS shedlock CASCADE;
 -- 주식(KIS) 수집 모듈 (생성 역순). CASCADE 가 파생 객체도 함께 제거한다:
 --   mv_stock_adjust_factor, vw_stock_daily_price_adj, vw_stock_market_calendar,
 --   mv_stock_daily_metric, mv_stock_index_metric, mv_stock_sector_daily, vw_stock_universe_daily
+DROP TABLE IF EXISTS tb_stock_etf_nav_daily CASCADE;
 DROP TABLE IF EXISTS tb_stock_kis_api_failure CASCADE;
 DROP TABLE IF EXISTS tb_stock_kis_token CASCADE;
 DROP TABLE IF EXISTS tb_stock_collect_checkpoint CASCADE;
@@ -1343,6 +1344,49 @@ COMMENT ON COLUMN tb_stock_kis_api_failure.occurred_at     IS '발생 시각';
 
 CREATE INDEX IF NOT EXISTS idx_stock_kis_api_failure_occurred
     ON tb_stock_kis_api_failure (occurred_at DESC);
+
+
+-- ---------------------------------------------
+-- ETF NAV 일별 (FHPST02440200 nav-comparison-daily-trend). 종가 vs NAV 괴리율. 대상은 마스터 활성 ETF(EF)만이며
+-- ETN 은 마스터 ticker 가 Q 접두 7자라 제외한다. 1회 100건·연속조회 없음 → 일봉과 같은 날짜 창 백필.
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS tb_stock_etf_nav_daily
+(
+    ticker             VARCHAR(10)    NOT NULL,
+    trade_date         DATE           NOT NULL,
+    close_price        NUMERIC(18,2)  NOT NULL,
+    prev_diff          NUMERIC(18,2)           DEFAULT NULL,
+    prev_diff_sign     VARCHAR(1)              DEFAULT NULL,
+    change_rate        NUMERIC(8,4)            DEFAULT NULL,
+    volume             BIGINT                  DEFAULT NULL,
+    nav                NUMERIC(18,4)           DEFAULT NULL,
+    nav_prev_diff      NUMERIC(18,4)           DEFAULT NULL,
+    nav_prev_diff_sign VARCHAR(1)              DEFAULT NULL,
+    nav_change_rate    NUMERIC(8,4)            DEFAULT NULL,
+    nav_diff           NUMERIC(18,4)           DEFAULT NULL,
+    disparity_rate     NUMERIC(8,4)            DEFAULT NULL,
+    collected_at       TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_stock_etf_nav_daily PRIMARY KEY (ticker, trade_date)
+);
+
+COMMENT ON TABLE  tb_stock_etf_nav_daily                    IS 'ETF NAV 일별 (종가·NAV·괴리율). 대상은 활성 ETF(EF), ETN 제외';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.ticker             IS '단축 종목코드 (ETF)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.trade_date         IS '거래일 (stck_bsop_date)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.close_price        IS '종가 (원, stck_clpr)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.prev_diff          IS '전일 대비 (원, prdy_vrss)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.prev_diff_sign     IS '전일 대비 부호 (prdy_vrss_sign)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.change_rate        IS '전일 대비율 (%, prdy_ctrt)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.volume             IS '누적 거래량 (acml_vol)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.nav                IS 'NAV (원, nav)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.nav_prev_diff      IS 'NAV 전일 대비 (nav_prdy_vrss)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.nav_prev_diff_sign IS 'NAV 전일 대비 부호 (nav_prdy_vrss_sign)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.nav_change_rate    IS 'NAV 전일 대비율 (%, nav_prdy_ctrt)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.nav_diff           IS 'NAV 대비 현재가 차이 (원, nav_vrss_prpr)';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.disparity_rate     IS '괴리율 (%, dprt). 부호 규약은 실측 항목';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.collected_at       IS '마지막 수집 시각';
+
+CREATE INDEX IF NOT EXISTS idx_stock_etf_nav_daily_date
+    ON tb_stock_etf_nav_daily (trade_date);
 -- <<< END db/stock-schema.sql
 
 -- >>> BEGIN db/stock-derived.sql

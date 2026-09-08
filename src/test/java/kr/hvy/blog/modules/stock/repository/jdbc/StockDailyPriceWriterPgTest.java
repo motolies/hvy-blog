@@ -52,7 +52,7 @@ class StockDailyPriceWriterPgTest {
   }
 
   @Test
-  @DisplayName("스키마 초기화 스크립트가 tb_stock_ 접두 테이블 19개를 만든다 (다른 접두사는 없다)")
+  @DisplayName("스키마 초기화 스크립트가 tb_stock_ 접두 테이블 20개를 만든다 (다른 접두사는 없다)")
   void schemaCreatesAllTables() {
     Integer stockTables = jdbc.queryForObject(
         "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' "
@@ -61,7 +61,7 @@ class StockDailyPriceWriterPgTest {
     Integer allTables = jdbc.queryForObject(
         "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
         Integer.class);
-    assertThat(stockTables).isEqualTo(19);
+    assertThat(stockTables).isEqualTo(20);
     assertThat(allTables).as("stock 모듈 테이블은 모두 tb_stock_ 접두사를 쓴다").isEqualTo(stockTables);
   }
 

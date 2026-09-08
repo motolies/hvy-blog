@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 일일 증분 파이프라인(DAILY, 평일 18:30 KST). 단계 순서가 단일 출처다:
- * INDEX → PRICE → VALUATION → INVESTOR → STATS(kis.stats.enabled) → CA_HINT → VALIDATE → DERIVED.
+ * INDEX → PRICE → VALUATION → INVESTOR → ETF_NAV → STATS(kis.stats.enabled) → CA_HINT → VALIDATE → DERIVED.
  * 단계 실패는 다음 단계를 막지 않지만, PRICE 실패 시 DERIVED 는 건너뛴다(잘못된 가격 위에 지표를 만들지 않는다).
  * 휴장일이면 run 기록만 남기고 끝낸다(force 로 무시 가능).
  */
@@ -32,6 +32,7 @@ public class StockDailyPipelineJob implements CollectJob {
   private final CollectValidationService validationService;
   private final DerivedMetricRefreshService derivedRefreshService;
   private final StockMarketStatCollectService marketStatService;
+  private final StockEtfNavCollectService etfNavService;
   private final KisProperties properties;
 
   @Override
@@ -56,6 +57,7 @@ public class StockDailyPipelineJob implements CollectJob {
     boolean priceOk = steps.run("PRICE", () -> hints.addAll(priceService.collectRecent(execution, tickers).actionHints()));
     steps.run("VALUATION", () -> valuationService.collectSnapshot(execution, tickers, today));
     steps.run("INVESTOR", () -> investorService.collectRecent(execution, tickers));
+    steps.run("ETF_NAV", () -> etfNavService.collectRecent(execution, targetResolver.activeTickers(StockEtfNavCollectService.ETF_GROUPS)));
     if (properties.getStats().isEnabled()) {
       steps.run("STATS", () -> marketStatService.collectRecent(execution, tickers));
     } else {

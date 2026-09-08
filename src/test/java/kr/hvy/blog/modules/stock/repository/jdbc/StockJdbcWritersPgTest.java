@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.stock.client.masterfile.IndexCodeRecord;
 import kr.hvy.blog.modules.stock.domain.code.MarketType;
+import kr.hvy.blog.modules.stock.domain.model.EtfNavRow;
 import kr.hvy.blog.modules.stock.domain.model.HolidayRow;
 import kr.hvy.blog.modules.stock.domain.model.IndexDailyRow;
 import kr.hvy.blog.modules.stock.domain.model.MasterHistoryRow;
@@ -46,7 +47,23 @@ class StockJdbcWritersPgTest {
   void setUp() {
     jdbc = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
     support = new BatchUpsertSupport(jdbc);
-    jdbc.update("TRUNCATE tb_stock_master_history, tb_stock_sector_map, tb_stock_index_master, tb_stock_index_daily, tb_stock_market_holiday");
+    jdbc.update("TRUNCATE tb_stock_master_history, tb_stock_sector_map, tb_stock_index_master, tb_stock_index_daily, tb_stock_market_holiday, tb_stock_etf_nav_daily");
+  }
+
+  @Test
+  @DisplayName("ETF NAV writer 는 동일값 재적재를 건너뛰고 NAV·괴리율 변경만 반영한다")
+  void etfNav() {
+    StockEtfNavWriter writer = new StockEtfNavWriter(support);
+    EtfNavRow row = new EtfNavRow("069500", D1, new BigDecimal("45000"), new BigDecimal("100"), "2", new BigDecimal("0.22"),
+        1_234_567L, new BigDecimal("45100.1234"), new BigDecimal("50.5"), "2", new BigDecimal("0.11"), new BigDecimal("-100.1234"),
+        new BigDecimal("-0.22"));
+    assertThat(writer.upsert(List.of(row))).isEqualTo(1);
+    assertThat(writer.upsert(List.of(row))).isZero();
+    EtfNavRow changed = new EtfNavRow("069500", D1, row.close(), row.prevDiff(), row.prevDiffSign(), row.changeRate(), row.volume(),
+        new BigDecimal("45200"), row.navPrevDiff(), row.navPrevDiffSign(), row.navChangeRate(), row.navDiff(), new BigDecimal("-0.44"));
+    assertThat(writer.upsert(List.of(changed))).isEqualTo(1);
+    BigDecimal nav = jdbc.queryForObject("SELECT nav FROM tb_stock_etf_nav_daily WHERE ticker = '069500'", BigDecimal.class);
+    assertThat(nav).isEqualByComparingTo("45200");
   }
 
   private static MasterHistoryRow history(String ticker, LocalDate from, boolean suspended) {

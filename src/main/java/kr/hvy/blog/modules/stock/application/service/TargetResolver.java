@@ -23,13 +23,20 @@ public class TargetResolver {
   private final KisProperties properties;
 
   /**
-   * 요청에 맞는 대상 종목(오름차순, 중복 제거).
+   * 요청에 맞는 대상 종목(오름차순, 중복 제거). 유니버스는 yml 의 kis.backfill.security-groups(기본 ST).
    */
   public List<String> resolveTickers(BackfillRequest request) {
+    return resolveTickers(request, properties.getBackfill().getSecurityGroups());
+  }
+
+  /**
+   * 증권그룹을 지정한 대상 해석 (예: ETF NAV 는 EF). tickers 가 있으면 그룹과 무관하게 그대로 쓴다.
+   */
+  public List<String> resolveTickers(BackfillRequest request, Collection<String> securityGroups) {
     if (request.hasTickers()) {
       return request.tickers().stream().distinct().sorted().toList();
     }
-    return activeTickers().stream()
+    return activeTickers(securityGroups).stream()
         .filter(t -> request.tickerFrom() == null || t.compareTo(request.tickerFrom()) >= 0)
         .filter(t -> request.tickerTo() == null || t.compareTo(request.tickerTo()) <= 0)
         .toList();
@@ -39,7 +46,14 @@ public class TargetResolver {
    * 활성 유니버스(증분 대상).
    */
   public List<String> activeTickers() {
-    return masterRepository.findActiveTickers(properties.getBackfill().getSecurityGroups());
+    return activeTickers(properties.getBackfill().getSecurityGroups());
+  }
+
+  /**
+   * 지정 증권그룹의 활성 종목.
+   */
+  public List<String> activeTickers(Collection<String> securityGroups) {
+    return masterRepository.findActiveTickers(securityGroups);
   }
 
   /**

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.stock.client.dto.KisCreditBalanceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisDailyChartResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisEtfNavResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisProgramTradeResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisShortSaleResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisFinancialResponse;
@@ -49,6 +50,8 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
   public static final String OVERSEAS_DAILY_PATH = "/uapi/overseas-price/v1/quotations/dailyprice";
   public static final String OVERSEAS_DAILY_TR_ID = "HHDFS76240000";
   public static final String SHORT_SALE_PATH = "/uapi/domestic-stock/v1/quotations/daily-short-sale";
+  public static final String ETF_NAV_PATH = "/uapi/etfetn/v1/quotations/nav-comparison-daily-trend";
+  public static final String ETF_NAV_TR_ID = "FHPST02440200";
   public static final String SHORT_SALE_TR_ID = "FHPST04830000";
   public static final String CREDIT_BALANCE_PATH = "/uapi/domestic-stock/v1/quotations/daily-credit-balance";
   public static final String CREDIT_BALANCE_TR_ID = "FHPST04760000";
@@ -218,6 +221,18 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
     params.put("fid_cond_mrkt_div_code", MARKET_STOCK);
     params.put("fid_input_iscd", ticker);
     KisFinancialResponse body = apiClient.get(kind.getPath(), kind.getTrId(), params, KisFinancialResponse.class,
+        context.withTarget(ticker)).body();
+    return body.output() == null ? List.of() : body.output();
+  }
+
+  @Override
+  public List<KisEtfNavResponse.Row> fetchEtfNavDaily(String ticker, LocalDate from, LocalDate to, KisCallContext context) {
+    Map<String, String> params = new LinkedHashMap<>();
+    params.put("FID_COND_MRKT_DIV_CODE", MARKET_STOCK);
+    params.put("FID_INPUT_ISCD", ticker);
+    params.put("FID_INPUT_DATE_1", KisValues.format(from));
+    params.put("FID_INPUT_DATE_2", KisValues.format(to));
+    KisEtfNavResponse body = apiClient.get(ETF_NAV_PATH, ETF_NAV_TR_ID, params, KisEtfNavResponse.class,
         context.withTarget(ticker)).body();
     return body.output() == null ? List.of() : body.output();
   }

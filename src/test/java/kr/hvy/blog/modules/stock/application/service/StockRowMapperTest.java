@@ -6,9 +6,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import kr.hvy.blog.modules.stock.client.dto.KisDailyChartResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisEtfNavResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisHolidayResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
 import kr.hvy.blog.modules.stock.domain.model.DailyPriceRow;
+import kr.hvy.blog.modules.stock.domain.model.EtfNavRow;
 import kr.hvy.blog.modules.stock.domain.model.HolidayRow;
 import kr.hvy.blog.modules.stock.domain.model.IndexDailyRow;
 import org.junit.jupiter.api.DisplayName;
@@ -63,5 +65,26 @@ class StockRowMapperTest {
     assertThat(holidays).hasSize(2);
     assertThat(holidays.get(0).isOpen()).isTrue();
     assertThat(holidays.get(1).isOpen()).isFalse();
+  }
+
+  @Test
+  @DisplayName("ETF NAV 행: 날짜·종가 없는 행은 버리고 같은 날짜는 앞 것을 남기며 NAV 소수는 보존한다")
+  void etfNavRows() {
+    List<KisEtfNavResponse.Row> rows = List.of(
+        new KisEtfNavResponse.Row("20260904", "45000", "100", "2", "0.22", "1234567", "100", "-0.22", "-100.1234", "45100.1234", "2", "50.5", "0.11"),
+        new KisEtfNavResponse.Row("20260904", "1", "", "", "", "", "", "", "", "", "", "", ""),
+        new KisEtfNavResponse.Row("", "45000", "", "", "", "", "", "", "", "", "", "", ""),
+        new KisEtfNavResponse.Row("20260903", "", "", "", "", "", "", "", "", "", "", "", ""));
+
+    List<EtfNavRow> mapped = StockRowMapper.toEtfNavRows("069500", rows);
+
+    assertThat(mapped).hasSize(1);
+    EtfNavRow row = mapped.get(0);
+    assertThat(row.tradeDate()).isEqualTo(LocalDate.of(2026, 9, 4));
+    assertThat(row.close()).isEqualByComparingTo("45000");
+    assertThat(row.nav()).isEqualByComparingTo("45100.1234");
+    assertThat(row.disparityRate()).isEqualByComparingTo("-0.22");
+    assertThat(row.volume()).isEqualTo(1_234_567L);
+    assertThat(row.navPrevDiffSign()).isEqualTo("2");
   }
 }

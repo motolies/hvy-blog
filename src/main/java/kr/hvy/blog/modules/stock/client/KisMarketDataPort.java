@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.stock.client.dto.KisCreditBalanceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisDailyChartResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisEtfNavResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisProgramTradeResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisShortSaleResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisOverseasDailyPriceResponse;
@@ -100,4 +101,9 @@ public interface KisMarketDataPort {
    * 종목별 프로그램매매 일별: 기준일 이하 최근분 (FHPPG04650201).
    */
   List<KisProgramTradeResponse.Row> fetchProgramTradeDaily(String ticker, LocalDate baseDate, KisCallContext context);
+
+  /**
+   * ETF NAV 비교추이(일) [from, to] 최신 100건 (FHPST02440200, 연속조회 없음).
+   */
+  List<KisEtfNavResponse.Row> fetchEtfNavDaily(String ticker, LocalDate from, LocalDate to, KisCallContext context);
 }

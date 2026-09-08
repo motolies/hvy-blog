@@ -24,7 +24,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * 지표 MV(mv_stock_daily_metric / mv_stock_index_metric / mv_stock_sector_daily)·유니버스 뷰·시장 통계 writer 를
+ * 지표(tb_stock_daily_metric 증분 재계산 / mv_stock_index_metric / mv_stock_sector_daily)·유니버스 뷰·시장 통계 writer 를
  * 실제 PostgreSQL 로 검증한다. 윈도우 프레임 경계(ROWS BETWEEN n PRECEDING)가 핵심이다.
  */
 @Testcontainers
@@ -49,7 +49,7 @@ class StockDerivedMetricPgTest {
     jdbc = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
     support = new BatchUpsertSupport(jdbc);
     jdbc.update("TRUNCATE tb_stock_daily_price, tb_stock_investor_daily, tb_stock_sector_map, tb_stock_master, "
-        + "tb_stock_index_daily, tb_stock_valuation_daily, tb_stock_adjust_event, tb_stock_market_stat_daily");
+        + "tb_stock_index_daily, tb_stock_valuation_daily, tb_stock_adjust_event, tb_stock_market_stat_daily, tb_stock_daily_metric");
   }
 
   private static List<LocalDate> tradingDays() {
@@ -65,7 +65,7 @@ class StockDerivedMetricPgTest {
   }
 
   @Test
-  @DisplayName("종목 지표 MV: 수익률·이동평균·52주 고점·거래대금 비율·외인 5일 누적이 프레임대로 계산된다")
+  @DisplayName("종목 지표 테이블: 수익률·이동평균·52주 고점·거래대금 비율·외인 5일 누적이 프레임대로 계산되고, 증분 재계산은 하한 이후 행만 바꾼다")
   void dailyMetric() {
     List<LocalDate> days = tradingDays();
     List<DailyPriceRow> prices = new ArrayList<>();
@@ -79,10 +79,12 @@ class StockDerivedMetricPgTest {
     new StockDailyPriceWriter(support).upsert(prices);
     new StockInvestorWriter(support).upsert(investors);
     DerivedViewRefresher refresher = new DerivedViewRefresher(jdbc);
-    refresher.refresh("mv_stock_daily_metric", true);
+    assertThat(refresher.tableExists(DerivedViewRefresher.TB_DAILY_METRIC)).isTrue();
+    assertThat(refresher.recomputeDailyMetric(null, null, "64MB", 0)).isEqualTo(DAYS);
+    assertThat(refresher.recomputeDailyMetric(null, null, null, null)).isZero(); // 같은 값은 건너뜀
 
     LocalDate last = days.get(DAYS - 1);
-    Map<String, Object> row = jdbc.queryForMap("SELECT * FROM mv_stock_daily_metric WHERE ticker = ? AND trade_date = ?", "005930", last);
+    Map<String, Object> row = jdbc.queryForMap("SELECT * FROM tb_stock_daily_metric WHERE ticker = ? AND trade_date = ?", "005930", last);
     double close = 1000 + DAYS - 1; // 1129
     assertThat((Double) row.get("ret_1d")).isCloseTo(close / (close - 1) - 1, within(1e-9));
     assertThat((Double) row.get("ret_120d")).isCloseTo(close / (close - 120) - 1, within(1e-9));
@@ -94,9 +96,23 @@ class StockDerivedMetricPgTest {
     assertThat((Double) row.get("foreign_net_5d")).isCloseTo(50d, within(1e-9));
     assertThat((Double) row.get("institution_net_5d")).isCloseTo(-25d, within(1e-9));
 
-    Map<String, Object> first = jdbc.queryForMap("SELECT * FROM mv_stock_daily_metric WHERE ticker = ? AND trade_date = ?", "005930", START);
+    Map<String, Object> first = jdbc.queryForMap("SELECT * FROM tb_stock_daily_metric WHERE ticker = ? AND trade_date = ?", "005930", START);
     assertThat(first.get("ret_1d")).isNull(); // 이전 행 없음
     assertThat((Double) first.get("ma_5")).isCloseTo(1000d, within(1e-9)); // 프레임이 잘려도 평균은 존재
+
+    // 증분: 마지막 날 종가를 바꾸고 최근 10일만 다시 계산 → 하한 이후 행만 갱신되고 이전 행은 그대로
+    LocalDate from = days.get(DAYS - 10);
+    jdbc.update("UPDATE tb_stock_daily_price SET close_price = 2000 WHERE ticker = '005930' AND trade_date = ?", last);
+    java.time.OffsetDateTime beforeAt = jdbc.queryForObject(
+        "SELECT computed_at FROM tb_stock_daily_metric WHERE ticker = '005930' AND trade_date = ?", java.time.OffsetDateTime.class, START);
+    int changed = refresher.recomputeDailyMetric(from, from.minusDays(400), null, null);
+    assertThat(changed).isBetween(1, 10);
+    Map<String, Object> updated = jdbc.queryForMap("SELECT * FROM tb_stock_daily_metric WHERE ticker = ? AND trade_date = ?", "005930", last);
+    assertThat((Double) updated.get("adj_close")).isCloseTo(2000d, within(1e-9));
+    assertThat((Double) updated.get("ret_1d")).isCloseTo(2000d / (close - 1) - 1, within(1e-9)); // 하한 앞 입력(lookback)으로 프레임이 이어진다
+    java.time.OffsetDateTime afterAt = jdbc.queryForObject(
+        "SELECT computed_at FROM tb_stock_daily_metric WHERE ticker = '005930' AND trade_date = ?", java.time.OffsetDateTime.class, START);
+    assertThat(afterAt).isEqualTo(beforeAt);
   }
 
   @Test
@@ -127,7 +143,9 @@ class StockDerivedMetricPgTest {
         + "('000660', ?, 100000000000000), ('035420', ?, 50000000000)", last, last, last); // NAVER 시총 500억 → 유니버스 제외
 
     DerivedViewRefresher refresher = new DerivedViewRefresher(jdbc);
-    for (String mv : List.of("mv_stock_adjust_factor", "mv_stock_daily_metric", "mv_stock_index_metric", "mv_stock_sector_daily")) {
+    refresher.refresh("mv_stock_adjust_factor", true);
+    refresher.recomputeDailyMetric(null, null, null, null);
+    for (String mv : List.of("mv_stock_index_metric", "mv_stock_sector_daily")) {
       refresher.refresh(mv, true);
     }
 

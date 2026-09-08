@@ -29,11 +29,12 @@ class StockWeeklyPipelineJobTest {
   private final AdjustFactorService adjustFactor = mock(AdjustFactorService.class);
   private final StockFinancialCollectService financial = mock(StockFinancialCollectService.class);
   private final StockInfoCollectService stockInfo = mock(StockInfoCollectService.class);
+  private final DerivedMetricRefreshService derived = mock(DerivedMetricRefreshService.class);
   private final CollectRunService runService = mock(CollectRunService.class);
-  private final StockWeeklyPipelineJob job = new StockWeeklyPipelineJob(targetResolver, corpAction, adjustFactor, financial, stockInfo);
+  private final StockWeeklyPipelineJob job = new StockWeeklyPipelineJob(targetResolver, corpAction, adjustFactor, financial, stockInfo, derived);
 
   @Test
-  @DisplayName("CORP_ACTION → STOCK_INFO → ADJUST_FACTOR → FINANCIAL 순서로 돌고, 후보가 있으면 STOCK_INFO 를 그 목록으로 호출한다")
+  @DisplayName("CORP_ACTION → STOCK_INFO → ADJUST_FACTOR → FINANCIAL → DERIVED_FULL 순서로 돌고, 후보가 있으면 STOCK_INFO 를 그 목록으로 호출한다")
   @SuppressWarnings("unchecked")
   void runsFourStepsAndEnrichesDelisted() {
     when(targetResolver.activeTickers()).thenReturn(List.of("005930"));
@@ -45,10 +46,11 @@ class StockWeeklyPipelineJobTest {
     job.execute(exec);
 
     List<Map<String, Object>> steps = (List<Map<String, Object>>) exec.metadataSnapshot().get("steps");
-    assertThat(steps).extracting(s -> s.get("step")).containsExactly("CORP_ACTION", "STOCK_INFO", "ADJUST_FACTOR", "FINANCIAL");
+    assertThat(steps).extracting(s -> s.get("step")).containsExactly("CORP_ACTION", "STOCK_INFO", "ADJUST_FACTOR", "FINANCIAL", "DERIVED_FULL");
     assertThat(steps).allSatisfy(s -> assertThat(s.get("status")).isEqualTo("OK"));
     assertThat(exec.metadataSnapshot()).containsEntry("stockInfoCandidates", 2).containsEntry("stockInfoApplied", 1);
     verify(financial).collectAll(eq(exec), eq(List.of("005930")));
+    verify(derived).refreshAllFull(exec);
   }
 
   @Test

@@ -826,3 +826,51 @@ COMMENT ON COLUMN tb_stock_market_investor_daily.other_org_net_qty        IS '�
 COMMENT ON COLUMN tb_stock_market_investor_daily.other_corp_net_amt       IS '기타 법인 순매수 대금 (etc_corp_ntby_tr_pbmn)';
 COMMENT ON COLUMN tb_stock_market_investor_daily.other_corp_net_qty       IS '기타 법인 순매수 수량 (etc_corp_ntby_vol)';
 COMMENT ON COLUMN tb_stock_market_investor_daily.collected_at             IS '마지막 수집 시각';
+
+
+-- ---------------------------------------------
+-- 종목 일별 지표 테이블 (2026-09-08, mv_stock_daily_metric 에서 전환). 전체 재계산이 25분(work_mem 512MB) 이라 MV 대신 테이블에
+-- 최근 N일만 다시 계산해 upsert 한다 (DerivedViewRefresher.recomputeDailyMetric). 계산식은 그 SQL 이 단일 출처다.
+-- 수익률 1/5/20/60/120, 이동평균 5/20/60/120, 이격도, 52주 고점(252거래일), 거래대금 5/60일, 외인·기관 5일 누적. 전부 수정주가 기준.
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS tb_stock_daily_metric
+(
+    ticker               VARCHAR(10)             NOT NULL,
+    trade_date           DATE                    NOT NULL,
+    adj_close            DOUBLE PRECISION        DEFAULT NULL,
+    ret_1d               DOUBLE PRECISION        DEFAULT NULL,
+    ret_5d               DOUBLE PRECISION        DEFAULT NULL,
+    ret_20d              DOUBLE PRECISION        DEFAULT NULL,
+    ret_60d              DOUBLE PRECISION        DEFAULT NULL,
+    ret_120d             DOUBLE PRECISION        DEFAULT NULL,
+    ma_5                 DOUBLE PRECISION        DEFAULT NULL,
+    ma_20                DOUBLE PRECISION        DEFAULT NULL,
+    ma_60                DOUBLE PRECISION        DEFAULT NULL,
+    ma_120               DOUBLE PRECISION        DEFAULT NULL,
+    dist_ma20            DOUBLE PRECISION        DEFAULT NULL,
+    dist_ma60            DOUBLE PRECISION        DEFAULT NULL,
+    high_52w             DOUBLE PRECISION        DEFAULT NULL,
+    dist_high_52w        DOUBLE PRECISION        DEFAULT NULL,
+    tv_avg_5d            DOUBLE PRECISION        DEFAULT NULL,
+    tv_avg_60d           DOUBLE PRECISION        DEFAULT NULL,
+    tv_ratio_5_60        DOUBLE PRECISION        DEFAULT NULL,
+    vol_avg_20d          DOUBLE PRECISION        DEFAULT NULL,
+    foreign_net_5d       DOUBLE PRECISION        DEFAULT NULL,
+    institution_net_5d   DOUBLE PRECISION        DEFAULT NULL,
+    computed_at          TIMESTAMPTZ(6)          NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_stock_daily_metric PRIMARY KEY (ticker, trade_date)
+);
+
+COMMENT ON TABLE  tb_stock_daily_metric                    IS '종목 일별 지표 (수정주가 기준). DAILY 는 최근 kis.derived.metric-recompute-days 만, WEEKLY 는 전체 재계산';
+COMMENT ON COLUMN tb_stock_daily_metric.adj_close          IS '수정 종가';
+COMMENT ON COLUMN tb_stock_daily_metric.ret_120d           IS '120거래일 수익률 (ret_1d/5d/20d/60d 동일 규칙)';
+COMMENT ON COLUMN tb_stock_daily_metric.ma_120             IS '120거래일 이동평균 (ma_5/20/60 동일 규칙)';
+COMMENT ON COLUMN tb_stock_daily_metric.dist_ma20          IS '20일선 이격도 = 종가/MA20 − 1';
+COMMENT ON COLUMN tb_stock_daily_metric.high_52w           IS '최근 252거래일 수정 고가 최대';
+COMMENT ON COLUMN tb_stock_daily_metric.dist_high_52w      IS '52주 고점 대비 = 종가/high_52w − 1';
+COMMENT ON COLUMN tb_stock_daily_metric.tv_ratio_5_60      IS '거래대금 5일 평균 / 60일 평균';
+COMMENT ON COLUMN tb_stock_daily_metric.foreign_net_5d     IS '외국인 순매수 5일 누적 (tb_stock_investor_daily)';
+COMMENT ON COLUMN tb_stock_daily_metric.computed_at        IS '마지막 계산 시각';
+
+CREATE INDEX IF NOT EXISTS idx_stock_daily_metric_date
+    ON tb_stock_daily_metric (trade_date);

@@ -7,7 +7,7 @@
 -- =============================================
 DROP VIEW IF EXISTS vw_stock_universe_daily;
 DROP MATERIALIZED VIEW IF EXISTS mv_stock_sector_daily;
-DROP MATERIALIZED VIEW IF EXISTS mv_stock_daily_metric;
+DROP MATERIALIZED VIEW IF EXISTS mv_stock_daily_metric;   -- 2026-09-08 테이블(tb_stock_daily_metric)로 전환된 옛 MV, 남아 있으면 제거
 DROP VIEW IF EXISTS vw_stock_daily_price_adj;
 DROP MATERIALIZED VIEW IF EXISTS mv_stock_adjust_factor;
 DROP MATERIALIZED VIEW IF EXISTS mv_stock_index_metric;

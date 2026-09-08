@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 주간 파이프라인(WEEKLY, 일요일 03:00 KST): 예탁원 기업행사(±3개월) → 상폐 보강(기업행사에만 있는 종목을 STOCK_INFO 로 조회)
- * → 수정계수 재산출·MV 갱신·표본 대조 → 재무 재조회(정정 감지).
+ * → 수정계수 재산출·MV 갱신·표본 대조 → 재무 재조회(정정 감지) → 종목 일별 지표 전체 재계산(수정계수 변경 등 과거 구간 흡수, ≈25분).
  * 재무는 종목당 12호출(6종 × 연/분기)이라 전 종목이 약 40분 걸리지만 주 1회 새벽이라 감당된다.
  * 상폐 보강 후보 중 상폐일이 없는 코드(KONEX·비상장)는 행이 생기지 않아 매주 다시 조회되지만 수는 유계다(run 메타 stockInfoCandidates).
  */
@@ -22,6 +22,7 @@ public class StockWeeklyPipelineJob implements CollectJob {
   private final AdjustFactorService adjustFactorService;
   private final StockFinancialCollectService financialService;
   private final StockInfoCollectService stockInfoService;
+  private final DerivedMetricRefreshService derivedRefreshService;
 
   @Override
   public CollectJobType jobType() {
@@ -42,6 +43,7 @@ public class StockWeeklyPipelineJob implements CollectJob {
     });
     steps.run("ADJUST_FACTOR", () -> adjustFactorService.execute(execution));
     steps.run("FINANCIAL", () -> financialService.collectAll(execution, tickers));
+    steps.run("DERIVED_FULL", () -> derivedRefreshService.refreshAllFull(execution));
     steps.finish();
   }
 }

@@ -46,6 +46,7 @@ DROP TABLE IF EXISTS shedlock CASCADE;
 -- 주식(KIS) 수집 모듈 (생성 역순). CASCADE 가 파생 객체도 함께 제거한다:
 --   mv_stock_adjust_factor, vw_stock_daily_price_adj, vw_stock_market_calendar,
 --   mv_stock_daily_metric, mv_stock_index_metric, mv_stock_sector_daily, vw_stock_universe_daily
+DROP TABLE IF EXISTS tb_stock_daily_metric CASCADE;
 DROP TABLE IF EXISTS tb_stock_market_investor_daily CASCADE;
 DROP TABLE IF EXISTS tb_stock_etf_nav_daily CASCADE;
 DROP TABLE IF EXISTS tb_stock_kis_api_failure CASCADE;
@@ -1466,6 +1467,54 @@ COMMENT ON COLUMN tb_stock_market_investor_daily.other_org_net_qty        IS '�
 COMMENT ON COLUMN tb_stock_market_investor_daily.other_corp_net_amt       IS '기타 법인 순매수 대금 (etc_corp_ntby_tr_pbmn)';
 COMMENT ON COLUMN tb_stock_market_investor_daily.other_corp_net_qty       IS '기타 법인 순매수 수량 (etc_corp_ntby_vol)';
 COMMENT ON COLUMN tb_stock_market_investor_daily.collected_at             IS '마지막 수집 시각';
+
+
+-- ---------------------------------------------
+-- 종목 일별 지표 테이블 (2026-09-08, mv_stock_daily_metric 에서 전환). 전체 재계산이 25분(work_mem 512MB) 이라 MV 대신 테이블에
+-- 최근 N일만 다시 계산해 upsert 한다 (DerivedViewRefresher.recomputeDailyMetric). 계산식은 그 SQL 이 단일 출처다.
+-- 수익률 1/5/20/60/120, 이동평균 5/20/60/120, 이격도, 52주 고점(252거래일), 거래대금 5/60일, 외인·기관 5일 누적. 전부 수정주가 기준.
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS tb_stock_daily_metric
+(
+    ticker               VARCHAR(10)             NOT NULL,
+    trade_date           DATE                    NOT NULL,
+    adj_close            DOUBLE PRECISION        DEFAULT NULL,
+    ret_1d               DOUBLE PRECISION        DEFAULT NULL,
+    ret_5d               DOUBLE PRECISION        DEFAULT NULL,
+    ret_20d              DOUBLE PRECISION        DEFAULT NULL,
+    ret_60d              DOUBLE PRECISION        DEFAULT NULL,
+    ret_120d             DOUBLE PRECISION        DEFAULT NULL,
+    ma_5                 DOUBLE PRECISION        DEFAULT NULL,
+    ma_20                DOUBLE PRECISION        DEFAULT NULL,
+    ma_60                DOUBLE PRECISION        DEFAULT NULL,
+    ma_120               DOUBLE PRECISION        DEFAULT NULL,
+    dist_ma20            DOUBLE PRECISION        DEFAULT NULL,
+    dist_ma60            DOUBLE PRECISION        DEFAULT NULL,
+    high_52w             DOUBLE PRECISION        DEFAULT NULL,
+    dist_high_52w        DOUBLE PRECISION        DEFAULT NULL,
+    tv_avg_5d            DOUBLE PRECISION        DEFAULT NULL,
+    tv_avg_60d           DOUBLE PRECISION        DEFAULT NULL,
+    tv_ratio_5_60        DOUBLE PRECISION        DEFAULT NULL,
+    vol_avg_20d          DOUBLE PRECISION        DEFAULT NULL,
+    foreign_net_5d       DOUBLE PRECISION        DEFAULT NULL,
+    institution_net_5d   DOUBLE PRECISION        DEFAULT NULL,
+    computed_at          TIMESTAMPTZ(6)          NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_stock_daily_metric PRIMARY KEY (ticker, trade_date)
+);
+
+COMMENT ON TABLE  tb_stock_daily_metric                    IS '종목 일별 지표 (수정주가 기준). DAILY 는 최근 kis.derived.metric-recompute-days 만, WEEKLY 는 전체 재계산';
+COMMENT ON COLUMN tb_stock_daily_metric.adj_close          IS '수정 종가';
+COMMENT ON COLUMN tb_stock_daily_metric.ret_120d           IS '120거래일 수익률 (ret_1d/5d/20d/60d 동일 규칙)';
+COMMENT ON COLUMN tb_stock_daily_metric.ma_120             IS '120거래일 이동평균 (ma_5/20/60 동일 규칙)';
+COMMENT ON COLUMN tb_stock_daily_metric.dist_ma20          IS '20일선 이격도 = 종가/MA20 − 1';
+COMMENT ON COLUMN tb_stock_daily_metric.high_52w           IS '최근 252거래일 수정 고가 최대';
+COMMENT ON COLUMN tb_stock_daily_metric.dist_high_52w      IS '52주 고점 대비 = 종가/high_52w − 1';
+COMMENT ON COLUMN tb_stock_daily_metric.tv_ratio_5_60      IS '거래대금 5일 평균 / 60일 평균';
+COMMENT ON COLUMN tb_stock_daily_metric.foreign_net_5d     IS '외국인 순매수 5일 누적 (tb_stock_investor_daily)';
+COMMENT ON COLUMN tb_stock_daily_metric.computed_at        IS '마지막 계산 시각';
+
+CREATE INDEX IF NOT EXISTS idx_stock_daily_metric_date
+    ON tb_stock_daily_metric (trade_date);
 -- <<< END db/stock-schema.sql
 
 -- >>> BEGIN db/stock-derived.sql
@@ -1525,55 +1574,16 @@ FROM tb_stock_index_daily
 WHERE index_code = '0001';
 
 -- =============================================
--- 지표 계층 (선순환의 출발점). 모두 vw_stock_daily_price_adj(수정주가) 위에서 계산하며 DOUBLE PRECISION 이다.
--- REFRESH 순서: mv_stock_adjust_factor → mv_stock_daily_metric → mv_stock_index_metric → mv_stock_sector_daily
+-- 지표 계층 (선순환의 출발점). 모두 vw_stock_daily_price_adj(수정주가) 위에서 계산하며 DOUBLE PRECISION 이다. 종목 일별 지표는 테이블(위 참조).
+-- 갱신 순서: mv_stock_adjust_factor → tb_stock_daily_metric(증분 재계산) → mv_stock_index_metric → mv_stock_sector_daily
 -- (DerivedMetricRefreshService.REFRESH_ORDER). 갱신이 3분을 넘으면 증분 테이블로 전환하되 뷰 이름은 유지한다.
 -- =============================================
 
 -- ---------------------------------------------
--- 종목 일별 지표: 수익률 1/5/20/60/120, 이동평균 5/20/60/120, 이격도, 52주 고점(252거래일), 거래대금 5/60일, 외인·기관 5일 누적
+-- 종목 일별 지표는 2026-09-08 부터 테이블 tb_stock_daily_metric (db/stock-schema.sql) 이다. 전체 재계산이 25분이라 MV 로는
+-- DAILY 락(40분) 안에 못 끝나, DerivedViewRefresher.recomputeDailyMetric 이 최근 N일만 창 함수로 다시 계산해 upsert 한다.
+-- 옛 mv_stock_daily_metric 은 stock-derived-rebuild.sql 이 지운다.
 -- ---------------------------------------------
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stock_daily_metric AS
-WITH base AS (
-    SELECT a.ticker,
-           a.trade_date,
-           a.adj_close,
-           a.adj_high,
-           a.adj_volume,
-           a.trading_value::double precision AS trading_value,
-           i.foreign_net_amt::double precision     AS foreign_net_amt,
-           i.institution_net_amt::double precision AS institution_net_amt
-    FROM vw_stock_daily_price_adj a
-             LEFT JOIN tb_stock_investor_daily i ON i.ticker = a.ticker AND i.trade_date = a.trade_date
-)
-SELECT ticker,
-       trade_date,
-       adj_close,
-       adj_close / NULLIF(LAG(adj_close, 1) OVER w, 0) - 1                                          AS ret_1d,
-       adj_close / NULLIF(LAG(adj_close, 5) OVER w, 0) - 1                                          AS ret_5d,
-       adj_close / NULLIF(LAG(adj_close, 20) OVER w, 0) - 1                                         AS ret_20d,
-       adj_close / NULLIF(LAG(adj_close, 60) OVER w, 0) - 1                                         AS ret_60d,
-       adj_close / NULLIF(LAG(adj_close, 120) OVER w, 0) - 1                                        AS ret_120d,
-       AVG(adj_close) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)                              AS ma_5,
-       AVG(adj_close) OVER (w ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)                             AS ma_20,
-       AVG(adj_close) OVER (w ROWS BETWEEN 59 PRECEDING AND CURRENT ROW)                             AS ma_60,
-       AVG(adj_close) OVER (w ROWS BETWEEN 119 PRECEDING AND CURRENT ROW)                            AS ma_120,
-       adj_close / NULLIF(AVG(adj_close) OVER (w ROWS BETWEEN 19 PRECEDING AND CURRENT ROW), 0) - 1  AS dist_ma20,
-       adj_close / NULLIF(AVG(adj_close) OVER (w ROWS BETWEEN 59 PRECEDING AND CURRENT ROW), 0) - 1  AS dist_ma60,
-       MAX(adj_high) OVER (w ROWS BETWEEN 251 PRECEDING AND CURRENT ROW)                             AS high_52w,
-       adj_close / NULLIF(MAX(adj_high) OVER (w ROWS BETWEEN 251 PRECEDING AND CURRENT ROW), 0) - 1  AS dist_high_52w,
-       AVG(trading_value) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)                          AS tv_avg_5d,
-       AVG(trading_value) OVER (w ROWS BETWEEN 59 PRECEDING AND CURRENT ROW)                         AS tv_avg_60d,
-       AVG(trading_value) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
-           / NULLIF(AVG(trading_value) OVER (w ROWS BETWEEN 59 PRECEDING AND CURRENT ROW), 0)        AS tv_ratio_5_60,
-       AVG(adj_volume) OVER (w ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)                            AS vol_avg_20d,
-       SUM(foreign_net_amt) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)                        AS foreign_net_5d,
-       SUM(institution_net_amt) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)                    AS institution_net_5d
-FROM base
-WINDOW w AS (PARTITION BY ticker ORDER BY trade_date)
-WITH DATA;
-CREATE UNIQUE INDEX IF NOT EXISTS uk_mv_stock_daily_metric ON mv_stock_daily_metric (ticker, trade_date);
-CREATE INDEX IF NOT EXISTS idx_mv_stock_daily_metric_date ON mv_stock_daily_metric (trade_date);
 
 -- ---------------------------------------------
 -- 지수 지표: RS = 종목 수익률 − 지수 수익률(동일 창)
@@ -1615,7 +1625,7 @@ FROM tb_stock_daily_price p
          JOIN tb_stock_sector_map s ON s.ticker = p.ticker AND s.source = 'KRX' AND s.valid_to IS NULL
          LEFT JOIN tb_stock_valuation_daily v ON v.ticker = p.ticker AND v.trade_date = p.trade_date
          LEFT JOIN tb_stock_investor_daily i ON i.ticker = p.ticker AND i.trade_date = p.trade_date
-         LEFT JOIN mv_stock_daily_metric m ON m.ticker = p.ticker AND m.trade_date = p.trade_date
+         LEFT JOIN tb_stock_daily_metric m ON m.ticker = p.ticker AND m.trade_date = p.trade_date
 GROUP BY s.sector_code, p.trade_date
 WITH DATA;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_mv_stock_sector_daily ON mv_stock_sector_daily (sector_code, trade_date);
@@ -1629,7 +1639,7 @@ SELECT p.trade_date, p.ticker
 FROM tb_stock_daily_price p
          JOIN tb_stock_master m ON m.ticker = p.ticker
          LEFT JOIN tb_stock_valuation_daily v ON v.ticker = p.ticker AND v.trade_date = p.trade_date
-         LEFT JOIN mv_stock_daily_metric d ON d.ticker = p.ticker AND d.trade_date = p.trade_date
+         LEFT JOIN tb_stock_daily_metric d ON d.ticker = p.ticker AND d.trade_date = p.trade_date
 WHERE m.security_group = 'ST'
   AND m.is_active = TRUE
   AND m.is_suspended = FALSE

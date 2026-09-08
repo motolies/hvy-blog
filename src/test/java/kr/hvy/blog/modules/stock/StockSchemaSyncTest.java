@@ -66,7 +66,7 @@ class StockSchemaSyncTest {
         tables.add(m.group(1));
       }
     }
-    assertThat(tables).hasSize(21).allMatch(t -> t.startsWith("tb_stock_"));
+    assertThat(tables).hasSize(22).allMatch(t -> t.startsWith("tb_stock_"));
 
     List<String> mirror = lines(MIRROR);
     int firstBegin = indexOfOnly(mirror, "-- >>> BEGIN " + SOURCES.getFirst());
@@ -96,7 +96,7 @@ class StockSchemaSyncTest {
             .contains("DROP VIEW IF EXISTS " + view.group(1) + ";");
       }
     }
-    assertThat(objects).isEqualTo(7);
+    assertThat(objects).isEqualTo(6); // MV 3 + 뷰 3 (종목 일별 지표는 테이블)
   }
 
   /**

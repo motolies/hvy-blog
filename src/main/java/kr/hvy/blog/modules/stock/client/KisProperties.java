@@ -171,6 +171,15 @@ public class KisProperties {
      * 컨테이너 shm_size 를 1GB 이상으로 올린 뒤에는 2~4 로 올려도 된다.
      */
     private int maxParallelWorkers = 0;
+
+    /**
+     * DAILY 가 다시 계산하는 종목 일별 지표의 최근 일수(캘린더일). 일봉 재수집 창(backfill.window-days 140)과 맞춘다.
+     * WEEKLY 는 전체를 다시 계산해 수정계수 변경 등 과거 구간의 변화를 흡수한다.
+     */
+    private int metricRecomputeDays = 140;
+
+    /** 창 함수 프레임(최대 252거래일)이 잘리지 않도록 기록 하한보다 앞서 읽는 입력 여유(캘린더일) */
+    private int metricLookbackDays = 420;
   }
 
   @Data

@@ -15,11 +15,11 @@
 
 1. 운영 DB에 순서대로 적용한다. 모두 재실행 안전(`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`).
    ```bash
-   psql "$DATABASE_URL" -f src/main/resources/db/stock-schema.sql    # 테이블 19개
-   psql "$DATABASE_URL" -f src/main/resources/db/stock-derived.sql   # MV 4개 + 뷰 3개 (schema 뒤에)
+   psql "$DATABASE_URL" -f src/main/resources/db/stock-schema.sql    # 테이블 21개 (재실행하면 새 테이블·COMMENT 만 반영)
+   psql "$DATABASE_URL" -f src/main/resources/db/stock-derived.sql   # MV 4개 + 뷰 3개 (schema 뒤에). MV 정의를 바꿨으면 stock-derived-rebuild.sql 선행(§9)
    psql "$DATABASE_URL" -f src/main/resources/db/stock-seed.sql      # tb_stock_global_sector_map 시드
    ```
-   `schema-postgres.sql`(전체 재구축용) 은 위 세 파일의 **원문**을 `-- >>> BEGIN db/stock-*.sql` / `-- <<< END …` 마커로 감싸 그대로 포함하고, DROP 블록에 stock 테이블 19개가 있다. 수정은 `db/stock-*.sql` 원본에만 하고 복사본을 갱신한다. `StockSchemaSyncTest` 가 불일치를 잡는다.
+   `schema-postgres.sql`(전체 재구축용) 은 위 세 파일의 **원문**을 `-- >>> BEGIN db/stock-*.sql` / `-- <<< END …` 마커로 감싸 그대로 포함하고, DROP 블록에 stock 테이블 21개가 있다. 수정은 `db/stock-*.sql` 원본에만 하고 복사본을 갱신한다. `StockSchemaSyncTest` 가 불일치를 잡는다.
    **기존 테이블의 새 컬럼**은 `CREATE TABLE IF NOT EXISTS` 로 반영되지 않으므로 `src/main/resources/db/migrate/<날짜>_<번호>_<내용>.sql`(`ALTER TABLE … ADD COLUMN IF NOT EXISTS`, 재실행 안전)을 먼저 적용한다. 현재: `20260908_01_financial_ratio_columns.sql`(재무 9컬럼).
 2. 환경변수 `KIS_APP_KEY`, `KIS_APP_SECRET` 를 주입한다(Dockerfile·yml 기본값 없음). 없으면 앱은 기동되지만 모든 수집 잡이 400으로 거부된다.
 3. `scheduler.stock-*.enabled` 는 default/prod 모두 `false` 로 배포한다. 백필 완료 후 `true` 로 바꾼다.
@@ -151,23 +151,28 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
   cat src/main/resources/db/stock-derived-rebuild.sql src/main/resources/db/stock-derived.sql | psql -1 "$DATABASE_URL"
   curl -X POST $B/ADJUST_FACTOR    # 계수 재산출·대조. 최신 거래일 adj_close == raw_close 확인
   ```
+- 재무 확장 9컬럼(2026-09-08)은 첫 재조회에서 기존 최신 행에 **채워지고 리비전을 올리지 않는다**(핵심 10개가 같고 확장이 전부 NULL 일 때). 채우려면 `POST /FINANCIAL_BACKFILL -d '{"resetCheckpoint":true}'` 또는 다음 WEEKLY.
 - 2026-09-08 효력일 상한 도입 이전에 적재된 **미래 유상증자 계수 행**은 효력일에 잘못된 계수(최근 종가 기준)로 켜질 수 있어 1회 수기 삭제한다(다른 유형의 미래 행은 MV 술어로 무해): `DELETE FROM tb_stock_adjust_event WHERE action_type='RIGHTS_ISSUE' AND effective_date > (now() AT TIME ZONE 'Asia/Seoul')::date`.
 
 ## 10. 실측이 필요한 항목 (실전 키 필요, 코드가 가정한 값)
 
 | 항목 | 가정 | 확인 방법 |
 |---|---|---|
-| 일봉 소급 한계 | 2015년까지 제공 | `PRICE_BACKFILL` 후 `EXHAUSTED` 체크포인트의 `earliest_loaded` 분포 |
+| 일봉 소급 한계 | **확인됨(2026-09-08)** — 2,720종목 전부 DONE·EXHAUSTED 0, 최소 2014-10-27 (2015 이전까지 제공) | `PRICE_BACKFILL` 체크포인트 summary |
 | 상폐 종목 조회 가능 여부 | **확인됨(2026-09-07)** — 동양생명 082640 에 `lstg_abol_dt=20260831` 이 옴. 단, 응답 `pdno` 는 12자 상품번호(`00000A082640`)라 ticker 로 쓰면 varchar(10) 초과 → 요청 종목코드를 키로 쓰도록 수정. `pdno` 가 요청 코드로 끝나지 않으면 run metadata `pdnoMismatch` 에 센다 | `POST /STOCK_INFO {"tickers":["<상폐코드>"]}` → `is_active=false` 행이 6자 ticker 로 생성되는지 |
 | 수정주가 모드 거래량 보정 | 미정 | `ADJUST_FACTOR` run metadata `verification` 의 volume 오차 |
-| 투자자 일별 소급 깊이·페이징 | 기준일 하나로 최근 N일, tr_cont 최대 5페이지 | `INVESTOR_BACKFILL` 체크포인트 `windows`/`earliest_loaded` |
+| 투자자 일별 소급 깊이·페이징 | 호출당 30건(일부 60건) 확인. 2026-09-08 실측은 API 한계가 아니라 `max-windows=40` 상한(2021-10-13/14·2016-11-22/23 두 클러스터)에서 멈춘 것 → 120 으로 올려 재실행 | 재실행 후 `EXHAUSTED` 의 `earliest_loaded` 분포 (PAUSED 가 남으면 재트리거) |
 | 투자자·재무 금액 단위 | 응답 그대로(원 / 억원 추정) | 삼성전자 1건을 HTS 값과 비교 |
 | 시가총액 `hts_avls` | 억원 → ×1e8 | `tb_stock_valuation_daily.market_cap` 대조 |
 | 마스터 `lstn_stcn` | 헤더 주석은 "(천)" 이나 원값 저장 | 현재가 API `lstn_stcn` 과 비교 후 필요 시 `StockMaster.applyFrom` 보정 |
 | 예탁원 배정율 단위 | 주당 주수(0.5 = 1주당 0.5주) | 무상증자 종목 계수 대조 결과 |
 | ksdinfo 연속조회 | CTS 승계 없이 tr_cont=N, 동일 페이지 반복 시 중단 | run 실패 목록 |
-| 해외 코드 `FX@KRW`, `SOX`, AMS 거래소 ETF | KIS 해외지수 마스터 기준 추정 | `OVERSEAS_BACKFILL` 실패 목록에서 심볼별 확인 후 yml 조정 |
-| 재무 API 파라미터 대소문자 | 공식 예제 그대로(FID_DIV_CLS_CODE / fid_cond_mrkt_div_code) | `FINANCIAL_BACKFILL` 1종목 실행 |
+| 해외 코드 `FX@KRW`, `SOX`, AMS 거래소 ETF | **확인됨(2026-09-08)** — yml 29심볼 전부 적재(82,805행, 2014-09~) | 심볼별 행 수가 극단적으로 적은 것만 재확인 |
+| 재무 API 파라미터 대소문자 | **확인됨(2026-09-08)** — 손익·대차·재무비율 3종 116K행·2,565종목·2004~ 적재 | — |
+| 재무 성장성·수익성·안정성 3종 필드명 | data.csv column_mapping 그대로(`bsop_prfi_inrt`, `cptl_ntin_rate`, `crnt_rate` 등) | `FINANCIAL_BACKFILL {"tickers":["005930"],"resetCheckpoint":true}` 후 `raw_json` 키·9컬럼 값 확인 |
+| ETF NAV (FHPST02440200) | output 단일 리스트, 100건/호출, 괴리율 부호·NAV 소수 4자리 가정 | `KisEtfNavManualTest`(069500) → `ETF_NAV_BACKFILL` 체크포인트 EXHAUSTED 분포 |
+| 시장별 투자자 (FHPTJ04040000) | 경로 `inquire-investor-daily-by-market`(예제 디렉터리명 추정), `FID_INPUT_ISCD`=종합지수코드·`_1`=KSP/KSQ·`_2`=종합지수코드, 호출당 1일, 금액 원 | **백필 전 필수** `KisMarketInvestorManualTest`: KSP 와 KSQ 응답이 다른지, 0001 vs 1001, 응답 일수, HTS 0404 단위 대조 |
+| theme_code.mst 레이아웃 | 앞 3자 테마코드 + 가변 테마명 + 줄 끝 10자 종목코드(6자 또는 A 접두) | `KisThemeFileManualTest`(@Disabled 해제, 키 불필요) 히스토그램 → `THEME_TICKER_WIDTH`·`ThemeCodeRecord.ticker()` 확정 |
 | EGW00133 등 토큰 오류 코드 | `KisErrorCode` 추정값 | `tb_stock_kis_api_failure.kis_msg_cd` |
 
 ## 11. 테스트

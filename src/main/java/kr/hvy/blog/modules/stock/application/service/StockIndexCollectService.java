@@ -137,7 +137,7 @@ public class StockIndexCollectService implements CollectJob {
     switch (outcome.termination()) {
       case REACHED_TARGET -> checkpoint.markDone();
       case EXHAUSTED, EMPTY -> checkpoint.markExhausted();
-      case WINDOW_LIMIT -> checkpoint.markFailed("윈도우 수 상한 도달 (" + outcome.windows() + ")");
+      case WINDOW_LIMIT -> checkpoint.pause("윈도우 수 상한 도달 (" + outcome.windows() + "), 다음 실행이 커서부터 이어감");
     }
   }
 }

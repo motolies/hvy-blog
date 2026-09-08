@@ -119,7 +119,7 @@ public class KisProperties {
     private int windowDays = 140;
 
     /** 종목당 최대 윈도우 수 (무한 루프 안전장치) */
-    private int maxWindows = 40;
+    private int maxWindows = 120;
 
     /** 종목 병렬 호출 수. 레이트 리미터가 전역 게이트라 한도는 넘지 않는다 */
     private int concurrency = 3;

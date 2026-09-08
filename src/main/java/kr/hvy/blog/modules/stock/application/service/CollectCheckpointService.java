@@ -27,7 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class CollectCheckpointService {
 
   private static final List<CheckpointStatus> RESUMABLE = List.of(
-      CheckpointStatus.PENDING, CheckpointStatus.IN_PROGRESS, CheckpointStatus.FAILED);
+      CheckpointStatus.PENDING, CheckpointStatus.IN_PROGRESS, CheckpointStatus.FAILED, CheckpointStatus.PAUSED);
 
   private final StockCollectCheckpointRepository repository;
   private final KisProperties properties;

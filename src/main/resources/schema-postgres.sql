@@ -1258,7 +1258,7 @@ COMMENT ON COLUMN tb_stock_collect_checkpoint.target_key      IS '종목코드 �
 COMMENT ON COLUMN tb_stock_collect_checkpoint.cursor_date     IS '다음 윈도우의 종료일 (뒤로 밀며 감소)';
 COMMENT ON COLUMN tb_stock_collect_checkpoint.earliest_loaded IS '지금까지 확보한 가장 오래된 거래일';
 COMMENT ON COLUMN tb_stock_collect_checkpoint.latest_loaded   IS '지금까지 확보한 가장 최근 거래일';
-COMMENT ON COLUMN tb_stock_collect_checkpoint.status          IS '상태: PENDING | IN_PROGRESS | DONE | EXHAUSTED | FAILED';
+COMMENT ON COLUMN tb_stock_collect_checkpoint.status          IS '상태: PENDING | IN_PROGRESS | DONE | EXHAUSTED | FAILED | PAUSED(윈도우 상한, 재개 가능)';
 COMMENT ON COLUMN tb_stock_collect_checkpoint.attempt_count   IS '시도 횟수 (임계 초과 시 FAILED 확정)';
 COMMENT ON COLUMN tb_stock_collect_checkpoint.last_run_id     IS '마지막으로 처리한 run_id';
 COMMENT ON COLUMN tb_stock_collect_checkpoint.error_message   IS '마지막 오류 메시지';

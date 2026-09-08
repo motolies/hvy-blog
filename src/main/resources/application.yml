@@ -173,7 +173,7 @@ kis:
   backfill:
     start-date: "2015-01-01"
     window-days: 140          # 일봉 100건 ≈ 캘린더 140일
-    max-windows: 40           # 종목당 최대 윈도우 수 (무한 루프 안전장치)
+    max-windows: 120          # 종목당 최대 윈도우 수 (무한 루프 안전장치. 상한 도달은 PAUSED 로 남아 다음 실행이 이어감. 수급은 호출당 30건이라 2015 까지 ≈96 윈도우)
     concurrency: 3
     max-attempts: 5           # 체크포인트 시도 임계, 초과 시 FAILED 확정
   run:

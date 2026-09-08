@@ -123,6 +123,17 @@ public class StockCollectCheckpoint {
   }
 
   /**
+   * 윈도우 상한 같은 정상적 중단을 기록한다. 커서를 보존한 채 PAUSED 로 두고 start() 가 올린 시도 횟수를 되돌린다.
+   * 실패가 아니므로 attempt 임계를 소모하지 않고, 다음 실행이 커서부터 이어받는다.
+   */
+  public void pause(String message) {
+    this.status = CheckpointStatus.PAUSED;
+    this.attemptCount = Math.max(0, this.attemptCount - 1);
+    this.errorMessage = StringUtils.abbreviate(message, ERROR_MESSAGE_LIMIT);
+    touch();
+  }
+
+  /**
    * 커서를 되돌리고 대기 상태로 초기화한다 (부분 재적재).
    */
   public void reset(LocalDate cursorDate) {

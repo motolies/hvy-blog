@@ -69,7 +69,7 @@ curl -X POST $B/DERIVED_REFRESH                          # MV 4개 갱신 (소�
 curl -X POST $B/VALIDATE                                 # 정합성 점검
 ```
 
-- 진행 확인: `GET $B/checkpoints/summary?jobType=PRICE_BACKFILL` (DONE ≥ 99% 목표, `EXHAUSTED` = KIS 소급 한계, `FAILED` = 5회 초과).
+- 진행 확인: `GET $B/checkpoints/summary?jobType=PRICE_BACKFILL` (DONE ≥ 99% 목표, `EXHAUSTED` = KIS 소급 한계, `PAUSED` = 윈도우 상한(`kis.backfill.max-windows`) 도달·재트리거로 이어감, `FAILED` = 5회 초과).
 - 백필 실행기는 단일 스레드(큐 10). 다른 백필 잡을 넣으면 순서대로 돈다. 같은 잡은 409.
 - 종목 동시성 `kis.backfill.concurrency`(3), 전역 한도 `kis.rate-limit`(200ms×3 = 15건/초, EGW00201 시 자동 하향·연속 성공 200회 후 원복).
 
@@ -136,6 +136,7 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 - 프로세스 강제 종료·재배포: 기동 시 RUNNING run 을 **전부** FAILED 로 정리한다(`kis.run.reconcile-all-on-startup=true`, 단일 인스턴스 전제). 다중 인스턴스로 가면 false 로 두고 `stale-after`(6h) 기준만 쓴다. 체크포인트 `IN_PROGRESS` 는 다음 트리거가 커서부터 이어받는다.
 - 특정 종목 다시 받기: `POST /reload {"tickers":["005930"],"startDate":"2024-01-01"}` (삭제 없이 upsert 덮어쓰기).
 - 체크포인트 FAILED 5회 초과 → 건너뜀. 되돌리려면 `{"tickers":[…],"resetCheckpoint":true}`.
+- 윈도우 상한(`max-windows`) 도달은 FAILED 가 아니라 **PAUSED** 로 남고 attempt 를 소모하지 않는다. 같은 잡을 다시 트리거하면 커서부터 이어받는다. (2026-09-08 이전 상한 40 으로 FAILED 가 된 INVESTOR_BACKFILL 2,185건도 attempt 1 이라 `POST /INVESTOR_BACKFILL` 재트리거만으로 이어간다.)
 - KIS 장애로 하루 결손: 다음 날 DAILY 가 최근 100건 윈도우를 재수집하므로 자동 복구. 2일 이상은 reload.
 - MV 미적용 상태(psql 전): `ADJUST_FACTOR`·`DERIVED_REFRESH` 는 경고만 남기고 건너뛴다.
 - MV 정의를 바꿨을 때(파생 재구축): `CREATE MATERIALIZED VIEW IF NOT EXISTS` 는 기존 MV 를 바꾸지 못하므로 의존 역순 DROP 후 재생성한다. 한 트랜잭션이라 소비자가 뷰 부재를 보지 않지만 수 분 락이 걸리므로 DAILY 18:30 창 밖에서 실행한다.

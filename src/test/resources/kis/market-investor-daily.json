@@ -1,0 +1,40 @@
+{
+  "rt_cd": "0",
+  "msg_cd": "MCA00000",
+  "msg1": "정상처리 되었습니다.",
+  "output": [
+    {
+      "stck_bsop_date": "20260904",
+      "frgn_ntby_qty": "1",
+      "frgn_ntby_tr_pbmn": "2",
+      "frgn_reg_ntby_qty": "3",
+      "frgn_reg_ntby_pbmn": "4",
+      "frgn_nreg_ntby_qty": "5",
+      "frgn_nreg_ntby_pbmn": "6",
+      "prsn_ntby_qty": "7",
+      "prsn_ntby_tr_pbmn": "8",
+      "orgn_ntby_qty": "9",
+      "orgn_ntby_tr_pbmn": "10",
+      "scrt_ntby_qty": "11",
+      "scrt_ntby_tr_pbmn": "12",
+      "ivtr_ntby_qty": "13",
+      "ivtr_ntby_tr_pbmn": "14",
+      "pe_fund_ntby_vol": "15",
+      "pe_fund_ntby_tr_pbmn": "16",
+      "bank_ntby_qty": "17",
+      "bank_ntby_tr_pbmn": "18",
+      "insu_ntby_qty": "19",
+      "insu_ntby_tr_pbmn": "20",
+      "mrbn_ntby_qty": "21",
+      "mrbn_ntby_tr_pbmn": "22",
+      "fund_ntby_qty": "23",
+      "fund_ntby_tr_pbmn": "24",
+      "etc_ntby_qty": "25",
+      "etc_ntby_tr_pbmn": "26",
+      "etc_orgt_ntby_vol": "27",
+      "etc_orgt_ntby_tr_pbmn": "28",
+      "etc_corp_ntby_vol": "29",
+      "etc_corp_ntby_tr_pbmn": "30"
+    }
+  ]
+}

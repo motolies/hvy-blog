@@ -8,7 +8,11 @@ import java.util.List;
 import kr.hvy.blog.modules.stock.client.dto.KisDailyChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisEtfNavResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisHolidayResponse;
+import kr.hvy.blog.modules.stock.client.KisJson;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
+import kr.hvy.blog.modules.stock.domain.code.MarketType;
+import kr.hvy.blog.modules.stock.domain.model.MarketInvestorRow;
 import kr.hvy.blog.modules.stock.domain.model.DailyPriceRow;
 import kr.hvy.blog.modules.stock.domain.model.EtfNavRow;
 import kr.hvy.blog.modules.stock.domain.model.HolidayRow;
@@ -86,5 +90,34 @@ class StockRowMapperTest {
     assertThat(row.disparityRate()).isEqualByComparingTo("-0.22");
     assertThat(row.volume()).isEqualTo(1_234_567L);
     assertThat(row.navPrevDiffSign()).isEqualTo("2");
+  }
+
+  @Test
+  @DisplayName("시장별 투자자: 31개 키 JSON 이 전부 역직렬화되고(접미사 예외 5개 포함) 15주체 대금·수량이 행으로 들어간다")
+  void marketInvestorRows() throws Exception {
+    String json;
+    try (var in = getClass().getClassLoader().getResourceAsStream("kis/market-investor-daily.json")) {
+      assertThat(in).isNotNull();
+      json = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+    KisMarketInvestorResponse response = KisJson.read(json, KisMarketInvestorResponse.class);
+    KisMarketInvestorResponse.Row raw = response.output().get(0);
+    // 픽스처는 키 순서대로 0..30 을 넣었다: 날짜, (수량, 대금) × 15
+    assertThat(raw.foreignNetQty()).isEqualTo("1");
+    assertThat(raw.foreignRegNetAmt()).isEqualTo("4");      // frgn_reg_ntby_pbmn (접미사 예외)
+    assertThat(raw.privateFundNetQty()).isEqualTo("15");    // pe_fund_ntby_vol (접미사 예외)
+    assertThat(raw.otherCorpNetQty()).isEqualTo("29");      // etc_corp_ntby_vol (접미사 예외)
+    assertThat(raw.otherCorpNetAmt()).isEqualTo("30");
+
+    List<MarketInvestorRow> rows = StockRowMapper.toMarketInvestorRows(MarketType.KOSDAQ, List.of(raw, raw));
+    assertThat(rows).hasSize(1);
+    MarketInvestorRow row = rows.get(0);
+    assertThat(row.marketType()).isEqualTo(MarketType.KOSDAQ);
+    assertThat(row.tradeDate()).isEqualTo(LocalDate.of(2026, 9, 4));
+    assertThat(row.foreignNetQty()).isEqualTo(1L);
+    assertThat(row.foreignNetAmt()).isEqualTo(2L);
+    assertThat(row.pensionNetQty()).isEqualTo(23L);
+    assertThat(row.pensionNetAmt()).isEqualTo(24L);
+    assertThat(row.otherCorpNetAmt()).isEqualTo(30L);
   }
 }

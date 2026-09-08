@@ -3,6 +3,7 @@ package kr.hvy.blog.modules.stock.client;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.stock.domain.code.MarketType;
 import kr.hvy.blog.modules.stock.client.dto.KisCreditBalanceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisDailyChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisEtfNavResponse;
@@ -13,6 +14,7 @@ import kr.hvy.blog.modules.stock.client.dto.KisOverseasIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisHolidayResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisStockInfoResponse;
 
@@ -106,4 +108,9 @@ public interface KisMarketDataPort {
    * ETF NAV 비교추이(일) [from, to] 최신 100건 (FHPST02440200, 연속조회 없음).
    */
   List<KisEtfNavResponse.Row> fetchEtfNavDaily(String ticker, LocalDate from, LocalDate to, KisCallContext context);
+
+  /**
+   * 시장별 투자자매매동향(일별): 기준일 기준 (FHPTJ04040000, 연속조회 없음). 호출당 일수는 실측 항목.
+   */
+  List<KisMarketInvestorResponse.Row> fetchMarketInvestorDaily(MarketType market, LocalDate baseDate, KisCallContext context);
 }

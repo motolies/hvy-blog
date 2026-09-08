@@ -16,6 +16,8 @@ import kr.hvy.blog.modules.stock.client.dto.KisOverseasIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisHolidayResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
+import kr.hvy.blog.modules.stock.domain.code.MarketType;
 import kr.hvy.blog.modules.stock.client.dto.KisKsdInfoResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisStockInfoResponse;
@@ -52,6 +54,10 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
   public static final String SHORT_SALE_PATH = "/uapi/domestic-stock/v1/quotations/daily-short-sale";
   public static final String ETF_NAV_PATH = "/uapi/etfetn/v1/quotations/nav-comparison-daily-trend";
   public static final String ETF_NAV_TR_ID = "FHPST02440200";
+  /** 경로는 공식 예제 디렉터리명(inquire_investor_daily_by_market)에서 추정 — 실측 항목 */
+  public static final String MARKET_INVESTOR_PATH = "/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market";
+  public static final String MARKET_INVESTOR_TR_ID = "FHPTJ04040000";
+  private static final String MARKET_SECTOR = "U";
   public static final String SHORT_SALE_TR_ID = "FHPST04830000";
   public static final String CREDIT_BALANCE_PATH = "/uapi/domestic-stock/v1/quotations/daily-credit-balance";
   public static final String CREDIT_BALANCE_TR_ID = "FHPST04760000";
@@ -222,6 +228,20 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
     params.put("fid_input_iscd", ticker);
     KisFinancialResponse body = apiClient.get(kind.getPath(), kind.getTrId(), params, KisFinancialResponse.class,
         context.withTarget(ticker)).body();
+    return body.output() == null ? List.of() : body.output();
+  }
+
+  @Override
+  public List<KisMarketInvestorResponse.Row> fetchMarketInvestorDaily(MarketType market, LocalDate baseDate, KisCallContext context) {
+    Map<String, String> params = new LinkedHashMap<>();
+    params.put("FID_COND_MRKT_DIV_CODE", MARKET_SECTOR);
+    params.put("FID_INPUT_ISCD", market.getCompositeIndexCode());
+    params.put("FID_INPUT_DATE_1", KisValues.format(baseDate));
+    params.put("FID_INPUT_ISCD_1", market.getInvestorMarketCode());
+    params.put("FID_INPUT_DATE_2", KisValues.format(baseDate));
+    params.put("FID_INPUT_ISCD_2", market.getCompositeIndexCode());
+    KisMarketInvestorResponse body = apiClient.get(MARKET_INVESTOR_PATH, MARKET_INVESTOR_TR_ID, params,
+        KisMarketInvestorResponse.class, context.withTarget(market.getCode())).body();
     return body.output() == null ? List.of() : body.output();
   }
 

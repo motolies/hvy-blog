@@ -131,7 +131,7 @@ class StockPhase3PgTest {
     jdbc.update("INSERT INTO tb_stock_master (ticker, stock_name, market_type, security_group, is_active, is_suspended, created_at, updated_at) VALUES "
         + "('005930','삼성전자','KOSPI','ST',TRUE,FALSE,NOW(),NOW()), ('000660','SK하이닉스','KOSPI','ST',TRUE,FALSE,NOW(),NOW()), "
         + "('035420','NAVER','KOSPI','ST',TRUE,FALSE,NOW(),NOW()), ('000020','동화약품','KOSPI','ST',TRUE,TRUE,NOW(),NOW())");
-    new MarketIndexWriter(support).upsert(List.of(
+    new MarketIndexWriter(support, jdbc).upsert(List.of(
         new IndexDailyRow("0001", D1, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, null, null, null),
         new IndexDailyRow("0001", D2, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, null, null, null)));
     StockDailyPriceWriter priceWriter = new StockDailyPriceWriter(support);

@@ -13,12 +13,15 @@ import kr.hvy.blog.modules.stock.client.dto.KisEtfNavResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisHolidayResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisPriceResponse;
 import kr.hvy.blog.modules.stock.domain.model.DailyPriceRow;
 import kr.hvy.blog.modules.stock.domain.model.EtfNavRow;
 import kr.hvy.blog.modules.stock.domain.model.HolidayRow;
 import kr.hvy.blog.modules.stock.domain.model.IndexDailyRow;
+import kr.hvy.blog.modules.stock.domain.code.MarketType;
 import kr.hvy.blog.modules.stock.domain.model.InvestorDailyRow;
+import kr.hvy.blog.modules.stock.domain.model.MarketInvestorRow;
 import kr.hvy.blog.modules.stock.domain.model.ValuationRow;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -151,6 +154,22 @@ public final class StockRowMapper {
           KisValues.decimal(r.changeRate()), KisValues.longValue(r.volume()), KisValues.decimal(r.nav()),
           KisValues.decimal(r.navPrevDiff()), blankToNull(r.navPrevDiffSign()), KisValues.decimal(r.navChangeRate()),
           KisValues.decimal(r.navDiff()), KisValues.decimal(r.disparityRate())));
+    }
+    return new ArrayList<>(byDate.values());
+  }
+
+  /**
+   * 시장별 투자자매매동향 → 행. 날짜 없는 행은 버리고 같은 날짜는 앞 것을 남긴다.
+   */
+  public static List<MarketInvestorRow> toMarketInvestorRows(MarketType market, List<KisMarketInvestorResponse.Row> rows) {
+    Map<LocalDate, MarketInvestorRow> byDate = new LinkedHashMap<>();
+    for (KisMarketInvestorResponse.Row r : rows) {
+      LocalDate date = KisValues.date(r.tradeDate());
+      if (date == null) {
+        continue;
+      }
+      byDate.putIfAbsent(date, new MarketInvestorRow(market, date,
+          KisValues.longValue(r.foreignNetAmt()), KisValues.longValue(r.foreignNetQty()), KisValues.longValue(r.foreignRegNetAmt()), KisValues.longValue(r.foreignRegNetQty()), KisValues.longValue(r.foreignNregNetAmt()), KisValues.longValue(r.foreignNregNetQty()), KisValues.longValue(r.individualNetAmt()), KisValues.longValue(r.individualNetQty()), KisValues.longValue(r.institutionNetAmt()), KisValues.longValue(r.institutionNetQty()), KisValues.longValue(r.securitiesNetAmt()), KisValues.longValue(r.securitiesNetQty()), KisValues.longValue(r.investTrustNetAmt()), KisValues.longValue(r.investTrustNetQty()), KisValues.longValue(r.privateFundNetAmt()), KisValues.longValue(r.privateFundNetQty()), KisValues.longValue(r.bankNetAmt()), KisValues.longValue(r.bankNetQty()), KisValues.longValue(r.insuranceNetAmt()), KisValues.longValue(r.insuranceNetQty()), KisValues.longValue(r.merchantBankNetAmt()), KisValues.longValue(r.merchantBankNetQty()), KisValues.longValue(r.pensionNetAmt()), KisValues.longValue(r.pensionNetQty()), KisValues.longValue(r.otherNetAmt()), KisValues.longValue(r.otherNetQty()), KisValues.longValue(r.otherOrgNetAmt()), KisValues.longValue(r.otherOrgNetQty()), KisValues.longValue(r.otherCorpNetAmt()), KisValues.longValue(r.otherCorpNetQty())));
     }
     return new ArrayList<>(byDate.values());
   }

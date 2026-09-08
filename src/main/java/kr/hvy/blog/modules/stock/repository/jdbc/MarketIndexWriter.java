@@ -2,9 +2,11 @@ package kr.hvy.blog.modules.stock.repository.jdbc;
 
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.time.LocalDate;
 import java.util.List;
 import kr.hvy.blog.modules.stock.domain.model.IndexDailyRow;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -39,6 +41,16 @@ public class MarketIndexWriter {
       """;
 
   private final BatchUpsertSupport upsertSupport;
+  private final JdbcTemplate jdbcTemplate;
+
+  /**
+   * 지수 일봉이 존재하는 날짜(내림차순). 0001 을 넘기면 영업일 정본이다 (vw_stock_market_calendar 와 같은 정의).
+   */
+  public List<LocalDate> tradeDates(String indexCode, LocalDate from, LocalDate to) {
+    return jdbcTemplate.query(
+        "SELECT trade_date FROM tb_stock_index_daily WHERE index_code = ? AND trade_date BETWEEN ? AND ? ORDER BY trade_date DESC",
+        (rs, i) -> rs.getObject(1, LocalDate.class), indexCode, from, to);
+  }
 
   /**
    * 지수 일봉 행들을 upsert 하고 실제 변경 행 수를 돌려준다.

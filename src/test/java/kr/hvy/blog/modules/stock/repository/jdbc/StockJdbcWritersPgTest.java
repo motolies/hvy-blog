@@ -11,6 +11,7 @@ import kr.hvy.blog.modules.stock.domain.code.MarketType;
 import kr.hvy.blog.modules.stock.domain.model.EtfNavRow;
 import kr.hvy.blog.modules.stock.domain.model.HolidayRow;
 import kr.hvy.blog.modules.stock.domain.model.IndexDailyRow;
+import kr.hvy.blog.modules.stock.domain.model.MarketInvestorRow;
 import kr.hvy.blog.modules.stock.domain.model.MasterHistoryRow;
 import kr.hvy.blog.modules.stock.domain.model.SectorMapRow;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +48,7 @@ class StockJdbcWritersPgTest {
   void setUp() {
     jdbc = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
     support = new BatchUpsertSupport(jdbc);
-    jdbc.update("TRUNCATE tb_stock_master_history, tb_stock_sector_map, tb_stock_index_master, tb_stock_index_daily, tb_stock_market_holiday, tb_stock_etf_nav_daily");
+    jdbc.update("TRUNCATE tb_stock_master_history, tb_stock_sector_map, tb_stock_index_master, tb_stock_index_daily, tb_stock_market_holiday, tb_stock_etf_nav_daily, tb_stock_market_investor_daily");
   }
 
   @Test
@@ -64,6 +65,23 @@ class StockJdbcWritersPgTest {
     assertThat(writer.upsert(List.of(changed))).isEqualTo(1);
     BigDecimal nav = jdbc.queryForObject("SELECT nav FROM tb_stock_etf_nav_daily WHERE ticker = '069500'", BigDecimal.class);
     assertThat(nav).isEqualByComparingTo("45200");
+  }
+
+  @Test
+  @DisplayName("시장별 투자자 writer 는 (시장, 일자) 키로 upsert 하고 동일값은 건너뛴다")
+  void marketInvestor() {
+    StockMarketInvestorWriter writer = new StockMarketInvestorWriter(support);
+    MarketInvestorRow row = new MarketInvestorRow(MarketType.KOSPI, D1, 1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L, 11L, 12L, 13L, 14L,
+        15L, 16L, 17L, 18L, 19L, 20L, 21L, 22L, 23L, 24L, 25L, 26L, 27L, 28L, 29L, 30L);
+    assertThat(writer.upsert(List.of(row))).isEqualTo(1);
+    assertThat(writer.upsert(List.of(row))).isZero();
+    MarketInvestorRow kosdaq = new MarketInvestorRow(MarketType.KOSDAQ, D1, -1L, null, null, null, null, null, null, null, null, null,
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    assertThat(writer.upsert(List.of(kosdaq))).isEqualTo(1);
+    Long pension = jdbc.queryForObject("SELECT pension_net_amt FROM tb_stock_market_investor_daily WHERE market_type = 'KOSPI'", Long.class);
+    assertThat(pension).isEqualTo(23L);
+    Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM tb_stock_market_investor_daily", Integer.class);
+    assertThat(count).isEqualTo(2);
   }
 
   private static MasterHistoryRow history(String ticker, LocalDate from, boolean suspended) {
@@ -144,11 +162,13 @@ class StockJdbcWritersPgTest {
   @Test
   @DisplayName("지수 일봉·휴장일 upsert 는 동일값 재적재를 건너뛴다")
   void indexDailyAndHoliday() {
-    MarketIndexWriter indexWriter = new MarketIndexWriter(support);
+    MarketIndexWriter indexWriter = new MarketIndexWriter(support, jdbc);
     List<IndexDailyRow> rows = List.of(new IndexDailyRow("0001", D1, new BigDecimal("2600.1"), new BigDecimal("2650.5"),
         new BigDecimal("2590.0"), new BigDecimal("2640.2"), 500_000L, 9_000_000_000L, null));
     assertThat(indexWriter.upsert(rows)).isEqualTo(1);
     assertThat(indexWriter.upsert(rows)).isZero();
+    assertThat(indexWriter.tradeDates("0001", D1.minusDays(30), D2)).containsExactly(D1);
+    assertThat(indexWriter.tradeDates("1001", D1.minusDays(30), D2)).isEmpty();
 
     MarketHolidayWriter holidayWriter = new MarketHolidayWriter(support, jdbc);
     List<HolidayRow> days = List.of(new HolidayRow(D1, true, true, true, true), new HolidayRow(D2, false, false, false, false));

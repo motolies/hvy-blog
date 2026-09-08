@@ -95,7 +95,8 @@ class FullBackfillJobTest {
     }
     assertThat(FullBackfillJob.subRequest(CollectJobType.PRICE_BACKFILL, request)).isSameAs(request);
     assertThat(FullBackfillJob.ORDER).containsSubsequence(CollectJobType.INVESTOR_BACKFILL, CollectJobType.VALUATION,
-        CollectJobType.MARKET_STAT, CollectJobType.ETF_NAV_BACKFILL, CollectJobType.FINANCIAL_BACKFILL);
+        CollectJobType.MARKET_STAT, CollectJobType.MARKET_INVESTOR_BACKFILL, CollectJobType.ETF_NAV_BACKFILL,
+        CollectJobType.FINANCIAL_BACKFILL);
   }
 
   @Test

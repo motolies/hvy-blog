@@ -26,6 +26,7 @@ public enum CollectJobType implements EnumCode<String> {
   FINANCIAL_BACKFILL("FINANCIAL_BACKFILL", "재무제표 백필", true),
   OVERSEAS_BACKFILL("OVERSEAS_BACKFILL", "해외 지표 백필", true),
   ETF_NAV_BACKFILL("ETF_NAV_BACKFILL", "ETF NAV 일별 백필", true),
+  MARKET_INVESTOR_BACKFILL("MARKET_INVESTOR_BACKFILL", "시장별 투자자 일별 백필", true),
   DERIVED_REFRESH("DERIVED_REFRESH", "파생 지표 갱신", false),
   VALIDATE("VALIDATE", "정합성 검증", false),
   DAILY("DAILY", "일일 증분 수집", false),

@@ -40,11 +40,11 @@
 요청 본문 `BackfillRequest`(모두 선택): `startDate`, `endDate`, `tickerFrom`, `tickerTo`, `tickers[]`, `indexCodes[]`, `resetCheckpoint`, `force`.
 응답 코드: 같은 잡이 RUNNING 이면 **409**(`runningRunId` 포함), 형식·전제조건 오류는 **400**. 둘 다 Slack 을 울리지 않는다.
 
-잡 유형(`CollectJobType`): `BACKFILL_ALL`(아래 §4 단계 순차), `MASTER`, `HOLIDAY`, `INDEX_BACKFILL`, `PRICE_BACKFILL`, `STOCK_INFO`, `VALUATION`, `MARKET_STAT`, `CORP_ACTION`, `ADJUST_FACTOR`, `INVESTOR_BACKFILL`, `ETF_NAV_BACKFILL`, `FINANCIAL_BACKFILL`, `OVERSEAS_BACKFILL`, `DERIVED_REFRESH`, `VALIDATE`, `DAILY`, `WEEKLY`, `OVERSEAS_DAILY`, `RELOAD`.
+잡 유형(`CollectJobType`): `BACKFILL_ALL`(아래 §4 단계 순차), `MASTER`, `HOLIDAY`, `INDEX_BACKFILL`, `PRICE_BACKFILL`, `STOCK_INFO`, `VALUATION`, `MARKET_STAT`, `CORP_ACTION`, `ADJUST_FACTOR`, `INVESTOR_BACKFILL`, `ETF_NAV_BACKFILL`, `MARKET_INVESTOR_BACKFILL`, `FINANCIAL_BACKFILL`, `OVERSEAS_BACKFILL`, `DERIVED_REFRESH`, `VALIDATE`, `DAILY`, `WEEKLY`, `OVERSEAS_DAILY`, `RELOAD`.
 
 ## 4. 최초 백필 순서 (장 마감 후 19:00 KST 이후 권장)
 
-한 번에 돌리려면 `BACKFILL_ALL` 하나면 된다. 아래 15단계를 이 순서로 하위 run 으로 실행하며(상위 run 의 `metadata_json.steps[]` 에 단계별 runId·상태·행 수),
+한 번에 돌리려면 `BACKFILL_ALL` 하나면 된다. 아래 16단계를 이 순서로 하위 run 으로 실행하며(상위 run 의 `metadata_json.steps[]` 에 단계별 runId·상태·행 수),
 한 단계가 실패해도 다음으로 넘어가고 재트리거하면 체크포인트부터 이어받는다. 상위 run 을 cancel 하면 진행 중인 하위 잡이 종목 경계에서 멈춘다.
 
 ```bash
@@ -66,6 +66,7 @@ curl -X POST $B/ADJUST_FACTOR                            # 계수 산출 → MV 
 curl -X POST $B/INVESTOR_BACKFILL                        # 소급 깊이 실측 (EXHAUSTED 분포 확인)
 curl -X POST $B/VALUATION                                # 오늘 스냅샷(시총·PER·PBR). 당일만 제공되므로 DAILY 로 누적 (BACKFILL_ALL 은 날짜 필터를 떼고 넘김)
 curl -X POST $B/MARKET_STAT                              # 공매도·신용·프로그램 최근 window-days
+curl -X POST $B/MARKET_INVESTOR_BACKFILL                 # 시장별(KOSPI·KOSDAQ) 투자자 15주체 2015~ (202, 영업일 역순 ≈5,800호출 ≈ 6분). KisMarketInvestorManualTest 실측 선행
 curl -X POST $B/ETF_NAV_BACKFILL                         # 활성 ETF(EF) NAV·괴리율 2015~ (202, ≈1,000종목 × 29윈도우 ≈ 30분)
 curl -X POST $B/FINANCIAL_BACKFILL                       # 종목당 12호출(6종 × 연/분기), 전 종목 ≈36분
 curl -X POST $B/OVERSEAS_BACKFILL                        # kis.overseas.symbols
@@ -82,7 +83,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | 스케줄러 | cron | 잡 | lockAtMostFor |
 |---|---|---|---|
 | `StockMasterScheduler` | 평일 05:30 | MASTER → HOLIDAY(1페이지) | 15m |
-| `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → ETF_NAV(활성 ETF 최근 1윈도우, +≈1,000호출) → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED (총 ≈19분) | 40m |
+| `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → MARKET_INVESTOR(시장별 오늘 1회, +2호출) → ETF_NAV(활성 ETF 최근 1윈도우, +≈1,000호출) → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED (총 ≈19분) | 40m |
 | `StockOverseasScheduler` | 화~토 06:30 | OVERSEAS_DAILY | 15m |
 | `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → STOCK_INFO(기업행사에만 있는 종목을 조회해 상폐일 있는 것만 비활성 마스터 행으로, 메타 `stockInfoCandidates`/`stockInfoApplied`) → ADJUST_FACTOR → FINANCIAL(정정 감지) | 2h |
 
@@ -107,6 +108,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | `tb_stock_global_market_daily` | (symbol, date) | 해외 지수·환율(N/X)·ETF·개별주(EQ, 수정주가) |
 | `tb_stock_market_stat_daily` | (ticker, date) | 공매도·신용잔고·프로그램(출처별 부분 upsert) |
 | `tb_stock_etf_nav_daily` | (ticker, date) | ETF 종가·NAV·괴리율 (FHPST02440200, 활성 EF 만, ETN 제외) |
+| `tb_stock_market_investor_daily` | (market_type, date) | KOSPI/KOSDAQ 투자자 15주체 순매수 대금·수량 (FHPTJ04040000, 영업일 역순 백필) |
 | `tb_stock_collect_run`, `tb_stock_collect_checkpoint`, `tb_stock_kis_token`, `tb_stock_kis_api_failure` | | 운영 |
 
 파생(`stock-derived.sql`): `mv_stock_adjust_factor`(EXP(SUM(LN)) 누적 계수, 이벤트 보유 종목만) → `vw_stock_daily_price_adj`(**가격 소비자의 유일한 진입점**) → `mv_stock_daily_metric`(ret 1/5/20/60/120, MA 5/20/60/120, 이격도, 52주 고점 252행, 거래대금 5/60, 외인·기관 5일) → `mv_stock_index_metric` → `mv_stock_sector_daily`(현재 KRX 매핑으로 과거를 근사) / `vw_stock_universe_daily`(ST·활성·비정지·비관리·시총 1,000억·거래대금 5일 10억 하한) / `vw_stock_market_calendar`.
@@ -188,4 +190,5 @@ H2 로는 `ON CONFLICT`·부분 유니크·MV 가 검증되지 않으므로 PG �
 - 재무는 6종(손익·대차·재무비율·성장성·수익성·안정성)을 호출한다(2026-09-08 확장, 종목당 12호출). 동명 필드 `grs`·`lblt_rate` 는 전문 API(성장성·안정성) 값. `profit_growth` 는 순이익 증가율(ntin_inrt)이고 영업이익 증가율은 `operating_profit_growth`. 기존 행의 새 컬럼은 첫 재조회에서 리비전 없이 채워진다.
 - P1 통계는 깊은 소급이 없어 BACKFILL_ALL 에서는 최근 창 1회, DAILY 에서 매일 누적(`kis.stats.enabled` 기본 true, 2026-09-08 부터).
 - ETF NAV(계획 P1 #18)는 2026-09-08 구현. ETN 은 마스터 ticker 가 `Q` 접두 7자라 `BackfillRequest.TICKER`·KIS 종목코드 형식과 맞지 않아 제외(필요 시 코드 정규화 후 EN 그룹 추가).
+- 시장별 투자자(계획 P2)는 2026-09-08 구현. 기준일 1회 호출·연속조회 없음이라 날짜 창 페이저 대신 0001 영업일 집합을 역순으로 돈다(휴장일 빈 응답을 소급 한계로 오판하지 않기 위해). 경로·파라미터 의미·금액 단위는 실측 항목(§10).
 - 실시간 웹소켓·Python 분석 환경은 범위 밖(계획대로). `KisMarketDataPort` 가 확장 경계.

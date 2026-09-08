@@ -114,7 +114,7 @@ class StockDerivedMetricPgTest {
             ticker.equals("035420") ? new BigDecimal("-1.0") : new BigDecimal("1.0"), null, null, "N", null));
       }
     }
-    new MarketIndexWriter(support).upsert(index);
+    new MarketIndexWriter(support, jdbc).upsert(index);
     new StockDailyPriceWriter(support).upsert(prices);
     jdbc.update("INSERT INTO tb_stock_master (ticker, stock_name, market_type, security_group, created_at, updated_at) VALUES "
         + "('005930','삼성전자','KOSPI','ST',NOW(),NOW()), ('000660','SK하이닉스','KOSPI','ST',NOW(),NOW()), ('035420','NAVER','KOSPI','ST',NOW(),NOW())");

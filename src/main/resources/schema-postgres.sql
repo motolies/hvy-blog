@@ -46,6 +46,7 @@ DROP TABLE IF EXISTS shedlock CASCADE;
 -- 주식(KIS) 수집 모듈 (생성 역순). CASCADE 가 파생 객체도 함께 제거한다:
 --   mv_stock_adjust_factor, vw_stock_daily_price_adj, vw_stock_market_calendar,
 --   mv_stock_daily_metric, mv_stock_index_metric, mv_stock_sector_daily, vw_stock_universe_daily
+DROP TABLE IF EXISTS tb_stock_market_investor_daily CASCADE;
 DROP TABLE IF EXISTS tb_stock_etf_nav_daily CASCADE;
 DROP TABLE IF EXISTS tb_stock_kis_api_failure CASCADE;
 DROP TABLE IF EXISTS tb_stock_kis_token CASCADE;
@@ -1387,6 +1388,84 @@ COMMENT ON COLUMN tb_stock_etf_nav_daily.collected_at       IS '마지막 수집
 
 CREATE INDEX IF NOT EXISTS idx_stock_etf_nav_daily_date
     ON tb_stock_etf_nav_daily (trade_date);
+
+
+-- ---------------------------------------------
+-- 시장별 투자자매매동향 일별 (FHPTJ04040000). KOSPI/KOSDAQ 단위 투자자 15주체 순매수 대금·수량.
+-- 백필은 tb_stock_index_daily(0001) 영업일 집합을 역순으로 돌며 기준일 1회 호출 (연속조회 없음). 금액 단위는 실측 항목.
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS tb_stock_market_investor_daily
+(
+    market_type              VARCHAR(10)    NOT NULL,
+    trade_date               DATE           NOT NULL,
+    foreign_net_amt          BIGINT                  DEFAULT NULL,
+    foreign_net_qty          BIGINT                  DEFAULT NULL,
+    foreign_reg_net_amt      BIGINT                  DEFAULT NULL,
+    foreign_reg_net_qty      BIGINT                  DEFAULT NULL,
+    foreign_nreg_net_amt     BIGINT                  DEFAULT NULL,
+    foreign_nreg_net_qty     BIGINT                  DEFAULT NULL,
+    individual_net_amt       BIGINT                  DEFAULT NULL,
+    individual_net_qty       BIGINT                  DEFAULT NULL,
+    institution_net_amt      BIGINT                  DEFAULT NULL,
+    institution_net_qty      BIGINT                  DEFAULT NULL,
+    securities_net_amt       BIGINT                  DEFAULT NULL,
+    securities_net_qty       BIGINT                  DEFAULT NULL,
+    invest_trust_net_amt     BIGINT                  DEFAULT NULL,
+    invest_trust_net_qty     BIGINT                  DEFAULT NULL,
+    private_fund_net_amt     BIGINT                  DEFAULT NULL,
+    private_fund_net_qty     BIGINT                  DEFAULT NULL,
+    bank_net_amt             BIGINT                  DEFAULT NULL,
+    bank_net_qty             BIGINT                  DEFAULT NULL,
+    insurance_net_amt        BIGINT                  DEFAULT NULL,
+    insurance_net_qty        BIGINT                  DEFAULT NULL,
+    merchant_bank_net_amt    BIGINT                  DEFAULT NULL,
+    merchant_bank_net_qty    BIGINT                  DEFAULT NULL,
+    pension_net_amt          BIGINT                  DEFAULT NULL,
+    pension_net_qty          BIGINT                  DEFAULT NULL,
+    other_net_amt            BIGINT                  DEFAULT NULL,
+    other_net_qty            BIGINT                  DEFAULT NULL,
+    other_org_net_amt        BIGINT                  DEFAULT NULL,
+    other_org_net_qty        BIGINT                  DEFAULT NULL,
+    other_corp_net_amt       BIGINT                  DEFAULT NULL,
+    other_corp_net_qty       BIGINT                  DEFAULT NULL,
+    collected_at             TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_stock_market_investor_daily PRIMARY KEY (market_type, trade_date)
+);
+
+COMMENT ON TABLE  tb_stock_market_investor_daily                          IS '시장별(KOSPI|KOSDAQ) 투자자 15주체 순매수 대금·수량 일별 (FHPTJ04040000)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.market_type              IS '시장 구분: KOSPI | KOSDAQ (KIS 파라미터 KSP | KSQ)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.trade_date               IS '영업일 (stck_bsop_date)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.foreign_net_amt          IS '외국인 순매수 대금 (frgn_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.foreign_net_qty          IS '외국인 순매수 수량 (frgn_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.foreign_reg_net_amt      IS '외국인 등록 순매수 대금 (frgn_reg_ntby_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.foreign_reg_net_qty      IS '외국인 등록 순매수 수량 (frgn_reg_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.foreign_nreg_net_amt     IS '외국인 비등록 순매수 대금 (frgn_nreg_ntby_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.foreign_nreg_net_qty     IS '외국인 비등록 순매수 수량 (frgn_nreg_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.individual_net_amt       IS '개인 순매수 대금 (prsn_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.individual_net_qty       IS '개인 순매수 수량 (prsn_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.institution_net_amt      IS '기관계 순매수 대금 (orgn_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.institution_net_qty      IS '기관계 순매수 수량 (orgn_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.securities_net_amt       IS '증권(금융투자) 순매수 대금 (scrt_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.securities_net_qty       IS '증권(금융투자) 순매수 수량 (scrt_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.invest_trust_net_amt     IS '투자신탁 순매수 대금 (ivtr_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.invest_trust_net_qty     IS '투자신탁 순매수 수량 (ivtr_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.private_fund_net_amt     IS '사모펀드 순매수 대금 (pe_fund_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.private_fund_net_qty     IS '사모펀드 순매수 수량 (pe_fund_ntby_vol)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.bank_net_amt             IS '은행 순매수 대금 (bank_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.bank_net_qty             IS '은행 순매수 수량 (bank_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.insurance_net_amt        IS '보험 순매수 대금 (insu_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.insurance_net_qty        IS '보험 순매수 수량 (insu_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.merchant_bank_net_amt    IS '종금 순매수 대금 (mrbn_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.merchant_bank_net_qty    IS '종금 순매수 수량 (mrbn_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.pension_net_amt          IS '기금(연기금) 순매수 대금 (fund_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.pension_net_qty          IS '기금(연기금) 순매수 수량 (fund_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.other_net_amt            IS '기타 순매수 대금 (etc_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.other_net_qty            IS '기타 순매수 수량 (etc_ntby_qty)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.other_org_net_amt        IS '기타 단체 순매수 대금 (etc_orgt_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.other_org_net_qty        IS '기타 단체 순매수 수량 (etc_orgt_ntby_vol)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.other_corp_net_amt       IS '기타 법인 순매수 대금 (etc_corp_ntby_tr_pbmn)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.other_corp_net_qty       IS '기타 법인 순매수 수량 (etc_corp_ntby_vol)';
+COMMENT ON COLUMN tb_stock_market_investor_daily.collected_at             IS '마지막 수집 시각';
 -- <<< END db/stock-schema.sql
 
 -- >>> BEGIN db/stock-derived.sql

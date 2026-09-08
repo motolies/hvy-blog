@@ -183,6 +183,9 @@ kis:
     max-pages: 15             # 휴장일 API 연속조회 페이지 상한 (startDate 지정 시에만 사용, 평소 1페이지)
   stats:
     enabled: true             # DAILY 에 P1 통계(공매도·신용·프로그램) 단계 포함 여부 (종목당 3호출 ≈ 8,400건 ≈ 9.5분 추가, DAILY ≈19분 < 40m 락)
+  derived:
+    work-mem: 512MB           # MV REFRESH 세션 정렬 메모리. 서버 기본 4MB 면 mv_stock_daily_metric 이 100분 초과(2026-09-08 실측). 서버 메모리에 맞춰 조정
+    concurrently: false       # 야간 DAILY·백필은 읽는 쪽이 없어 일반 REFRESH (CONCURRENTLY 는 전체 대조로 2배 이상 느림). 낮 수동 실행 중 조회를 막지 않으려면 true
   overseas:
     # "구분:거래소:심볼" — N 지수, X 환율(FHKST03030100), EQ 개별주·ETF(HHDFS76240000, NAS/NYS/AMS). 스펙 §4.4 매핑
     symbols:

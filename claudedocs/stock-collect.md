@@ -146,6 +146,7 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 - 윈도우 상한(`max-windows`) 도달은 FAILED 가 아니라 **PAUSED** 로 남고 attempt 를 소모하지 않는다. 같은 잡을 다시 트리거하면 커서부터 이어받는다. (2026-09-08 이전 상한 40 으로 FAILED 가 된 INVESTOR_BACKFILL 2,185건도 attempt 1 이라 `POST /INVESTOR_BACKFILL` 재트리거만으로 이어간다.)
 - KIS 장애로 하루 결손: 다음 날 DAILY 가 최근 100건 윈도우를 재수집하므로 자동 복구. 2일 이상은 reload.
 - MV 미적용 상태(psql 전): `ADJUST_FACTOR`·`DERIVED_REFRESH` 는 경고만 남기고 건너뛴다.
+- **MV 갱신 시간**: 2026-09-08 실측 `mv_stock_daily_metric` 6,294,938ms(105분, work_mem 4MB + CONCURRENTLY). `kis.derived.work-mem`(기본 512MB, REFRESH 세션에만 SET/RESET)과 `kis.derived.concurrently`(기본 false, 야간은 읽는 쪽이 없음)로 조정한다. 재실행 후 run 메타 `refreshMs` 를 다시 보고 3분을 넘으면 계획서 §6 의 증분 테이블 전환(`tb_stock_daily_metric` + 최근 N일 upsert, 뷰 이름 유지)으로 간다.
 - MV 정의를 바꿨을 때(파생 재구축): `CREATE MATERIALIZED VIEW IF NOT EXISTS` 는 기존 MV 를 바꾸지 못하므로 의존 역순 DROP 후 재생성한다. 한 트랜잭션이라 소비자가 뷰 부재를 보지 않지만 수 분 락이 걸리므로 DAILY 18:30 창 밖에서 실행한다.
   ```bash
   cat src/main/resources/db/stock-derived-rebuild.sql src/main/resources/db/stock-derived.sql | psql -1 "$DATABASE_URL"
@@ -196,5 +197,6 @@ H2 로는 `ON CONFLICT`·부분 유니크·MV 가 검증되지 않으므로 PG �
 - P1 통계는 깊은 소급이 없어 BACKFILL_ALL 에서는 최근 창 1회, DAILY 에서 매일 누적(`kis.stats.enabled` 기본 true, 2026-09-08 부터).
 - ETF NAV(계획 P1 #18)는 2026-09-08 구현. ETN 은 마스터 ticker 가 `Q` 접두 7자라 `BackfillRequest.TICKER`·KIS 종목코드 형식과 맞지 않아 제외(필요 시 코드 정규화 후 EN 그룹 추가).
 - 시장별 투자자(계획 P2)는 2026-09-08 구현. 기준일 1회 호출·연속조회 없음이라 날짜 창 페이저 대신 0001 영업일 집합을 역순으로 돈다(휴장일 빈 응답을 소급 한계로 오판하지 않기 위해). 경로·파라미터 의미·금액 단위는 실측 항목(§10).
+- 파생 MV 갱신은 `kis.derived.work-mem`(REFRESH 세션 한정 SET) 과 `kis.derived.concurrently`(기본 false) 로 제어한다. CONCURRENTLY 고정이던 것을 설정으로 뺐다(2026-09-08, 105분 실측).
 - 테마 매핑(계획 P2)은 2026-09-08 구현. 테마명 마스터 테이블을 두지 않고 `tb_stock_sector_map.sector_name` 에 보관한다(`tb_stock_index_master` 에 넣으면 INDEX_BACKFILL 대상으로 새어 나감). 줄 끝 10자 종목코드의 체계(6자/A 접두/기타)는 `KisThemeFileManualTest` 로 실측 후 `ThemeCodeRecord.ticker()` 규칙 확정.
 - 실시간 웹소켓·Python 분석 환경은 범위 밖(계획대로). `KisMarketDataPort` 가 확장 경계.

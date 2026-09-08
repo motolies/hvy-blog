@@ -136,6 +136,16 @@ class StockDerivedPgTest {
         .isCloseTo(100d, within(1e-6));
   }
 
+  @Test
+  @DisplayName("REFRESH 는 지정한 work_mem 으로 같은 커넥션에서 돌고, 형식 밖 값은 거부한다")
+  void refreshWithWorkMem() {
+    DerivedViewRefresher refresher = new DerivedViewRefresher(jdbc);
+    assertThat(refresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, false, "64MB")).isGreaterThanOrEqualTo(0);
+    assertThat(refresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, true, "64MB")).isGreaterThanOrEqualTo(0);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> refresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, false, "64MB; DROP TABLE x"))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
   /**
    * 종가 100·거래량 100 인 일봉 1행.
    */

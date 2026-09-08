@@ -46,6 +46,7 @@ public class KisProperties {
   private Calendar calendar = new Calendar();
   private Overseas overseas = new Overseas();
   private Stats stats = new Stats();
+  private Derived derived = new Derived();
 
   /**
    * 앱키와 시크릿이 모두 설정되어 있는지 확인한다.
@@ -147,6 +148,22 @@ public class KisProperties {
         "EQ:NAS:TSLA", "EQ:NAS:MSFT", "EQ:NAS:GOOGL", "EQ:NAS:AMZN", "EQ:NYS:ALB", "EQ:AMS:LIT",
         "EQ:AMS:XBI", "EQ:NAS:IBB", "EQ:AMS:ITA", "EQ:NYS:LMT", "EQ:NYS:RTX", "EQ:NYS:NOC",
         "EQ:AMS:XLF", "EQ:AMS:KRE", "EQ:AMS:XLE", "EQ:NAS:BOTZ", "EQ:AMS:ROBO"));
+  }
+
+  @Data
+  public static class Derived {
+
+    /**
+     * MV REFRESH 세션의 work_mem. 서버 기본 4MB 면 일봉 618만 행의 창 함수 정렬이 디스크로 넘쳐
+     * mv_stock_daily_metric 이 100분을 넘겼다(2026-09-08 실측 6,294,938ms). 서버 메모리에 맞춰 조정한다.
+     */
+    private String workMem = "512MB";
+
+    /**
+     * true 면 REFRESH … CONCURRENTLY (갱신 중 조회 가능하지만 기존 MV 와 전체 대조라 2배 이상 느림).
+     * 야간 DAILY·백필은 읽는 쪽이 없어 false 가 기본. 낮에 수동 실행하며 조회를 막고 싶지 않으면 true.
+     */
+    private boolean concurrently = false;
   }
 
   @Data

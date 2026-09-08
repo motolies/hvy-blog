@@ -1,8 +1,10 @@
 package kr.hvy.blog.modules.stock.repository.jdbc;
 
 import java.math.BigDecimal;
+import java.sql.Statement;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,6 +20,8 @@ public class DerivedViewRefresher {
 
   public static final String MV_ADJUST_FACTOR = "mv_stock_adjust_factor";
   public static final String VW_PRICE_ADJ = "vw_stock_daily_price_adj";
+  /** work_mem 값 형식 (SET 문에 그대로 들어가므로 숫자+단위만 허용) */
+  private static final Pattern WORK_MEM = Pattern.compile("^[1-9][0-9]*(kB|MB|GB)$");
 
   private final JdbcTemplate jdbcTemplate;
 
@@ -35,15 +39,44 @@ public class DerivedViewRefresher {
   }
 
   /**
-   * MV 를 갱신한다. CONCURRENTLY 는 유니크 인덱스가 있고 한 번 채워진 MV 에만 가능하다.
+   * MV 를 세션 기본 work_mem 으로 갱신한다 (테스트·소형 MV 용).
    *
    * @return 소요 ms
    */
   public long refresh(String name, boolean concurrently) {
+    return refresh(name, concurrently, null);
+  }
+
+  /**
+   * MV 를 갱신한다. CONCURRENTLY 는 유니크 인덱스가 있고 한 번 채워진 MV 에만 가능하다.
+   * workMem 이 있으면 같은 커넥션에서 SET work_mem 후 REFRESH 하고 끝나면 RESET 한다 — CONCURRENTLY 는 트랜잭션 블록 안에서
+   * 못 돌므로 SET LOCAL 대신 세션 SET 을 쓰고, 풀에 반환되기 전에 반드시 되돌린다.
+   *
+   * @return 소요 ms
+   */
+  public long refresh(String name, boolean concurrently, String workMem) {
+    if (workMem != null && !WORK_MEM.matcher(workMem).matches()) {
+      throw new IllegalArgumentException("work_mem 형식 오류: " + workMem + " (예: 512MB)");
+    }
+    String sql = "REFRESH MATERIALIZED VIEW " + (concurrently ? "CONCURRENTLY " : "") + name;
     long started = System.currentTimeMillis();
-    jdbcTemplate.execute("REFRESH MATERIALIZED VIEW " + (concurrently ? "CONCURRENTLY " : "") + name);
+    jdbcTemplate.execute((java.sql.Connection connection) -> {
+      try (Statement statement = connection.createStatement()) {
+        if (workMem != null) {
+          statement.execute("SET work_mem TO '" + workMem + "'");
+        }
+        try {
+          statement.execute(sql);
+        } finally {
+          if (workMem != null) {
+            statement.execute("RESET work_mem");
+          }
+        }
+      }
+      return null;
+    });
     long elapsed = System.currentTimeMillis() - started;
-    log.info("MV 갱신: {} concurrently={} {}ms", name, concurrently, elapsed);
+    log.info("MV 갱신: {} concurrently={} workMem={} {}ms", name, concurrently, workMem, elapsed);
     return elapsed;
   }
 

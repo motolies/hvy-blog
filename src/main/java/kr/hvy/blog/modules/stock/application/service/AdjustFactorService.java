@@ -156,7 +156,8 @@ public class AdjustFactorService implements CollectJob {
       log.warn("{} 가 없습니다. db/stock-derived.sql 을 적용하세요", DerivedViewRefresher.MV_ADJUST_FACTOR);
       return false;
     }
-    viewRefresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, true);
+    viewRefresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, properties.getDerived().isConcurrently(),
+        properties.getDerived().getWorkMem());
     return true;
   }
 

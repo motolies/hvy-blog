@@ -3,6 +3,7 @@ package kr.hvy.blog.modules.stock.application.service;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.stock.client.KisProperties;
 import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
 import kr.hvy.blog.modules.stock.repository.jdbc.DerivedViewRefresher;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class DerivedMetricRefreshService implements CollectJob {
   static final long WARN_THRESHOLD_MS = 3 * 60_000L;
 
   private final DerivedViewRefresher viewRefresher;
+  private final KisProperties properties;
 
   @Override
   public CollectJobType jobType() {
@@ -56,7 +58,7 @@ public class DerivedMetricRefreshService implements CollectJob {
         continue;
       }
       try {
-        long ms = viewRefresher.refresh(name, true);
+        long ms = viewRefresher.refresh(name, properties.getDerived().isConcurrently(), properties.getDerived().getWorkMem());
         timings.put(name, ms);
         total += ms;
         refreshed++;

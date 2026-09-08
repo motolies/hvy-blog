@@ -8,4 +8,5 @@ import java.time.LocalDate;
 public record SectorMapRow(String ticker, String sectorCode, LocalDate validFrom, String sectorName, String source) {
 
   public static final String SOURCE_KRX = "KRX";
+  public static final String SOURCE_THEME = "THEME";
 }

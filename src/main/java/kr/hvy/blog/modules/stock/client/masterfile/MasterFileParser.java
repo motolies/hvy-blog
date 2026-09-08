@@ -20,6 +20,9 @@ public class MasterFileParser {
   private static final int INDEX_DIV_WIDTH = 1;
   private static final int INDEX_CODE_WIDTH = 4;
   private static final int INDEX_NAME_WIDTH = 40;
+  /** 테마 마스터: 앞 3자 테마코드, 줄 끝 10자 종목코드(공식 파서 [-10:]), 가운데 가변 테마명. 실측 후 조정 */
+  public static final int THEME_CODE_WIDTH = 3;
+  public static final int THEME_TICKER_WIDTH = 10;
 
   /**
    * 종목 마스터 파일을 파싱한다. 길이가 맞지 않는 줄은 경고 후 건너뛴다(한 줄 때문에 전체를 버리지 않는다).
@@ -69,6 +72,30 @@ public class MasterFileParser {
       records.add(new IndexCodeRecord(div, code, name));
     }
     log.info("업종코드 마스터 파싱: records={}", records.size());
+    return records;
+  }
+
+  /**
+   * 테마코드 마스터(theme_code.mst)를 파싱한다. 한글 테마명이 가변이라 줄 끝 10자를 먼저 떼고 앞 3자를 코드로 본다.
+   */
+  public List<ThemeCodeRecord> parseThemeCodes(byte[] content) {
+    List<ThemeCodeRecord> records = new ArrayList<>();
+    int skipped = 0;
+    for (String line : lines(content)) {
+      if (line.length() < THEME_CODE_WIDTH + THEME_TICKER_WIDTH) {
+        skipped++;
+        continue;
+      }
+      String code = line.substring(0, THEME_CODE_WIDTH).trim();
+      String rawCode = line.substring(line.length() - THEME_TICKER_WIDTH).trim();
+      String name = line.substring(THEME_CODE_WIDTH, line.length() - THEME_TICKER_WIDTH).trim();
+      if (code.isEmpty() || rawCode.isEmpty()) {
+        skipped++;
+        continue;
+      }
+      records.add(new ThemeCodeRecord(code, name, rawCode));
+    }
+    log.info("테마코드 마스터 파싱: records={}, skipped={}", records.size(), skipped);
     return records;
   }
 

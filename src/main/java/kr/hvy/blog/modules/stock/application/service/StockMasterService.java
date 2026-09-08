@@ -7,12 +7,14 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import kr.hvy.blog.modules.stock.client.masterfile.IndexCodeRecord;
 import kr.hvy.blog.modules.stock.client.masterfile.MasterFileDownloader;
 import kr.hvy.blog.modules.stock.client.masterfile.MasterFileLayout;
 import kr.hvy.blog.modules.stock.client.masterfile.MasterFileParser;
 import kr.hvy.blog.modules.stock.client.masterfile.MasterRecord;
+import kr.hvy.blog.modules.stock.client.masterfile.ThemeCodeRecord;
 import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
 import kr.hvy.blog.modules.stock.domain.entity.StockMaster;
 import kr.hvy.blog.modules.stock.domain.model.MarketClock;
@@ -29,7 +31,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 종목 마스터 갱신(MASTER 잡): 마스터 파일 3종(kospi/kosdaq/idxcode) → tb_stock_master 덮어쓰기,
- * SCD2 이력, 섹터 매핑, 신규상장 체크포인트 생성. 상폐 종목은 비활성 처리만 하고 삭제하지 않는다.
+ * SCD2 이력, 섹터 매핑(KRX), 테마 매핑(theme_code.mst → THEME, N:M), 신규상장 체크포인트 생성. 상폐 종목은 비활성 처리만 하고 삭제하지 않는다.
+ * 테마 파일 실패는 마스터 갱신을 막지 않고 THEME 동기화만 건너뛴다(빈 목록으로 동기화하면 전 테마가 닫히므로).
  * <p>
  * 다운로드(네트워크)는 트랜잭션 밖에서 하고 DB 반영만 한 트랜잭션으로 묶는다.
  */
@@ -40,6 +43,7 @@ public class StockMasterService implements CollectJob {
   /** 파일이 잘려 내려온 경우 전 종목을 상폐 처리하는 사고를 막는 하한 */
   static final int MIN_EXPECTED_RECORDS = 1_000;
   static final String INDEX_CODE_FILE = "idxcode";
+  public static final String THEME_FILE = "theme_code";
 
   private final MasterFileDownloader downloader;
   private final MasterFileParser parser;
@@ -69,7 +73,8 @@ public class StockMasterService implements CollectJob {
    */
   public record MasterRefreshResult(int total, int inserted, int updated, int delisted, int historyChanged,
                                     int sectorChanged, int indexCodes, List<String> newTickers,
-                                    List<String> delistedTickers) {
+                                    List<String> delistedTickers, int themeChanged, int themeCodes, int themeSkipped,
+                                    boolean themeSkippedAll) {
   }
 
   @Override
@@ -90,6 +95,12 @@ public class StockMasterService implements CollectJob {
     execution.putMetadata("indexCodes", result.indexCodes());
     execution.putMetadata("newTickers", result.newTickers());
     execution.putMetadata("delistedTickers", result.delistedTickers());
+    execution.putMetadata("themeChanged", result.themeChanged());
+    execution.putMetadata("themeCodes", result.themeCodes());
+    execution.putMetadata("themeSkipped", result.themeSkipped());
+    if (result.themeSkippedAll()) {
+      execution.putMetadata("themeError", "theme_code.mst 다운로드·파싱 실패로 THEME 동기화 건너뜀");
+    }
   }
 
   /**
@@ -105,16 +116,30 @@ public class StockMasterService implements CollectJob {
       throw new IllegalStateException("마스터 레코드가 비정상적으로 적습니다(" + records.size()
           + "건). 파일 손상 가능성이 있어 반영하지 않습니다");
     }
+    List<ThemeCodeRecord> themes = downloadThemes().orElse(null);
     LocalDate today = MarketClock.today();
-    MasterRefreshResult result = transactionTemplate.execute(status -> apply(records, indexCodes, today));
+    MasterRefreshResult result = transactionTemplate.execute(status -> apply(records, indexCodes, themes, today));
     log.info("종목 마스터 갱신: {}", result);
     return result;
   }
 
   /**
-   * 파싱된 레코드를 한 트랜잭션으로 반영한다.
+   * 테마코드 마스터를 내려받아 파싱한다. 실패하면 로그만 남기고 빈 Optional — MASTER 잡 전체를 실패시키지 않는다.
    */
-  MasterRefreshResult apply(List<MasterRecord> records, List<IndexCodeRecord> indexCodes, LocalDate today) {
+  Optional<List<ThemeCodeRecord>> downloadThemes() {
+    try {
+      return Optional.of(parser.parseThemeCodes(downloader.download(THEME_FILE)));
+    } catch (RuntimeException e) {
+      log.warn("테마코드 마스터 실패 — THEME 동기화 건너뜀: {}", e.toString());
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * 파싱된 레코드를 한 트랜잭션으로 반영한다. themes 가 null 이면 THEME 동기화를 건너뛴다.
+   */
+  MasterRefreshResult apply(List<MasterRecord> records, List<IndexCodeRecord> indexCodes, List<ThemeCodeRecord> themes,
+      LocalDate today) {
     Map<String, IndexCodeRecord> uniqueIndex = new LinkedHashMap<>();
     for (IndexCodeRecord code : indexCodes) {
       uniqueIndex.putIfAbsent(code.indexCode(), code);
@@ -158,12 +183,50 @@ public class StockMasterService implements CollectJob {
     int historyChanged = historyWriter.apply(changedHistoryRows(all, today));
     int sectorChanged = sectorMapWriter.sync(desiredSectorRows(all, today, indexNames), today, SectorMapRow.SOURCE_KRX);
 
+    int themeChanged = 0;
+    int themeCodes = 0;
+    int themeSkipped = 0;
+    if (themes != null) {
+      ThemeRows themeRows = desiredThemeRows(all, themes, today);
+      themeChanged = sectorMapWriter.sync(themeRows.rows(), today, SectorMapRow.SOURCE_THEME);
+      themeCodes = themeRows.codes();
+      themeSkipped = themeRows.skipped();
+    }
+
     if (!newTickers.isEmpty()) {
       // 신규상장은 다음 일봉 백필이 이어받도록 PENDING 체크포인트만 만든다
       checkpointService.initialize(CollectJobType.PRICE_BACKFILL, newTickers, today, false);
     }
     return new MasterRefreshResult(seen.size(), inserted.size(), updated, delistedTickers.size(), historyChanged,
-        sectorChanged, uniqueIndex.size(), newTickers, delistedTickers);
+        sectorChanged, uniqueIndex.size(), newTickers, delistedTickers, themeChanged, themeCodes, themeSkipped, themes == null);
+  }
+
+  /** 테마 매핑 목표 상태와 집계 */
+  record ThemeRows(List<SectorMapRow> rows, int codes, int skipped) {
+  }
+
+  /**
+   * 테마 레코드 → THEME 섹터맵 목표 상태. 마스터에 있는 종목만 남기고(비상장·형식 밖은 skipped), 같은 (종목, 테마) 는 하나로 접는다.
+   */
+  private static ThemeRows desiredThemeRows(List<StockMaster> masters, List<ThemeCodeRecord> themes, LocalDate today) {
+    Set<String> known = new HashSet<>();
+    for (StockMaster m : masters) {
+      known.add(m.getTicker());
+    }
+    Map<String, SectorMapRow> rows = new LinkedHashMap<>();
+    Set<String> codes = new HashSet<>();
+    int skipped = 0;
+    for (ThemeCodeRecord theme : themes) {
+      String ticker = theme.ticker();
+      if (ticker == null || !known.contains(ticker)) {
+        skipped++;
+        continue;
+      }
+      codes.add(theme.themeCode());
+      rows.putIfAbsent(ticker + "|" + theme.themeCode(),
+          new SectorMapRow(ticker, theme.themeCode(), today, theme.themeName(), SectorMapRow.SOURCE_THEME));
+    }
+    return new ThemeRows(new ArrayList<>(rows.values()), codes.size(), skipped);
   }
 
   /**

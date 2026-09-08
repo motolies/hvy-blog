@@ -82,7 +82,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 
 | 스케줄러 | cron | 잡 | lockAtMostFor |
 |---|---|---|---|
-| `StockMasterScheduler` | 평일 05:30 | MASTER → HOLIDAY(1페이지) | 15m |
+| `StockMasterScheduler` | 평일 05:30 | MASTER(마스터 3종 + theme_code.mst → KRX·THEME 섹터맵, 테마 실패 시 THEME 만 건너뜀 `themeError`) → HOLIDAY(1페이지) | 15m |
 | `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → MARKET_INVESTOR(시장별 오늘 1회, +2호출) → ETF_NAV(활성 ETF 최근 1윈도우, +≈1,000호출) → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED (총 ≈19분) | 40m |
 | `StockOverseasScheduler` | 화~토 06:30 | OVERSEAS_DAILY | 15m |
 | `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → STOCK_INFO(기업행사에만 있는 종목을 조회해 상폐일 있는 것만 비활성 마스터 행으로, 메타 `stockInfoCandidates`/`stockInfoApplied`) → ADJUST_FACTOR → FINANCIAL(정정 감지) | 2h |
@@ -104,7 +104,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | `tb_stock_corporate_action` | uk(ticker, date, type, source) | 예탁원 7종 + 일봉 힌트(CHART_HINT), `raw_json` |
 | `tb_stock_adjust_event` | (ticker, date, type) | price/volume factor, `verified` |
 | `tb_stock_financial` | (ticker, period, type, revision_seq) | 손익·대차·재무비율·성장성·수익성·안정성 6종 병합(지표 19컬럼), `available_from`(LAG_45D/90D), `first_seen_at`. 확장 9컬럼이 NULL 인 기존 행에 처음 값이 오면 리비전 없이 채움 |
-| `tb_stock_sector_map`, `tb_stock_global_sector_map` | | KRX 중분류 매핑(SCD) / 국내 섹터↔미국 참조 시드 |
+| `tb_stock_sector_map`, `tb_stock_global_sector_map` | | KRX 중분류 매핑(SCD, 종목당 1개) + THEME 테마 매핑(theme_code.mst, N:M, 테마명은 `sector_name`, 목록은 `SELECT DISTINCT sector_code, sector_name WHERE source='THEME' AND valid_to IS NULL`) / 국내 섹터↔미국 참조 시드 |
 | `tb_stock_global_market_daily` | (symbol, date) | 해외 지수·환율(N/X)·ETF·개별주(EQ, 수정주가) |
 | `tb_stock_market_stat_daily` | (ticker, date) | 공매도·신용잔고·프로그램(출처별 부분 upsert) |
 | `tb_stock_etf_nav_daily` | (ticker, date) | ETF 종가·NAV·괴리율 (FHPST02440200, 활성 EF 만, ETN 제외) |
@@ -191,4 +191,5 @@ H2 로는 `ON CONFLICT`·부분 유니크·MV 가 검증되지 않으므로 PG �
 - P1 통계는 깊은 소급이 없어 BACKFILL_ALL 에서는 최근 창 1회, DAILY 에서 매일 누적(`kis.stats.enabled` 기본 true, 2026-09-08 부터).
 - ETF NAV(계획 P1 #18)는 2026-09-08 구현. ETN 은 마스터 ticker 가 `Q` 접두 7자라 `BackfillRequest.TICKER`·KIS 종목코드 형식과 맞지 않아 제외(필요 시 코드 정규화 후 EN 그룹 추가).
 - 시장별 투자자(계획 P2)는 2026-09-08 구현. 기준일 1회 호출·연속조회 없음이라 날짜 창 페이저 대신 0001 영업일 집합을 역순으로 돈다(휴장일 빈 응답을 소급 한계로 오판하지 않기 위해). 경로·파라미터 의미·금액 단위는 실측 항목(§10).
+- 테마 매핑(계획 P2)은 2026-09-08 구현. 테마명 마스터 테이블을 두지 않고 `tb_stock_sector_map.sector_name` 에 보관한다(`tb_stock_index_master` 에 넣으면 INDEX_BACKFILL 대상으로 새어 나감). 줄 끝 10자 종목코드의 체계(6자/A 접두/기타)는 `KisThemeFileManualTest` 로 실측 후 `ThemeCodeRecord.ticker()` 규칙 확정.
 - 실시간 웹소켓·Python 분석 환경은 범위 밖(계획대로). `KisMarketDataPort` 가 확장 경계.

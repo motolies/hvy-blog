@@ -108,4 +108,22 @@ class MasterFileParserTest {
     assertThat(codes.get(0)).isEqualTo(new IndexCodeRecord("0", "0001", "종합"));
     assertThat(codes.get(1)).isEqualTo(new IndexCodeRecord("0", "1001", "코스닥 종합"));
   }
+
+  @Test
+  @DisplayName("테마코드 마스터는 앞 3자 코드 + 가변 테마명 + 줄 끝 10자 종목코드이며, 짧은 줄은 건너뛴다")
+  void parseThemeCodes() {
+    String lines = "001반도체 장비                        005930    \n"
+        + "002AI 데이터센터          A000660   \n"
+        + "00\n"
+        + "003테마명            KR7005930003\n";
+    List<ThemeCodeRecord> themes = parser.parseThemeCodes(lines.getBytes(MasterFileParser.CP949));
+
+    assertThat(themes).hasSize(3);
+    assertThat(themes.get(0)).isEqualTo(new ThemeCodeRecord("001", "반도체 장비", "005930"));
+    assertThat(themes.get(0).ticker()).isEqualTo("005930");
+    assertThat(themes.get(1).themeName()).isEqualTo("AI 데이터센터");
+    assertThat(themes.get(1).ticker()).isEqualTo("000660");           // A 접두 제거
+    assertThat(themes.get(2).rawCode()).isEqualTo("7005930003");      // 끝 10자만 잘려 형식 밖 → 조인 불가
+    assertThat(themes.get(2).ticker()).isNull();
+  }
 }

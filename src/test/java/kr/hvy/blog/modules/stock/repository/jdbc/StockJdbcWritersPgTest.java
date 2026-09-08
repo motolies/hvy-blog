@@ -144,6 +144,26 @@ class StockJdbcWritersPgTest {
     writer.sync(day2b, D2, "KRX");
     Integer rows035420 = jdbc.queryForObject("SELECT COUNT(*) FROM tb_stock_sector_map WHERE ticker = '035420'", Integer.class);
     assertThat(rows035420).isEqualTo(2); // D1 행(닫힘) + D2 0046 행
+
+    // THEME: 한 종목이 테마 2개(N:M). KRX 행과 무관하게 소스별로 동기화된다
+    List<SectorMapRow> themes = List.of(
+        new SectorMapRow("005930", "001", D2, "반도체", "THEME"),
+        new SectorMapRow("005930", "002", D2, "AI", "THEME"),
+        new SectorMapRow("035420", "002", D2, "AI", "THEME"));
+    assertThat(writer.sync(themes, D2, "THEME")).isEqualTo(3);
+    assertThat(writer.sync(themes, D2, "THEME")).isZero();
+    // D3: 005930 이 AI 테마에서 이탈 → 그 쌍만 닫히고 나머지는 유지
+    LocalDate d3 = D2.plusDays(1);
+    assertThat(writer.sync(List.of(
+        new SectorMapRow("005930", "001", d3, "반도체", "THEME"),
+        new SectorMapRow("035420", "002", d3, "AI", "THEME")), d3, "THEME")).isZero();
+    LocalDate closedTheme = jdbc.queryForObject(
+        "SELECT valid_to FROM tb_stock_sector_map WHERE ticker = '005930' AND sector_code = '002' AND source = 'THEME'", LocalDate.class);
+    assertThat(closedTheme).isEqualTo(d3);
+    Integer openThemes = jdbc.queryForObject("SELECT COUNT(*) FROM tb_stock_sector_map WHERE source = 'THEME' AND valid_to IS NULL", Integer.class);
+    assertThat(openThemes).isEqualTo(2);
+    Integer openKrx = jdbc.queryForObject("SELECT COUNT(*) FROM tb_stock_sector_map WHERE source = 'KRX' AND valid_to IS NULL", Integer.class);
+    assertThat(openKrx).isEqualTo(2);
   }
 
   @Test

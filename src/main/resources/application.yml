@@ -186,6 +186,7 @@ kis:
   derived:
     work-mem: 512MB           # MV REFRESH 세션 정렬 메모리. 서버 기본 4MB 면 mv_stock_daily_metric 이 100분 초과(2026-09-08 실측). 서버 메모리에 맞춰 조정
     concurrently: false       # 야간 DAILY·백필은 읽는 쪽이 없어 일반 REFRESH (CONCURRENTLY 는 전체 대조로 2배 이상 느림). 낮 수동 실행 중 조회를 막지 않으려면 true
+    max-parallel-workers: 0   # REFRESH 세션 병렬 워커. Docker 기본 /dev/shm 64MB 에서 병렬 해시 조인이 'could not resize shared memory segment' 로 실패(2026-09-08). 컨테이너 shm_size 1GB+ 이후 2~4 로
   overseas:
     # "구분:거래소:심볼" — N 지수, X 환율(FHKST03030100), EQ 개별주·ETF(HHDFS76240000, NAS/NYS/AMS). 스펙 §4.4 매핑
     symbols:

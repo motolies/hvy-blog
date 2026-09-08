@@ -164,6 +164,13 @@ public class KisProperties {
      * 야간 DAILY·백필은 읽는 쪽이 없어 false 가 기본. 낮에 수동 실행하며 조회를 막고 싶지 않으면 true.
      */
     private boolean concurrently = false;
+
+    /**
+     * REFRESH 세션의 max_parallel_workers_per_gather. 병렬 해시 조인은 /dev/shm 에 동적 공유 메모리를 잡는데 Docker 기본 shm 64MB 에서는
+     * "could not resize shared memory segment … No space left on device" 로 실패한다(2026-09-08 실측). 0 이면 직렬 실행(창 함수는 원래 직렬).
+     * 컨테이너 shm_size 를 1GB 이상으로 올린 뒤에는 2~4 로 올려도 된다.
+     */
+    private int maxParallelWorkers = 0;
   }
 
   @Data

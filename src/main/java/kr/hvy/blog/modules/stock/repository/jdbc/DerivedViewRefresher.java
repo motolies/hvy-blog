@@ -44,7 +44,7 @@ public class DerivedViewRefresher {
    * @return 소요 ms
    */
   public long refresh(String name, boolean concurrently) {
-    return refresh(name, concurrently, null);
+    return refresh(name, concurrently, null, null);
   }
 
   /**
@@ -55,8 +55,19 @@ public class DerivedViewRefresher {
    * @return 소요 ms
    */
   public long refresh(String name, boolean concurrently, String workMem) {
+    return refresh(name, concurrently, workMem, null);
+  }
+
+  /**
+   * 세션 설정을 지정해 MV 를 갱신한다. maxParallelWorkers=0 이면 병렬 해시 조인이 /dev/shm 공유 메모리를 잡지 않아
+   * Docker 기본 shm(64MB) 에서도 안전하다. 설정은 같은 커넥션에서 SET → REFRESH → RESET 한다.
+   */
+  public long refresh(String name, boolean concurrently, String workMem, Integer maxParallelWorkers) {
     if (workMem != null && !WORK_MEM.matcher(workMem).matches()) {
       throw new IllegalArgumentException("work_mem 형식 오류: " + workMem + " (예: 512MB)");
+    }
+    if (maxParallelWorkers != null && (maxParallelWorkers < 0 || maxParallelWorkers > 64)) {
+      throw new IllegalArgumentException("max_parallel_workers_per_gather 범위 오류: " + maxParallelWorkers);
     }
     String sql = "REFRESH MATERIALIZED VIEW " + (concurrently ? "CONCURRENTLY " : "") + name;
     long started = System.currentTimeMillis();
@@ -65,18 +76,24 @@ public class DerivedViewRefresher {
         if (workMem != null) {
           statement.execute("SET work_mem TO '" + workMem + "'");
         }
+        if (maxParallelWorkers != null) {
+          statement.execute("SET max_parallel_workers_per_gather TO " + maxParallelWorkers);
+        }
         try {
           statement.execute(sql);
         } finally {
           if (workMem != null) {
             statement.execute("RESET work_mem");
           }
+          if (maxParallelWorkers != null) {
+            statement.execute("RESET max_parallel_workers_per_gather");
+          }
         }
       }
       return null;
     });
     long elapsed = System.currentTimeMillis() - started;
-    log.info("MV 갱신: {} concurrently={} workMem={} {}ms", name, concurrently, workMem, elapsed);
+    log.info("MV 갱신: {} concurrently={} workMem={} parallel={} {}ms", name, concurrently, workMem, maxParallelWorkers, elapsed);
     return elapsed;
   }
 

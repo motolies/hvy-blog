@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.NoSuchElementException;
 import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
 import kr.hvy.blog.modules.stock.domain.code.CollectStatus;
@@ -13,7 +14,6 @@ import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
 import kr.hvy.blog.modules.stock.repository.StockCollectRunRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -30,12 +30,18 @@ public class CollectRunService {
   private final StockCollectRunRepository repository;
 
   /**
-   * run 을 RUNNING 으로 생성한다. 같은 잡이 이미 RUNNING 이면 부분 유니크 인덱스가 막고
-   * {@link CollectAlreadyRunningException} 으로 변환한다.
+   * run 을 RUNNING 으로 생성한다. 같은 잡이 이미 RUNNING 이면 먼저 조회해 {@link CollectAlreadyRunningException} 을 던지고,
+   * 그 사이에 끼어든 경합은 부분 유니크 인덱스가 막는다(그때의 DataIntegrityViolationException 은 호출자가 변환한다).
+   * <p>
+   * 제약 위반을 이 메서드 안에서 잡고 다시 조회하면 안 된다 — 실패한 엔티티가 영속성 컨텍스트에 남아 다음 쿼리의 auto-flush 에서
+   * "null identifier" AssertionFailure 로 죽고, PG 트랜잭션도 이미 abort 상태다 (2026-09-08 DERIVED_REFRESH 중복 트리거 500).
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public StockCollectRun start(CollectJobType jobType, TriggerType triggerType, LocalDate targetDate,
       LocalDate rangeStart, LocalDate rangeEnd, Map<String, Object> metadata) {
+    repository.findFirstByJobTypeAndStatus(jobType, CollectStatus.RUNNING).ifPresent(running -> {
+      throw new CollectAlreadyRunningException(jobType, running.getRunId());
+    });
     StockCollectRun run = StockCollectRun.builder()
         .jobType(jobType)
         .triggerType(triggerType)
@@ -44,14 +50,15 @@ public class CollectRunService {
         .rangeEnd(rangeEnd)
         .metadataJson(metadata)
         .build();
-    try {
-      return repository.saveAndFlush(run);
-    } catch (DataIntegrityViolationException e) {
-      Long runningId = repository.findFirstByJobTypeAndStatus(jobType, CollectStatus.RUNNING)
-          .map(StockCollectRun::getRunId)
-          .orElse(null);
-      throw new CollectAlreadyRunningException(jobType, runningId);
-    }
+    return repository.saveAndFlush(run);
+  }
+
+  /**
+   * 잡의 RUNNING run id. 경합으로 제약 위반이 난 뒤 409 응답에 실을 id 를 새 트랜잭션에서 찾는다.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+  public Optional<Long> findRunningId(CollectJobType jobType) {
+    return repository.findFirstByJobTypeAndStatus(jobType, CollectStatus.RUNNING).map(StockCollectRun::getRunId);
   }
 
   /**

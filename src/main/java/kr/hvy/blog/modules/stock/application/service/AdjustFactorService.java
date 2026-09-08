@@ -157,7 +157,7 @@ public class AdjustFactorService implements CollectJob {
       return false;
     }
     viewRefresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, properties.getDerived().isConcurrently(),
-        properties.getDerived().getWorkMem());
+        properties.getDerived().getWorkMem(), properties.getDerived().getMaxParallelWorkers());
     return true;
   }
 

@@ -28,6 +28,7 @@ import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 /**
@@ -201,5 +202,17 @@ class StockCollectOrchestratorTest {
 
     assertThat(result.async()).isFalse();
     verify(runService).finish(eq(7L), eq(CollectStatus.CANCELED), any(String.class));
+  }
+
+  @Test
+  @DisplayName("사전 조회를 지나 INSERT 에서 부분 유니크 인덱스에 걸린 경합은 409(CollectAlreadyRunningException) 로 바뀐다")
+  void constraintRaceBecomesAlreadyRunning() {
+    when(runService.start(any(), any(), any(), any(), any(), any())).thenThrow(new DataIntegrityViolationException("uk_stock_collect_run_running"));
+    when(runService.findRunningId(CollectJobType.DERIVED_REFRESH)).thenReturn(Optional.of(63L));
+    CollectJob job = job(CollectJobType.DERIVED_REFRESH, execution -> { });
+
+    assertThatThrownBy(() -> orchestrator(job, Runnable::run).trigger(CollectJobType.DERIVED_REFRESH, null, TriggerType.API))
+        .isInstanceOf(CollectAlreadyRunningException.class)
+        .extracting("runningRunId").isEqualTo(63L);
   }
 }

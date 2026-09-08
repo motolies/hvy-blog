@@ -30,7 +30,7 @@
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| POST | `/api/stock/admin/collect/{jobType}` | 잡 실행. 장시간 잡(`longRunning`)은 `kisBackfillExecutor` 에 제출 후 **202**, 짧은 잡은 완료 후 200 |
+| POST | `/api/stock/admin/collect/{jobType}` | 잡 실행. 장시간 잡(`longRunning`)은 `kisBackfillExecutor` 에 제출 후 **202**, 짧은 잡(MASTER·HOLIDAY·VALIDATE)은 완료 후 200. 2026-09-08 부터 ADJUST_FACTOR·DERIVED_REFRESH·DAILY·WEEKLY·OVERSEAS_DAILY 도 202 (수 분 잡이 동기로 돌면 프록시 타임아웃 뒤 RUNNING 이 남아 재호출이 409) |
 | POST | `/api/stock/admin/collect/reload` | 지정 종목·기간 일봉 부분 재적재(`tickers` 필수, 체크포인트 RELOAD 네임스페이스) |
 | GET | `/runs?jobType=&limit=` / `/runs/{runId}` | 실행 이력 (카운터·metadata_json·실패 표본) |
 | POST | `/runs/{runId}/cancel` | 협조적 취소(종목 경계에서 3초 내 감지, 인터럽트 없음) |
@@ -143,10 +143,11 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 - 프로세스 강제 종료·재배포: 기동 시 RUNNING run 을 **전부** FAILED 로 정리한다(`kis.run.reconcile-all-on-startup=true`, 단일 인스턴스 전제). 다중 인스턴스로 가면 false 로 두고 `stale-after`(6h) 기준만 쓴다. 체크포인트 `IN_PROGRESS` 는 다음 트리거가 커서부터 이어받는다.
 - 특정 종목 다시 받기: `POST /reload {"tickers":["005930"],"startDate":"2024-01-01"}` (삭제 없이 upsert 덮어쓰기).
 - 체크포인트 FAILED 5회 초과 → 건너뜀. 되돌리려면 `{"tickers":[…],"resetCheckpoint":true}`.
+- 같은 잡을 RUNNING 중에 다시 부르면 **409** 와 `runningRunId` 를 돌려준다. 2026-09-08 이전엔 제약 위반을 같은 세션에서 조회하다 Hibernate `null identifier` 로 500 이 났다(수정됨). 진행 중인지 모르겠으면 `GET /runs?jobType=…&limit=1` 의 status 를 본다.
 - 윈도우 상한(`max-windows`) 도달은 FAILED 가 아니라 **PAUSED** 로 남고 attempt 를 소모하지 않는다. 같은 잡을 다시 트리거하면 커서부터 이어받는다. (2026-09-08 이전 상한 40 으로 FAILED 가 된 INVESTOR_BACKFILL 2,185건도 attempt 1 이라 `POST /INVESTOR_BACKFILL` 재트리거만으로 이어간다.)
 - KIS 장애로 하루 결손: 다음 날 DAILY 가 최근 100건 윈도우를 재수집하므로 자동 복구. 2일 이상은 reload.
 - MV 미적용 상태(psql 전): `ADJUST_FACTOR`·`DERIVED_REFRESH` 는 경고만 남기고 건너뛴다.
-- **MV 갱신 시간**: 2026-09-08 실측 `mv_stock_daily_metric` 6,294,938ms(105분, work_mem 4MB + CONCURRENTLY). `kis.derived.work-mem`(기본 512MB, REFRESH 세션에만 SET/RESET)과 `kis.derived.concurrently`(기본 false, 야간은 읽는 쪽이 없음)로 조정한다. 재실행 후 run 메타 `refreshMs` 를 다시 보고 3분을 넘으면 계획서 §6 의 증분 테이블 전환(`tb_stock_daily_metric` + 최근 N일 upsert, 뷰 이름 유지)으로 간다.
+- **MV 갱신 시간**: 2026-09-08 실측 `mv_stock_daily_metric` 6,294,938ms(105분, work_mem 4MB + CONCURRENTLY). `kis.derived.work-mem`(기본 512MB, REFRESH 세션에만 SET/RESET)과 `kis.derived.concurrently`(기본 false, 야간은 읽는 쪽이 없음)로 조정한다. work_mem 을 올리자 병렬 해시 조인이 `/dev/shm` 공유 메모리를 잡다 Docker 기본 64MB 에서 `could not resize shared memory segment … No space left on device` 로 실패했다(같은 날 실측) → `kis.derived.max-parallel-workers`(기본 0, 직렬) 로 막았고, PG 컨테이너에 `shm_size: 1g` 를 주면 2~4 로 올려 병렬 스캔을 살릴 수 있다. 재실행 후 run 메타 `refreshMs` 를 다시 보고 3분을 넘으면 계획서 §6 의 증분 테이블 전환(`tb_stock_daily_metric` + 최근 N일 upsert, 뷰 이름 유지)으로 간다.
 - MV 정의를 바꿨을 때(파생 재구축): `CREATE MATERIALIZED VIEW IF NOT EXISTS` 는 기존 MV 를 바꾸지 못하므로 의존 역순 DROP 후 재생성한다. 한 트랜잭션이라 소비자가 뷰 부재를 보지 않지만 수 분 락이 걸리므로 DAILY 18:30 창 밖에서 실행한다.
   ```bash
   cat src/main/resources/db/stock-derived-rebuild.sql src/main/resources/db/stock-derived.sql | psql -1 "$DATABASE_URL"

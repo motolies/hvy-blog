@@ -2,7 +2,22 @@ package kr.hvy.blog.modules.stock.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import java.lang.reflect.Method;
+import java.time.LocalDate;
+import java.util.Map;
+import java.util.Optional;
+import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
+import kr.hvy.blog.modules.stock.domain.code.CollectStatus;
+import kr.hvy.blog.modules.stock.domain.code.TriggerType;
+import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
+import kr.hvy.blog.modules.stock.repository.StockCollectRunRepository;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -27,5 +42,21 @@ class CollectRunServiceTest {
         .toList();
 
     assertThat(missing).isEmpty();
+  }
+
+  @Test
+  @DisplayName("같은 잡이 RUNNING 이면 INSERT 전에 409 예외를 던진다 (제약 위반 후 같은 세션에서 조회하면 Hibernate 가 죽는다)")
+  void startRejectsWhenAlreadyRunningBeforeInsert() {
+    StockCollectRunRepository repository = mock(StockCollectRunRepository.class);
+    StockCollectRun running = StockCollectRun.builder().runId(63L).jobType(CollectJobType.DERIVED_REFRESH)
+        .triggerType(TriggerType.API).build();
+    when(repository.findFirstByJobTypeAndStatus(CollectJobType.DERIVED_REFRESH, CollectStatus.RUNNING)).thenReturn(Optional.of(running));
+    CollectRunService service = new CollectRunService(repository);
+
+    assertThatThrownBy(() -> service.start(CollectJobType.DERIVED_REFRESH, TriggerType.API, LocalDate.of(2026, 9, 8), null, null, Map.of()))
+        .isInstanceOf(CollectAlreadyRunningException.class)
+        .extracting("runningRunId").isEqualTo(63L);
+    verify(repository, never()).saveAndFlush(any());
+    assertThat(service.findRunningId(CollectJobType.DERIVED_REFRESH)).contains(63L);
   }
 }

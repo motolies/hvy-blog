@@ -14,6 +14,7 @@ import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
 import kr.hvy.blog.modules.stock.domain.model.MarketClock;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 /**
@@ -75,8 +76,14 @@ public class StockCollectOrchestrator {
     }
     effective.validate();
 
-    StockCollectRun run = runService.start(jobType, triggerType, MarketClock.today(),
-        effective.startDate(), effective.endDate(), effective.toMetadata());
+    StockCollectRun run;
+    try {
+      run = runService.start(jobType, triggerType, MarketClock.today(), effective.startDate(), effective.endDate(),
+          effective.toMetadata());
+    } catch (DataIntegrityViolationException e) {
+      // 사전 조회와 INSERT 사이에 끼어든 경합: 부분 유니크 인덱스가 막았다. 롤백된 뒤 새 트랜잭션에서 id 를 찾아 409 로 돌린다
+      throw new CollectAlreadyRunningException(jobType, runService.findRunningId(jobType).orElse(null));
+    }
     CollectExecution execution = new CollectExecution(run, effective, runService, parentRunId);
 
     boolean async = triggerType == TriggerType.API && jobType.isLongRunning() && parentRunId == null;

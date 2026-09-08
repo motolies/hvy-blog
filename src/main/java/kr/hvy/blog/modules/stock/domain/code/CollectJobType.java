@@ -21,22 +21,26 @@ public enum CollectJobType implements EnumCode<String> {
   VALUATION("VALUATION", "밸류에이션 스냅샷", true),
   MARKET_STAT("MARKET_STAT", "시장 통계(공매도·신용·프로그램)", true),
   CORP_ACTION("CORP_ACTION", "기업행사 수집", true),
-  ADJUST_FACTOR("ADJUST_FACTOR", "수정주가 계수 산출", false),
+  ADJUST_FACTOR("ADJUST_FACTOR", "수정주가 계수 산출", true),
   INVESTOR_BACKFILL("INVESTOR_BACKFILL", "투자자 수급 백필", true),
   FINANCIAL_BACKFILL("FINANCIAL_BACKFILL", "재무제표 백필", true),
   OVERSEAS_BACKFILL("OVERSEAS_BACKFILL", "해외 지표 백필", true),
   ETF_NAV_BACKFILL("ETF_NAV_BACKFILL", "ETF NAV 일별 백필", true),
   MARKET_INVESTOR_BACKFILL("MARKET_INVESTOR_BACKFILL", "시장별 투자자 일별 백필", true),
-  DERIVED_REFRESH("DERIVED_REFRESH", "파생 지표 갱신", false),
+  DERIVED_REFRESH("DERIVED_REFRESH", "파생 지표 갱신", true),
   VALIDATE("VALIDATE", "정합성 검증", false),
-  DAILY("DAILY", "일일 증분 수집", false),
-  WEEKLY("WEEKLY", "주간 수집", false),
-  OVERSEAS_DAILY("OVERSEAS_DAILY", "해외 일일 증분", false),
+  DAILY("DAILY", "일일 증분 수집", true),
+  WEEKLY("WEEKLY", "주간 수집", true),
+  OVERSEAS_DAILY("OVERSEAS_DAILY", "해외 일일 증분", true),
   RELOAD("RELOAD", "부분 재적재", true);
 
   private final String code;
   private final String desc;
 
-  /** 장시간 실행되어 스케줄러가 아닌 전용 실행기(kisBackfillExecutor)에서 돌려야 하는 잡인지 */
+  /**
+   * API 로 트리거될 때 HTTP 스레드가 아니라 전용 실행기(kisBackfillExecutor)에 제출해 202 로 돌려줄 잡인지.
+   * 수 분 이상 걸리는 잡이 동기로 돌면 프록시 타임아웃 뒤에도 서버는 계속 실행돼 RUNNING 이 남고, 재호출이 409 로 막힌다.
+   * 스케줄러·상위 run(BACKFILL_ALL) 에서 부를 때는 이 값과 무관하게 호출 스레드에서 동기 실행된다.
+   */
   private final boolean longRunning;
 }

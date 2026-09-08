@@ -142,6 +142,9 @@ class StockDerivedPgTest {
     DerivedViewRefresher refresher = new DerivedViewRefresher(jdbc);
     assertThat(refresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, false, "64MB")).isGreaterThanOrEqualTo(0);
     assertThat(refresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, true, "64MB")).isGreaterThanOrEqualTo(0);
+    assertThat(refresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, false, "64MB", 0)).isGreaterThanOrEqualTo(0);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> refresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, false, null, -1))
+        .isInstanceOf(IllegalArgumentException.class);
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> refresher.refresh(DerivedViewRefresher.MV_ADJUST_FACTOR, false, "64MB; DROP TABLE x"))
         .isInstanceOf(IllegalArgumentException.class);
   }

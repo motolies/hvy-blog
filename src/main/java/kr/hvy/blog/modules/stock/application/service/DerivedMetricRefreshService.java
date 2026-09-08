@@ -58,7 +58,8 @@ public class DerivedMetricRefreshService implements CollectJob {
         continue;
       }
       try {
-        long ms = viewRefresher.refresh(name, properties.getDerived().isConcurrently(), properties.getDerived().getWorkMem());
+        long ms = viewRefresher.refresh(name, properties.getDerived().isConcurrently(), properties.getDerived().getWorkMem(),
+            properties.getDerived().getMaxParallelWorkers());
         timings.put(name, ms);
         total += ms;
         refreshed++;

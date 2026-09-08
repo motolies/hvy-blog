@@ -16,7 +16,10 @@ import kr.hvy.blog.modules.stock.domain.model.FinancialRow;
 import org.apache.commons.lang3.StringUtils;
 
 /**
- * 재무 3종(손익계산서·대차대조표·재무비율) 응답을 결산기(stac_yymm) 기준으로 합쳐 행을 만든다.
+ * 재무 6종(손익·대차·재무비율·성장성·수익성·안정성) 응답을 결산기(stac_yymm) 기준으로 합쳐 행을 만든다.
+ * <p>
+ * 소스는 {@code FinancialKind} 선언 순서로 넘어오고 나중 소스가 동명 필드를 덮는다.
+ * 재무비율·성장성 양쪽의 {@code grs}, 재무비율·안정성 양쪽의 {@code lblt_rate} 는 전문 API 값이 남는다(의미 동일).
  * <p>
  * KIS 재무는 발표일이 없다. available_from 규칙: 분기 = 결산기말 + 45일(LAG_45D), 연간 = 결산기말 + 90일(LAG_90D).
  * 공시일을 확보하면 DISCLOSED 로 바꾼다. 백테스트는 max(available_from, first_seen_at) 을 써야 한다.
@@ -33,12 +36,13 @@ public final class FinancialRowMapper {
   }
 
   /**
-   * 결산기별로 세 응답을 합친다. stac_yymm 이 없는 행은 버린다.
+   * 결산기별로 소스들을 순서대로 합친다. stac_yymm 이 없는 행은 버린다.
+   *
+   * @param sources FinancialKind 선언 순서의 응답 목록 (나중 소스 우선)
    */
-  public static List<FinancialRow> merge(String ticker, boolean quarterly, List<Map<String, String>> income,
-      List<Map<String, String>> balance, List<Map<String, String>> ratio) {
+  public static List<FinancialRow> merge(String ticker, boolean quarterly, List<List<Map<String, String>>> sources) {
     Map<String, Map<String, String>> byPeriod = new TreeMap<>();
-    for (List<Map<String, String>> source : List.of(income, balance, ratio)) {
+    for (List<Map<String, String>> source : sources) {
       for (Map<String, String> row : source) {
         String period = normalizePeriod(row.get("stac_yymm"));
         if (period == null) {
@@ -53,10 +57,19 @@ public final class FinancialRowMapper {
       Map<String, String> m = entry.getValue();
       rows.add(new FinancialRow(ticker, entry.getKey(), periodType, null,
           availableFrom(entry.getKey(), quarterly), quarterly ? RULE_QUARTER : RULE_ANNUAL,
+          // 손익계산서 · 대차대조표
           amount(m.get("sale_account")), amount(m.get("bsop_prti")), amount(m.get("thtr_ntin")),
           amount(m.get("total_aset")), amount(m.get("total_cptl")), amount(m.get("total_lblt")),
+          // 재무비율 (grs·lblt_rate 는 성장성·안정성이 있으면 그 값)
           KisValues.decimal(m.get("roe_val")), KisValues.decimal(m.get("lblt_rate")),
-          KisValues.decimal(m.get("grs")), KisValues.decimal(m.get("ntin_inrt")), KisJson.write(m)));
+          KisValues.decimal(m.get("grs")), KisValues.decimal(m.get("ntin_inrt")),
+          // 성장성비율
+          KisValues.decimal(m.get("bsop_prfi_inrt")), KisValues.decimal(m.get("equt_inrt")), KisValues.decimal(m.get("totl_aset_inrt")),
+          // 수익성비율
+          KisValues.decimal(m.get("cptl_ntin_rate")), KisValues.decimal(m.get("sale_ntin_rate")), KisValues.decimal(m.get("sale_totl_rate")),
+          // 안정성비율
+          KisValues.decimal(m.get("crnt_rate")), KisValues.decimal(m.get("quck_rate")), KisValues.decimal(m.get("bram_depn")),
+          KisJson.write(m)));
     }
     return rows;
   }

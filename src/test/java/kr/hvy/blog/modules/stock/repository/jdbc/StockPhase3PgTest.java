@@ -56,15 +56,15 @@ class StockPhase3PgTest {
   @DisplayName("재무: 신규 seq 0, 같은 값은 건너뛰고, 값이 바뀌면 seq+1 로 누적된다")
   void financialRevisions() {
     StockFinancialWriter writer = new StockFinancialWriter(jdbc);
-    List<FinancialRow> v1 = FinancialRowMapper.merge("005930", true,
+    List<FinancialRow> v1 = FinancialRowMapper.merge("005930", true, List.of(
         List.of(java.util.Map.of("stac_yymm", "202406", "sale_account", "740650", "thtr_ntin", "98413")),
-        List.of(java.util.Map.of("stac_yymm", "202406", "total_aset", "4850000")), List.of());
+        List.of(java.util.Map.of("stac_yymm", "202406", "total_aset", "4850000"))));
     assertThat(writer.apply("005930", v1)).isEqualTo(1);
     assertThat(writer.apply("005930", v1)).isZero();
 
-    List<FinancialRow> v2 = FinancialRowMapper.merge("005930", true,
+    List<FinancialRow> v2 = FinancialRowMapper.merge("005930", true, List.of(
         List.of(java.util.Map.of("stac_yymm", "202406", "sale_account", "740651", "thtr_ntin", "98413")),
-        List.of(java.util.Map.of("stac_yymm", "202406", "total_aset", "4850000")), List.of());
+        List.of(java.util.Map.of("stac_yymm", "202406", "total_aset", "4850000"))));
     assertThat(writer.apply("005930", v2)).isEqualTo(1);
     assertThat(writer.count("005930")).isEqualTo(2);
     Integer maxSeq = jdbc.queryForObject("SELECT MAX(revision_seq) FROM tb_stock_financial WHERE ticker = '005930'", Integer.class);
@@ -74,6 +74,41 @@ class StockPhase3PgTest {
     assertThat(available).isEqualTo(LocalDate.of(2024, 6, 30).plusDays(45));
     String raw = jdbc.queryForObject("SELECT raw_json->>'sale_account' FROM tb_stock_financial WHERE revision_seq = 1", String.class);
     assertThat(raw).isEqualTo("740651");
+
+    // 확장 지표(2026-09-08 승격)만 처음 채워지는 재조회는 정정이 아니라 채움: 최신 행에 UPDATE, 리비전 유지
+    List<FinancialRow> v3 = FinancialRowMapper.merge("005930", true, List.of(
+        List.of(java.util.Map.of("stac_yymm", "202406", "sale_account", "740651", "thtr_ntin", "98413")),
+        List.of(java.util.Map.of("stac_yymm", "202406", "total_aset", "4850000")),
+        List.of(java.util.Map.of("stac_yymm", "202406", "cptl_ntin_rate", "5.5", "crnt_rate", "150.1"))));
+    assertThat(writer.apply("005930", v3)).isEqualTo(1);
+    assertThat(writer.count("005930")).isEqualTo(2);
+    assertThat(jdbc.queryForObject("SELECT roa FROM tb_stock_financial WHERE ticker = '005930' AND revision_seq = 1", java.math.BigDecimal.class))
+        .isEqualByComparingTo("5.5");
+    assertThat(jdbc.queryForObject("SELECT raw_json->>'crnt_rate' FROM tb_stock_financial WHERE revision_seq = 1", String.class)).isEqualTo("150.1");
+    assertThat(writer.apply("005930", v3)).isZero();
+    // 채워진 뒤 확장 지표가 바뀌면 정정 → seq+1
+    List<FinancialRow> v4 = FinancialRowMapper.merge("005930", true, List.of(
+        List.of(java.util.Map.of("stac_yymm", "202406", "sale_account", "740651", "thtr_ntin", "98413")),
+        List.of(java.util.Map.of("stac_yymm", "202406", "total_aset", "4850000")),
+        List.of(java.util.Map.of("stac_yymm", "202406", "cptl_ntin_rate", "6.0", "crnt_rate", "150.1"))));
+    assertThat(writer.apply("005930", v4)).isEqualTo(1);
+    assertThat(writer.count("005930")).isEqualTo(3);
+  }
+
+  @Test
+  @DisplayName("재무 컬럼 승격 마이그레이션은 이미 적용된 스키마에 재실행해도 안전하다")
+  void financialMigrationIsIdempotent() throws Exception {
+    String script;
+    try (var in = getClass().getClassLoader().getResourceAsStream("db/migrate/20260908_01_financial_ratio_columns.sql")) {
+      assertThat(in).isNotNull();
+      script = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+    jdbc.execute(script);
+    jdbc.execute(script);
+    Integer columns = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'tb_stock_financial' "
+        + "AND column_name IN ('operating_profit_growth','equity_growth','asset_growth','roa','net_margin','gross_margin',"
+        + "'current_ratio','quick_ratio','borrowing_dependency')", Integer.class);
+    assertThat(columns).isEqualTo(9);
   }
 
   @Test

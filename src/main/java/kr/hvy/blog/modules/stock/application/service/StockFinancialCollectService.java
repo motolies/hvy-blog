@@ -1,5 +1,6 @@
 package kr.hvy.blog.modules.stock.application.service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.stock.client.FinancialKind;
@@ -13,7 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
- * 재무제표 수집(FINANCIAL_BACKFILL 잡 + 주간 재조회). 종목당 6호출(3종 × 연/분기).
+ * 재무제표 수집(FINANCIAL_BACKFILL 잡 + 주간 재조회). 종목당 12호출(FinancialKind 6종 × 연/분기).
  * 값이 바뀐 결산기만 revision_seq+1 로 쌓이므로 주간 재조회는 정정 공시 감지기 역할을 한다.
  */
 @Slf4j
@@ -82,17 +83,18 @@ public class StockFinancialCollectService implements CollectJob {
   }
 
   /**
-   * 종목 1개: 연간·분기 각각 3종을 받아 결산기별로 합친 뒤 리비전 규칙으로 저장한다.
+   * 종목 1개: 연간·분기 각각 6종을 FinancialKind 선언 순서로 받아 결산기별로 합친 뒤 리비전 규칙으로 저장한다.
    */
   int collectOne(CollectExecution execution, String ticker) {
-    int inserted = 0;
+    int applied = 0;
     for (boolean quarterly : new boolean[]{false, true}) {
-      List<Map<String, String>> income = marketDataPort.fetchFinancial(FinancialKind.INCOME_STATEMENT, ticker, quarterly, execution.context(ticker));
-      List<Map<String, String>> balance = marketDataPort.fetchFinancial(FinancialKind.BALANCE_SHEET, ticker, quarterly, execution.context(ticker));
-      List<Map<String, String>> ratio = marketDataPort.fetchFinancial(FinancialKind.FINANCIAL_RATIO, ticker, quarterly, execution.context(ticker));
-      List<FinancialRow> rows = FinancialRowMapper.merge(ticker, quarterly, income, balance, ratio);
-      inserted += financialWriter.apply(ticker, rows);
+      List<List<Map<String, String>>> sources = new ArrayList<>();
+      for (FinancialKind kind : FinancialKind.values()) {
+        sources.add(marketDataPort.fetchFinancial(kind, ticker, quarterly, execution.context(ticker)));
+      }
+      List<FinancialRow> rows = FinancialRowMapper.merge(ticker, quarterly, sources);
+      applied += financialWriter.apply(ticker, rows);
     }
-    return inserted;
+    return applied;
   }
 }

@@ -432,12 +432,21 @@ CREATE TABLE IF NOT EXISTS tb_stock_financial
     debt_ratio       NUMERIC(12,4)           DEFAULT NULL,
     revenue_growth   NUMERIC(12,4)           DEFAULT NULL,
     profit_growth    NUMERIC(12,4)           DEFAULT NULL,
+    operating_profit_growth NUMERIC(12,4)    DEFAULT NULL,
+    equity_growth    NUMERIC(12,4)           DEFAULT NULL,
+    asset_growth     NUMERIC(12,4)           DEFAULT NULL,
+    roa              NUMERIC(12,4)           DEFAULT NULL,
+    net_margin       NUMERIC(12,4)           DEFAULT NULL,
+    gross_margin     NUMERIC(12,4)           DEFAULT NULL,
+    current_ratio    NUMERIC(12,4)           DEFAULT NULL,
+    quick_ratio      NUMERIC(12,4)           DEFAULT NULL,
+    borrowing_dependency NUMERIC(12,4)       DEFAULT NULL,
     raw_json         JSONB                   DEFAULT NULL,
     created_at       TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
     CONSTRAINT pk_stock_financial PRIMARY KEY (ticker, fiscal_period, period_type, revision_seq)
 );
 
-COMMENT ON TABLE  tb_stock_financial                  IS '재무제표 point-in-time. 백테스트는 max(available_from, first_seen_at) 이후에만 이 값을 볼 수 있다';
+COMMENT ON TABLE  tb_stock_financial                  IS '재무제표 point-in-time (손익·대차·재무비율·성장성·수익성·안정성 6종 병합). 백테스트는 max(available_from, first_seen_at) 이후에만 이 값을 볼 수 있다';
 COMMENT ON COLUMN tb_stock_financial.ticker           IS '단축 종목코드';
 COMMENT ON COLUMN tb_stock_financial.fiscal_period    IS '결산기 (YYYYMM)';
 COMMENT ON COLUMN tb_stock_financial.period_type      IS 'Y 연간 | Q 분기';
@@ -455,7 +464,16 @@ COMMENT ON COLUMN tb_stock_financial.total_debt       IS '부채총계 (백만�
 COMMENT ON COLUMN tb_stock_financial.roe              IS 'ROE (%)';
 COMMENT ON COLUMN tb_stock_financial.debt_ratio       IS '부채비율 (%)';
 COMMENT ON COLUMN tb_stock_financial.revenue_growth   IS '매출액 증가율 (%)';
-COMMENT ON COLUMN tb_stock_financial.profit_growth    IS '영업이익 증가율 (%)';
+COMMENT ON COLUMN tb_stock_financial.profit_growth    IS '순이익 증가율 (%) (재무비율 ntin_inrt. 영업이익 증가율은 operating_profit_growth)';
+COMMENT ON COLUMN tb_stock_financial.operating_profit_growth IS '영업이익 증가율 (%) (성장성 bsop_prfi_inrt)';
+COMMENT ON COLUMN tb_stock_financial.equity_growth    IS '자기자본 증가율 (%) (성장성 equt_inrt)';
+COMMENT ON COLUMN tb_stock_financial.asset_growth     IS '총자산 증가율 (%) (성장성 totl_aset_inrt)';
+COMMENT ON COLUMN tb_stock_financial.roa              IS '총자본 순이익율 ROA (%) (수익성 cptl_ntin_rate)';
+COMMENT ON COLUMN tb_stock_financial.net_margin       IS '매출액 순이익율 (%) (수익성 sale_ntin_rate)';
+COMMENT ON COLUMN tb_stock_financial.gross_margin     IS '매출액 총이익율 (%) (수익성 sale_totl_rate)';
+COMMENT ON COLUMN tb_stock_financial.current_ratio    IS '유동비율 (%) (안정성 crnt_rate)';
+COMMENT ON COLUMN tb_stock_financial.quick_ratio      IS '당좌비율 (%) (안정성 quck_rate)';
+COMMENT ON COLUMN tb_stock_financial.borrowing_dependency IS '차입금 의존도 (%) (안정성 bram_depn)';
 COMMENT ON COLUMN tb_stock_financial.raw_json         IS 'API 원본 응답 (계정과목이 종목별로 달라 원본 보관)';
 COMMENT ON COLUMN tb_stock_financial.created_at       IS '적재 시각';
 

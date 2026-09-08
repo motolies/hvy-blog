@@ -20,6 +20,7 @@
    psql "$DATABASE_URL" -f src/main/resources/db/stock-seed.sql      # tb_stock_global_sector_map 시드
    ```
    `schema-postgres.sql`(전체 재구축용) 은 위 세 파일의 **원문**을 `-- >>> BEGIN db/stock-*.sql` / `-- <<< END …` 마커로 감싸 그대로 포함하고, DROP 블록에 stock 테이블 19개가 있다. 수정은 `db/stock-*.sql` 원본에만 하고 복사본을 갱신한다. `StockSchemaSyncTest` 가 불일치를 잡는다.
+   **기존 테이블의 새 컬럼**은 `CREATE TABLE IF NOT EXISTS` 로 반영되지 않으므로 `src/main/resources/db/migrate/<날짜>_<번호>_<내용>.sql`(`ALTER TABLE … ADD COLUMN IF NOT EXISTS`, 재실행 안전)을 먼저 적용한다. 현재: `20260908_01_financial_ratio_columns.sql`(재무 9컬럼).
 2. 환경변수 `KIS_APP_KEY`, `KIS_APP_SECRET` 를 주입한다(Dockerfile·yml 기본값 없음). 없으면 앱은 기동되지만 모든 수집 잡이 400으로 거부된다.
 3. `scheduler.stock-*.enabled` 는 default/prod 모두 `false` 로 배포한다. 백필 완료 후 `true` 로 바꾼다.
 4. 기동 후 확인: `GET /api/stock/admin/collect/token` → `POST /api/stock/admin/collect/token/refresh` (1분 1회 게이트, 재발급 실패 시 기존 토큰 유지).
@@ -65,7 +66,7 @@ curl -X POST $B/ADJUST_FACTOR                            # 계수 산출 → MV 
 curl -X POST $B/INVESTOR_BACKFILL                        # 소급 깊이 실측 (EXHAUSTED 분포 확인)
 curl -X POST $B/VALUATION                                # 오늘 스냅샷(시총·PER·PBR). 당일만 제공되므로 DAILY 로 누적 (BACKFILL_ALL 은 날짜 필터를 떼고 넘김)
 curl -X POST $B/MARKET_STAT                              # 공매도·신용·프로그램 최근 window-days
-curl -X POST $B/FINANCIAL_BACKFILL                       # 종목당 6호출
+curl -X POST $B/FINANCIAL_BACKFILL                       # 종목당 12호출(6종 × 연/분기), 전 종목 ≈36분
 curl -X POST $B/OVERSEAS_BACKFILL                        # kis.overseas.symbols
 curl -X POST $B/DERIVED_REFRESH                          # MV 4개 갱신 (소요 시간 3분 룰 실측)
 curl -X POST $B/VALIDATE                                 # 정합성 점검
@@ -100,7 +101,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | `tb_stock_investor_daily` | (ticker, date) | 외국인·기관·개인·연기금(기금)·기타 순매수 금액/수량 (FHPTJ04160001) |
 | `tb_stock_corporate_action` | uk(ticker, date, type, source) | 예탁원 7종 + 일봉 힌트(CHART_HINT), `raw_json` |
 | `tb_stock_adjust_event` | (ticker, date, type) | price/volume factor, `verified` |
-| `tb_stock_financial` | (ticker, period, type, revision_seq) | 손익·대차·재무비율 병합, `available_from`(LAG_45D/90D), `first_seen_at` |
+| `tb_stock_financial` | (ticker, period, type, revision_seq) | 손익·대차·재무비율·성장성·수익성·안정성 6종 병합(지표 19컬럼), `available_from`(LAG_45D/90D), `first_seen_at`. 확장 9컬럼이 NULL 인 기존 행에 처음 값이 오면 리비전 없이 채움 |
 | `tb_stock_sector_map`, `tb_stock_global_sector_map` | | KRX 중분류 매핑(SCD) / 국내 섹터↔미국 참조 시드 |
 | `tb_stock_global_market_daily` | (symbol, date) | 해외 지수·환율(N/X)·ETF·개별주(EQ, 수정주가) |
 | `tb_stock_market_stat_daily` | (ticker, date) | 공매도·신용잔고·프로그램(출처별 부분 upsert) |
@@ -182,6 +183,6 @@ H2 로는 `ON CONFLICT`·부분 유니크·MV 가 검증되지 않으므로 PG �
 - 마스터 고정폭은 공식 C 헤더 기준 KOSPI 227자 70필드 / KOSDAQ 221자 64필드(계획의 65/62 는 근사치).
 - 예탁원 `stock_split` API 는 없고 `rev_split`(액면교체)이 분할·병합을 모두 담는다.
 - 투자자 일별은 FHPTJ04160001 하나로 백필·증분을 모두 처리(FHKST01010900 미사용).
-- 재무는 핵심 3종(손익·대차·재무비율)만 호출하고 성장성·수익성·안정성은 미수집(호출 수 절감, 필요 시 `FinancialKind` 추가).
+- 재무는 6종(손익·대차·재무비율·성장성·수익성·안정성)을 호출한다(2026-09-08 확장, 종목당 12호출). 동명 필드 `grs`·`lblt_rate` 는 전문 API(성장성·안정성) 값. `profit_growth` 는 순이익 증가율(ntin_inrt)이고 영업이익 증가율은 `operating_profit_growth`. 기존 행의 새 컬럼은 첫 재조회에서 리비전 없이 채워진다.
 - P1 통계는 깊은 소급이 없어 BACKFILL_ALL 에서는 최근 창 1회, DAILY 에서 매일 누적(`kis.stats.enabled` 기본 true, 2026-09-08 부터).
 - 실시간 웹소켓·Python 분석 환경은 범위 밖(계획대로). `KisMarketDataPort` 가 확장 경계.

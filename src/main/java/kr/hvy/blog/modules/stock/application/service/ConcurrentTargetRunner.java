@@ -4,11 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.function.Consumer;
 import kr.hvy.blog.modules.stock.client.KisProperties;
+import kr.hvy.common.config.executor.TraceExecutors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -26,12 +26,16 @@ public class ConcurrentTargetRunner {
 
   /**
    * 대상들을 동시성 제한 아래 처리한다. task 는 스스로 예외를 잡아 실패를 기록해야 한다.
+   * <p>
+   * 풀은 {@link TraceExecutors} 로 만든다 — {@code Executors.newVirtualThreadPerTaskExecutor()} 로 직접
+   * 만들면 Spring 이 모르는 풀이라 데코레이터가 붙지 않아 종목 단위 로그에서 traceId 가 전부 사라진다.
+   * {@code ContextExecutorService} 는 submit 시점마다 스냅샷을 떠서 호출 스레드의 트레이스 컨텍스트를 넘긴다.
    */
   public <T> void run(CollectExecution execution, List<T> targets, Consumer<T> task) {
     int concurrency = Math.max(1, properties.getBackfill().getConcurrency());
     Semaphore gate = new Semaphore(concurrency);
     List<Future<?>> futures = new ArrayList<>();
-    try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+    try (ExecutorService pool = TraceExecutors.virtualThreadPerTask("kis-target-")) {
       for (T target : targets) {
         if (execution.isCancelRequested()) {
           break;

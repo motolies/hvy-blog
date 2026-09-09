@@ -50,7 +50,9 @@ dependencies {
     // Library
     if (env == "prod") {
         // 0.3.0: Spring Boot 4.1.1 / JDK 25 / Jackson 3 전환 (ObjectMapperConfigurer 반환형·RedisConfigurer 생성자 등 binary breaking, messaging 패키지 삭제)
-        implementation 'io.github.motolies:hvy-common:0.3.3'
+        // 0.3.4: traceId 전파 장치(ContextPropagationConfigurer·TraceExecutors·TraceBoundary·TraceTaskDecoratorBeanPostProcessor) 추가
+        //        전부 additive(신규 클래스·메서드 추가, 생성자 오버로드)라 바이너리 호환 — patch 승격
+        implementation 'io.github.motolies:hvy-common:0.3.4'
     } else {
         // MavenLocal에 배포된 hvy-common을 사용
         implementation 'io.github.motolies:hvy-common:local'
@@ -117,6 +119,9 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     testImplementation 'org.springframework.security:spring-security-test'
+
+    // 동시성 가드레일: traceId 전파를 잃는 실행 경로(raw Executors, executor 미지정 CompletableFuture, parallelStream)를 빌드에서 차단
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.4.1'
 
 }
 

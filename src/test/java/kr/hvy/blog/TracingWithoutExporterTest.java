@@ -7,6 +7,7 @@ import io.micrometer.tracing.Tracer;
 import kr.hvy.blog.common.AbstractTestContainers;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -46,6 +47,10 @@ class TracingWithoutExporterTest extends AbstractTestContainers {
       // 로그 MDC 로 나가는 경로도 같은 값이어야 한다 — 이게 달라지면 로그 상관관계가 깨진다.
       assertThat(tracer.currentSpan()).isNotNull();
       assertThat(tracer.currentSpan().context().traceId()).isEqualTo(traceId);
+
+      // logback 패턴 %X{traceId},%X{spanId} 가 실제로 읽는 값. Slf4JEventListener 가 스코프 이벤트로 채운다.
+      assertThat(MDC.get("traceId")).isEqualTo(traceId);
+      assertThat(MDC.get("spanId")).isEqualTo(span.context().spanId());
     } finally {
       span.end();
     }

@@ -21,7 +21,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.task.TaskExecutor;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 /**
@@ -46,8 +45,12 @@ public class JiraBatchService {
    * 프로젝트의 모든 이슈와 워크로그를 동기화합니다. DDD 방식으로 이슈 애그리게이트를 통해 워크로그를 함께 처리합니다.
    * 스트리밍 방식으로 페이지 단위 처리하여 메모리 효율을 높입니다.
    * endDate가 설정된 완료된 이슈는 동기화 대상에서 제외됩니다.
+   * <p>
+   * <b>동기 메서드다.</b> 예전에는 {@code @Async} 가 붙어 있어 {@code JiraSyncScheduler} 가 호출하면 즉시
+   * 리턴했고, 그 순간 스케줄러의 트레이스 경계가 닫혀 실제 동기화 로그 전체가 traceId 를 잃었다.
+   * 스케줄러 스레드는 그 자체로 이미 비동기이고 ShedLock 도 들고 있으므로 여기서 다시 비동기로 만들 이유가 없다.
+   * REST 트리거처럼 즉시 응답이 필요한 호출부는 {@link JiraSyncAsyncLauncher} 를 거친다.
    */
-  @Async
   @DistributedLock(key = "JIRA_SYNC", leaseTime = 600)
   public void syncAllIssuesAndWorklogs() {
     log.info("Jira 이슈 및 워크로그 동기화를 시작합니다. (스트리밍 방식)");

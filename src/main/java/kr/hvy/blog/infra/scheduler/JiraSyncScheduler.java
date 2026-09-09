@@ -32,6 +32,12 @@ public class JiraSyncScheduler extends AbstractScheduler {
         .accept(this::jiraIssueCollection);
   }
 
+  /**
+   * 동기화를 스케줄러 스레드에서 <b>동기로</b> 실행한다.
+   * <p>
+   * 비동기 진입점({@code JiraSyncAsyncLauncher})을 쓰면 즉시 리턴해 {@code proceedScheduler} 의 트레이스
+   * 경계와 소요시간 측정이 실작업 전에 닫히고, ShedLock 도 작업이 끝나기 전에 풀린다.
+   */
   private void jiraIssueCollection() {
 
     try {

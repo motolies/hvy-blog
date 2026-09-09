@@ -83,7 +83,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | 스케줄러 | cron | 잡 | lockAtMostFor |
 |---|---|---|---|
 | `StockMasterScheduler` | 평일 05:30 | MASTER(마스터 3종 + theme_code.mst → KRX·THEME 섹터맵, 테마 실패 시 THEME 만 건너뜀 `themeError`) → HOLIDAY(1페이지) | 15m |
-| `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → MARKET_INVESTOR(시장별 오늘 1회, +2호출) → ETF_NAV(활성 ETF 최근 1윈도우, +≈1,000호출) → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED(MV 3개 전체 REFRESH ≈5분 고정 + 지표 140일 증분) (총 ≈22분) | 40m |
+| `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → MARKET_INVESTOR(시장별 오늘 1회, +2호출) → ETF_NAV(활성 ETF 최근 1윈도우, +≈1,000호출) → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED(MV 3개 전체 REFRESH + 지표 30일 증분; 09-09 실측 8.5분, 창 함수 개선 후 목표 ≈4분) (총 ≈20~25분) | 40m |
 | `StockOverseasScheduler` | 화~토 06:30 | OVERSEAS_DAILY | 15m |
 | `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → STOCK_INFO(기업행사에만 있는 종목을 조회해 상폐일 있는 것만 비활성 마스터 행으로, 메타 `stockInfoCandidates`/`stockInfoApplied`) → ADJUST_FACTOR → FINANCIAL(정정 감지) → DERIVED_FULL(지표 테이블 전체 재계산 ≈22분 + MV ≈5분) | 2h |
 
@@ -111,7 +111,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | `tb_stock_market_investor_daily` | (market_type, date) | KOSPI/KOSDAQ 투자자 15주체 순매수 대금·수량 (FHPTJ04040000, 영업일 역순 백필) |
 | `tb_stock_collect_run`, `tb_stock_collect_checkpoint`, `tb_stock_kis_token`, `tb_stock_kis_api_failure` | | 운영 |
 
-파생(`stock-derived.sql`): `mv_stock_adjust_factor`(EXP(SUM(LN)) 누적 계수, 이벤트 보유 종목만) → `vw_stock_daily_price_adj`(**가격 소비자의 유일한 진입점**) → `tb_stock_daily_metric`(**테이블**, ret 1/5/20/60/120, MA 5/20/60/120, 이격도, 52주 고점 252행, 거래대금 5/60, 외인·기관 5일 — 계산식은 `DerivedViewRefresher.DAILY_METRIC_UPSERT_SQL`, DAILY 는 최근 `kis.derived.metric-recompute-days`(140일)만 재계산·WEEKLY 는 전체) → `mv_stock_index_metric` → `mv_stock_sector_daily`(현재 KRX 매핑으로 과거를 근사) / `vw_stock_universe_daily`(ST·활성·비정지·비관리·시총 1,000억·거래대금 5일 10억 하한) / `vw_stock_market_calendar`.
+파생(`stock-derived.sql`): `mv_stock_adjust_factor`(EXP(SUM(LN)) 누적 계수, 이벤트 보유 종목만) → `vw_stock_daily_price_adj`(**가격 소비자의 유일한 진입점**) → `tb_stock_daily_metric`(**테이블**, ret 1/5/20/60/120, MA 5/20/60/120, 이격도, 52주 고점 252행, 거래대금 5/60, 외인·기관 5일 — 계산식은 `DerivedViewRefresher.DAILY_METRIC_UPSERT_SQL`, DAILY 는 최근 `kis.derived.metric-recompute-days`(30일)만 재계산·WEEKLY 는 전체; 이동평균은 누적합 − LAG, 52주 고점은 21행 블록 × 12 — §9 실행 계획 실측) → `mv_stock_index_metric` → `mv_stock_sector_daily`(현재 KRX 매핑으로 과거를 근사) / `vw_stock_universe_daily`(ST·활성·비정지·비관리·시총 1,000억·거래대금 5일 10억 하한) / `vw_stock_market_calendar`.
 MV REFRESH 는 `kis.derived.concurrently`(기본 false) 를 따르고 순서는 `DerivedMetricRefreshService.REFRESH_ORDER`(계수 MV → 지표 테이블 → 지수 MV → 섹터 MV).
 
 이름 규약: 테이블·뷰·MV 는 전부 `tb_stock_` / `vw_stock_` / `mv_stock_` 접두사다(`\dt tb_stock_*` 로 한 번에 본다). JPA 엔티티는 `HvyPhysicalNamingStrategy` 가 클래스명에 `tb_` 를 무조건 붙이므로 `@Table` 없이 클래스명(`StockKisToken` → `tb_stock_kis_token`)으로 맞춘다.
@@ -148,6 +148,12 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 - KIS 장애로 하루 결손: 다음 날 DAILY 가 최근 100건 윈도우를 재수집하므로 자동 복구. 2일 이상은 reload.
 - MV 미적용 상태(psql 전): `ADJUST_FACTOR`·`DERIVED_REFRESH` 는 경고만 남기고 건너뛴다.
 - **MV 갱신 시간**: 2026-09-08 실측 `mv_stock_daily_metric` 6,294,938ms(105분, work_mem 4MB + CONCURRENTLY). `kis.derived.work-mem`(기본 512MB, REFRESH 세션에만 SET/RESET)과 `kis.derived.concurrently`(기본 false, 야간은 읽는 쪽이 없음)로 조정한다. work_mem 을 올리자 병렬 해시 조인이 `/dev/shm` 공유 메모리를 잡다 Docker 기본 64MB 에서 `could not resize shared memory segment … No space left on device` 로 실패했다(같은 날 실측) → `kis.derived.max-parallel-workers`(기본 0, 직렬) 로 막았고, PG 컨테이너에 `shm_size: 1g` 를 주면 2~4 로 올려 병렬 스캔을 살릴 수 있다. 그래도 25분(1,509,788ms)이라 같은 날 **테이블 증분 재계산으로 전환**했다: DAILY 는 최근 140일만 다시 계산해 upsert, WEEKLY 가 전체 재계산. 2026-09-09 실측(run 76·77): 전체 재계산 `tb_stock_daily_metric` 1,346,783ms/1,296,491ms(≈22분, 611만 행), MV 고정 비용 `mv_stock_index_metric` ≈150s + `mv_stock_adjust_factor` ≈87s + `mv_stock_sector_daily` ≈50s ≈ 5분(증분이어도 매번). 요청 해석: **본문 없음 = 증분(140일)**, `{"startDate":…}` = 그 날짜부터, `{"force":true}` = 전체 — 09-09 이전엔 본문 없는 호출이 전체로 돌았다(run 77 `metricFrom: ALL`, 수정됨). 경고 임계는 증분 10분·전체 45분(`DerivedMetricRefreshService.WARN_*`). 첫 적재 때 `startDate` 로 돌리면 일봉 백필이 목표일을 지나쳐 받은 앞 구간(≈7.3만 행, 2014-12)이 빠지므로 첫 적재는 `force` 가 맞다(run 77 의 rows 73,007 이 그 구간).
+- **지표 증분 3.7분의 정체(2026-09-09 run 78 `EXPLAIN (ANALYZE, BUFFERS)`)**: SELECT 161초 = ① `idx_stock_daily_price_date` 비트맵 인덱스 스캔 33초(6,153 블록을 블록당 5ms 랜덤 읽기 — 백필이 종목별 역순으로 넣어 인덱스 리프가 흩어짐, 순차 읽기는 60MB/s 로 정상) ② 창 함수 6단계 112초(프레임 폭에 비례: 60행 25초·120행 33초·MAX 252행 36초) ③ 나머지 조인·정렬 ≈15초, 여기에 ON CONFLICT 비교 25만 행 ≈58초. ②의 원인은 `double precision` 의 AVG/SUM 에 역전이 함수(moving-aggregate)가 없어 행마다 프레임을 다시 훑는 것(`pg_aggregate.aggminvtransfn` 이 `-`; numeric·bigint 는 있음, MAX 는 전부 없음). numeric 으로 바꾸면 double↔numeric 변환이 문자열 왕복이라 오히려 느렸다(합성 99만 행 22.1초 → 24.9초). 채택: **누적합(UNBOUNDED PRECEDING) − LAG(cum, n)** 으로 이동평균, **21행 블록 MAX × 12 를 GREATEST** 로 52주 고점(252 = 21×12, 정확히 동일) → 같은 데이터 23.5초 → 6.9초, 값 차이 1e-14 이내·NULL 의미 유지. `mv_stock_index_metric` 도 같은 형태로 재정의(**rebuild 필요**). `metric-recompute-days` 140 → 30(ON CONFLICT 비교 25만 → 5.5만 행; 과거 정정은 WEEKLY 가 7일 안에 흡수). 운영 적용:
+  ```bash
+  psql "$DB" -c "REINDEX INDEX CONCURRENTLY idx_stock_daily_price_date"     # ①: 리프를 키 순서로 다시 배치 → 범위 읽기가 순차로. 온라인, 수 분
+  psql -v ON_ERROR_STOP=1 -1 "$DB" -f src/main/resources/db/stock-derived-rebuild.sql -f src/main/resources/db/stock-derived.sql   # 지수 MV 재정의
+  # 배포 후 첫 DERIVED_REFRESH(본문 없음)는 계산식이 바뀌어 30일 범위 전 행을 다시 쓰고(마지막 비트 차이), 일요일 WEEKLY 가 611만 행을 한 번 다시 쓴다
+  ```
 - MV 정의를 바꿨을 때(파생 재구축): `CREATE MATERIALIZED VIEW IF NOT EXISTS` 는 기존 MV 를 바꾸지 못하므로 의존 역순 DROP 후 재생성한다. 한 트랜잭션이라 소비자가 뷰 부재를 보지 않지만 수 분 락이 걸리므로 DAILY 18:30 창 밖에서 실행한다.
   ```bash
   cat src/main/resources/db/stock-derived-rebuild.sql src/main/resources/db/stock-derived.sql | psql -1 "$DATABASE_URL"

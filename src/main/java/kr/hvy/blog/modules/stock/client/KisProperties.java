@@ -173,10 +173,11 @@ public class KisProperties {
     private int maxParallelWorkers = 0;
 
     /**
-     * DAILY 가 다시 계산하는 종목 일별 지표의 최근 일수(캘린더일). 일봉 재수집 창(backfill.window-days 140)과 맞춘다.
-     * WEEKLY 는 전체를 다시 계산해 수정계수 변경 등 과거 구간의 변화를 흡수한다.
+     * DAILY 가 다시 계산하는 종목 일별 지표의 최근 일수(캘린더일). 기록 행 수에 비례해 ON CONFLICT 비교 비용이 들고
+     * (2026-09-09 실측 140일 = 25만 행 ≈ 58초), 과거 정정은 어차피 WEEKLY 전체 재계산이 7일 안에 흡수하므로 30일(≈5.5만 행)이면 충분하다.
+     * 입력은 이 하한보다 metricLookbackDays 앞부터 읽으므로 프레임은 잘리지 않는다.
      */
-    private int metricRecomputeDays = 140;
+    private int metricRecomputeDays = 30;
 
     /** 창 함수 프레임(최대 252거래일)이 잘리지 않도록 기록 하한보다 앞서 읽는 입력 여유(캘린더일) */
     private int metricLookbackDays = 420;

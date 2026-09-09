@@ -68,19 +68,30 @@ WHERE index_code = '0001';
 -- ---------------------------------------------
 -- 지수 지표: RS = 종목 수익률 − 지수 수익률(동일 창)
 -- ---------------------------------------------
+-- 이동평균은 누적합 − LAG 로 계산한다(2026-09-09): double precision 의 AVG 는 역전이 함수가 없어 ROWS n PRECEDING 프레임을
+-- 행마다 다시 훑는다(131만 행 REFRESH 150초). 누적합은 행당 덧셈 1회이고 파티션 앞부분은 LEAST(rn, n) 으로 프레임이 잘린 AVG 와 같다.
+-- 계산식 설명은 DerivedViewRefresher.DAILY_METRIC_UPSERT_SQL 주석 참고. 정의를 바꿨으므로 운영은 stock-derived-rebuild.sql 로 재생성한다.
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stock_index_metric AS
 SELECT index_code,
        trade_date,
-       close_price::double precision                                                                       AS close_value,
-       close_price::double precision / NULLIF(LAG(close_price, 1) OVER w, 0)::double precision - 1        AS ret_1d,
-       close_price::double precision / NULLIF(LAG(close_price, 5) OVER w, 0)::double precision - 1        AS ret_5d,
-       close_price::double precision / NULLIF(LAG(close_price, 20) OVER w, 0)::double precision - 1       AS ret_20d,
-       close_price::double precision / NULLIF(LAG(close_price, 60) OVER w, 0)::double precision - 1       AS ret_60d,
-       close_price::double precision / NULLIF(LAG(close_price, 120) OVER w, 0)::double precision - 1      AS ret_120d,
-       AVG(close_price::double precision) OVER (w ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)              AS ma_20,
-       AVG(close_price::double precision) OVER (w ROWS BETWEEN 59 PRECEDING AND CURRENT ROW)              AS ma_60,
-       AVG(close_price::double precision) OVER (w ROWS BETWEEN 119 PRECEDING AND CURRENT ROW)             AS ma_120
-FROM tb_stock_index_daily
+       close_value,
+       close_value / NULLIF(LAG(close_value, 1) OVER w, 0) - 1                       AS ret_1d,
+       close_value / NULLIF(LAG(close_value, 5) OVER w, 0) - 1                       AS ret_5d,
+       close_value / NULLIF(LAG(close_value, 20) OVER w, 0) - 1                      AS ret_20d,
+       close_value / NULLIF(LAG(close_value, 60) OVER w, 0) - 1                      AS ret_60d,
+       close_value / NULLIF(LAG(close_value, 120) OVER w, 0) - 1                     AS ret_120d,
+       (cum_close - COALESCE(LAG(cum_close, 20) OVER w, 0)) / LEAST(rn, 20)          AS ma_20,
+       (cum_close - COALESCE(LAG(cum_close, 60) OVER w, 0)) / LEAST(rn, 60)          AS ma_60,
+       (cum_close - COALESCE(LAG(cum_close, 120) OVER w, 0)) / LEAST(rn, 120)        AS ma_120
+FROM (
+    SELECT index_code,
+           trade_date,
+           close_price::double precision                                              AS close_value,
+           ROW_NUMBER() OVER (c ROWS UNBOUNDED PRECEDING)                             AS rn,
+           SUM(close_price::double precision) OVER (c ROWS UNBOUNDED PRECEDING)       AS cum_close
+    FROM tb_stock_index_daily
+    WINDOW c AS (PARTITION BY index_code ORDER BY trade_date)
+) cum
 WINDOW w AS (PARTITION BY index_code ORDER BY trade_date)
 WITH DATA;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_mv_stock_index_metric ON mv_stock_index_metric (index_code, trade_date);

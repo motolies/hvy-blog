@@ -29,50 +29,73 @@ public class DerivedViewRefresher {
   private static final LocalDate EPOCH = LocalDate.of(1900, 1, 1);
 
   /**
-   * 종목 일별 지표 계산식의 단일 출처. 옛 mv_stock_daily_metric 정의와 같고, 입력 하한(?1)과 기록 하한(?2)만 추가됐다.
-   * 값이 같은 행은 IS DISTINCT FROM 으로 UPDATE 를 건너뛴다.
+   * 종목 일별 지표 계산식의 단일 출처. 입력 하한(?1)부터 읽어 기록 하한(?2) 이후 행만 쓰고, 값이 같은 행은 IS DISTINCT FROM 으로 UPDATE 를 건너뛴다.
+   * <p>
+   * 2026-09-09 운영 실행 계획 실측으로 창 함수 형태를 바꿨다(값은 옛 정의와 1e-14 이내 동일, 합성 99만 행 대조).
+   * <ul>
+   *   <li>double precision 의 AVG/SUM 은 역전이 함수(moving-aggregate)가 없어 {@code ROWS n PRECEDING} 프레임을 행마다 다시 훑는다
+   *       (120행 이동평균이 행당 120번 덧셈 → 99만 행에 33초). 그래서 누적합(UNBOUNDED PRECEDING, 덧셈 1회)을 만든 뒤
+   *       {@code cum - LAG(cum, n)} 으로 구간 합을 얻는다. 파티션 앞부분은 LAG 가 NULL 이라 0 으로 두고 행 수는 {@code LEAST(rn, n)} 으로
+   *       맞춰 프레임이 잘린 AVG 와 같은 값이 된다.</li>
+   *   <li>MAX 는 어떤 타입도 역전이가 없다. 52주 고점(252행)은 21행 블록 최고가를 만들고 그 블록 12개(0·21·…·231행 전)를 GREATEST 로
+   *       모은다 — 21×12 = 252 라 프레임과 정확히 같고 행당 연산이 252 → 33 이다. GREATEST 는 NULL(파티션 앞부분)을 무시한다.</li>
+   *   <li>numeric 으로 바꾸면 역전이는 생기지만 double↔numeric 변환이 문자열 왕복이라 더 느렸다(실측). 정수 스케일 bigint 는 1e-4 절삭이 생겨 버렸다.</li>
+   *   <li>외인·기관 5일 합은 투자자 행이 하나도 없으면 NULL 이어야 하므로(SUM 이 NULL 을 무시하던 의미) COUNT 누적으로 구분한다.</li>
+   * </ul>
    */
   static final String DAILY_METRIC_UPSERT_SQL = """
       INSERT INTO tb_stock_daily_metric (ticker, trade_date, adj_close, ret_1d, ret_5d, ret_20d, ret_60d, ret_120d, ma_5, ma_20, ma_60, ma_120, dist_ma20, dist_ma60, high_52w, dist_high_52w, tv_avg_5d, tv_avg_60d, tv_ratio_5_60, vol_avg_20d, foreign_net_5d, institution_net_5d, computed_at)
-      SELECT ticker, trade_date, adj_close, ret_1d, ret_5d, ret_20d, ret_60d, ret_120d, ma_5, ma_20, ma_60, ma_120, dist_ma20, dist_ma60, high_52w, dist_high_52w, tv_avg_5d, tv_avg_60d, tv_ratio_5_60, vol_avg_20d, foreign_net_5d, institution_net_5d, NOW()
+      SELECT ticker, trade_date, adj_close, ret_1d, ret_5d, ret_20d, ret_60d, ret_120d, ma_5, ma_20, ma_60, ma_120,
+             adj_close / NULLIF(ma_20, 0) - 1      AS dist_ma20,
+             adj_close / NULLIF(ma_60, 0) - 1      AS dist_ma60,
+             high_52w,
+             adj_close / NULLIF(high_52w, 0) - 1   AS dist_high_52w,
+             tv_avg_5d, tv_avg_60d,
+             tv_avg_5d / NULLIF(tv_avg_60d, 0)     AS tv_ratio_5_60,
+             vol_avg_20d, foreign_net_5d, institution_net_5d, NOW()
       FROM (
-        WITH base AS (
-            SELECT a.ticker,
-                   a.trade_date,
-                   a.adj_close,
-                   a.adj_high,
-                   a.adj_volume,
-                   a.trading_value::double precision AS trading_value,
+        SELECT ticker, trade_date, adj_close,
+               adj_close / NULLIF(LAG(adj_close, 1) OVER w, 0) - 1                          AS ret_1d,
+               adj_close / NULLIF(LAG(adj_close, 5) OVER w, 0) - 1                          AS ret_5d,
+               adj_close / NULLIF(LAG(adj_close, 20) OVER w, 0) - 1                         AS ret_20d,
+               adj_close / NULLIF(LAG(adj_close, 60) OVER w, 0) - 1                         AS ret_60d,
+               adj_close / NULLIF(LAG(adj_close, 120) OVER w, 0) - 1                        AS ret_120d,
+               (cum_close - COALESCE(LAG(cum_close, 5) OVER w, 0)) / LEAST(rn, 5)           AS ma_5,
+               (cum_close - COALESCE(LAG(cum_close, 20) OVER w, 0)) / LEAST(rn, 20)         AS ma_20,
+               (cum_close - COALESCE(LAG(cum_close, 60) OVER w, 0)) / LEAST(rn, 60)         AS ma_60,
+               (cum_close - COALESCE(LAG(cum_close, 120) OVER w, 0)) / LEAST(rn, 120)       AS ma_120,
+               GREATEST(high_21, LAG(high_21, 21) OVER w, LAG(high_21, 42) OVER w, LAG(high_21, 63) OVER w,
+                        LAG(high_21, 84) OVER w, LAG(high_21, 105) OVER w, LAG(high_21, 126) OVER w, LAG(high_21, 147) OVER w,
+                        LAG(high_21, 168) OVER w, LAG(high_21, 189) OVER w, LAG(high_21, 210) OVER w, LAG(high_21, 231) OVER w) AS high_52w,
+               (cum_tv - COALESCE(LAG(cum_tv, 5) OVER w, 0)) / LEAST(rn, 5)                 AS tv_avg_5d,
+               (cum_tv - COALESCE(LAG(cum_tv, 60) OVER w, 0)) / LEAST(rn, 60)               AS tv_avg_60d,
+               (cum_vol - COALESCE(LAG(cum_vol, 20) OVER w, 0)) / LEAST(rn, 20)             AS vol_avg_20d,
+               CASE WHEN cnt_frgn - COALESCE(LAG(cnt_frgn, 5) OVER w, 0) > 0
+                    THEN cum_frgn - COALESCE(LAG(cum_frgn, 5) OVER w, 0) END                AS foreign_net_5d,
+               CASE WHEN cnt_inst - COALESCE(LAG(cnt_inst, 5) OVER w, 0) > 0
+                    THEN cum_inst - COALESCE(LAG(cum_inst, 5) OVER w, 0) END                AS institution_net_5d
+        FROM (
+          SELECT ticker, trade_date, adj_close,
+                 ROW_NUMBER() OVER (c ROWS UNBOUNDED PRECEDING)                        AS rn,
+                 SUM(adj_close) OVER (c ROWS UNBOUNDED PRECEDING)                      AS cum_close,
+                 SUM(trading_value) OVER (c ROWS UNBOUNDED PRECEDING)                  AS cum_tv,
+                 SUM(adj_volume) OVER (c ROWS UNBOUNDED PRECEDING)                     AS cum_vol,
+                 SUM(foreign_net_amt) OVER (c ROWS UNBOUNDED PRECEDING)                AS cum_frgn,
+                 COUNT(foreign_net_amt) OVER (c ROWS UNBOUNDED PRECEDING)              AS cnt_frgn,
+                 SUM(institution_net_amt) OVER (c ROWS UNBOUNDED PRECEDING)            AS cum_inst,
+                 COUNT(institution_net_amt) OVER (c ROWS UNBOUNDED PRECEDING)          AS cnt_inst,
+                 MAX(adj_high) OVER (c ROWS BETWEEN 20 PRECEDING AND CURRENT ROW)      AS high_21
+          FROM (
+            SELECT a.ticker, a.trade_date, a.adj_close, a.adj_high, a.adj_volume,
+                   a.trading_value::double precision       AS trading_value,
                    i.foreign_net_amt::double precision     AS foreign_net_amt,
                    i.institution_net_amt::double precision AS institution_net_amt
             FROM vw_stock_daily_price_adj a
                      LEFT JOIN tb_stock_investor_daily i ON i.ticker = a.ticker AND i.trade_date = a.trade_date
             WHERE a.trade_date >= ?
-        )
-        SELECT ticker,
-               trade_date,
-               adj_close,
-               adj_close / NULLIF(LAG(adj_close, 1) OVER w, 0) - 1                                          AS ret_1d,
-               adj_close / NULLIF(LAG(adj_close, 5) OVER w, 0) - 1                                          AS ret_5d,
-               adj_close / NULLIF(LAG(adj_close, 20) OVER w, 0) - 1                                         AS ret_20d,
-               adj_close / NULLIF(LAG(adj_close, 60) OVER w, 0) - 1                                         AS ret_60d,
-               adj_close / NULLIF(LAG(adj_close, 120) OVER w, 0) - 1                                        AS ret_120d,
-               AVG(adj_close) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)                              AS ma_5,
-               AVG(adj_close) OVER (w ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)                             AS ma_20,
-               AVG(adj_close) OVER (w ROWS BETWEEN 59 PRECEDING AND CURRENT ROW)                             AS ma_60,
-               AVG(adj_close) OVER (w ROWS BETWEEN 119 PRECEDING AND CURRENT ROW)                            AS ma_120,
-               adj_close / NULLIF(AVG(adj_close) OVER (w ROWS BETWEEN 19 PRECEDING AND CURRENT ROW), 0) - 1  AS dist_ma20,
-               adj_close / NULLIF(AVG(adj_close) OVER (w ROWS BETWEEN 59 PRECEDING AND CURRENT ROW), 0) - 1  AS dist_ma60,
-               MAX(adj_high) OVER (w ROWS BETWEEN 251 PRECEDING AND CURRENT ROW)                             AS high_52w,
-               adj_close / NULLIF(MAX(adj_high) OVER (w ROWS BETWEEN 251 PRECEDING AND CURRENT ROW), 0) - 1  AS dist_high_52w,
-               AVG(trading_value) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)                          AS tv_avg_5d,
-               AVG(trading_value) OVER (w ROWS BETWEEN 59 PRECEDING AND CURRENT ROW)                         AS tv_avg_60d,
-               AVG(trading_value) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
-                   / NULLIF(AVG(trading_value) OVER (w ROWS BETWEEN 59 PRECEDING AND CURRENT ROW), 0)        AS tv_ratio_5_60,
-               AVG(adj_volume) OVER (w ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)                            AS vol_avg_20d,
-               SUM(foreign_net_amt) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)                        AS foreign_net_5d,
-               SUM(institution_net_amt) OVER (w ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)                    AS institution_net_5d
-        FROM base
+          ) base
+          WINDOW c AS (PARTITION BY ticker ORDER BY trade_date)
+        ) cum
         WINDOW w AS (PARTITION BY ticker ORDER BY trade_date)
       ) m
       WHERE m.trade_date >= ?

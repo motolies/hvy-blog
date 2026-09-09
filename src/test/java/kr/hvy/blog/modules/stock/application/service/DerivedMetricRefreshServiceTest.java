@@ -42,14 +42,14 @@ class DerivedMetricRefreshServiceTest {
   }
 
   @Test
-  @DisplayName("증분(DAILY): 오늘 − recompute-days 부터 쓰고 입력은 그보다 lookback-days 앞부터 읽는다")
+  @DisplayName("증분(DAILY): 오늘 − recompute-days(30) 부터 쓰고 입력은 그보다 lookback-days(420) 앞부터 읽는다")
   @SuppressWarnings("unchecked")
   void incrementalRecomputeWindow() {
     CollectExecution exec = execution(BackfillRequest.empty());
 
     int refreshed = service.refreshAll(exec);
 
-    LocalDate from = MarketClock.today().minusDays(140);
+    LocalDate from = MarketClock.today().minusDays(30);
     verify(refresher).recomputeDailyMetric(eq(from), eq(from.minusDays(420)), eq("512MB"), eq(0));
     verify(refresher).refresh(eq(DerivedViewRefresher.MV_ADJUST_FACTOR), eq(false), eq("512MB"), eq(0));
     verify(refresher).refresh(eq("mv_stock_sector_daily"), eq(false), eq("512MB"), eq(0));
@@ -76,7 +76,7 @@ class DerivedMetricRefreshServiceTest {
   void executeDefaultsToIncrementalAndForceMeansFull() {
     CollectExecution incremental = execution(BackfillRequest.empty());
     service.execute(incremental);
-    LocalDate from = MarketClock.today().minusDays(140);
+    LocalDate from = MarketClock.today().minusDays(30);
     verify(refresher).recomputeDailyMetric(eq(from), eq(from.minusDays(420)), eq("512MB"), eq(0));
     assertThat(incremental.metadataSnapshot()).containsEntry("metricFrom", from.toString());
 

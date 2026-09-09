@@ -16,7 +16,7 @@
 1. 운영 DB에 순서대로 적용한다. 모두 재실행 안전(`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`).
    ```bash
    psql "$DATABASE_URL" -f src/main/resources/db/stock-schema.sql    # 테이블 22개 (재실행하면 새 테이블·COMMENT 만 반영)
-   psql "$DATABASE_URL" -f src/main/resources/db/stock-derived.sql   # MV 3개 + 뷰 3개 (schema 뒤에). MV 정의를 바꿨으면 stock-derived-rebuild.sql 선행(§9). 종목 일별 지표는 테이블이라 첫 적재는 POST /DERIVED_REFRESH {"startDate":"2015-01-01"}
+   psql "$DATABASE_URL" -f src/main/resources/db/stock-derived.sql   # MV 3개 + 뷰 3개 (schema 뒤에). MV 정의를 바꿨으면 stock-derived-rebuild.sql 선행(§9). 종목 일별 지표는 테이블이라 첫 적재는 POST /DERIVED_REFRESH {"force":true} (전체 ≈22분)
    psql "$DATABASE_URL" -f src/main/resources/db/stock-seed.sql      # tb_stock_global_sector_map 시드
    ```
    `schema-postgres.sql`(전체 재구축용) 은 위 세 파일의 **원문**을 `-- >>> BEGIN db/stock-*.sql` / `-- <<< END …` 마커로 감싸 그대로 포함하고, DROP 블록에 stock 테이블 22개가 있다. 수정은 `db/stock-*.sql` 원본에만 하고 복사본을 갱신한다. `StockSchemaSyncTest` 가 불일치를 잡는다.
@@ -70,7 +70,7 @@ curl -X POST $B/MARKET_INVESTOR_BACKFILL                 # 시장별(KOSPI·KOSD
 curl -X POST $B/ETF_NAV_BACKFILL                         # 활성 ETF(EF) NAV·괴리율 2015~ (202, ≈1,000종목 × 29윈도우 ≈ 30분)
 curl -X POST $B/FINANCIAL_BACKFILL                       # 종목당 12호출(6종 × 연/분기), 전 종목 ≈36분
 curl -X POST $B/OVERSEAS_BACKFILL                        # kis.overseas.symbols
-curl -X POST $B/DERIVED_REFRESH                          # MV 4개 갱신 (소요 시간 3분 룰 실측)
+curl -X POST $B/DERIVED_REFRESH -H "$H" -d '{"force":true}'   # 파생 4개 갱신. force = 지표 테이블 전체 재계산(≈22분, BACKFILL_ALL 도 이걸 넘김). 본문 없음 = 최근 140일 증분(DAILY 와 동일), {"startDate":…} = 그 날짜부터
 curl -X POST $B/VALIDATE                                 # 정합성 점검
 ```
 
@@ -83,9 +83,9 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | 스케줄러 | cron | 잡 | lockAtMostFor |
 |---|---|---|---|
 | `StockMasterScheduler` | 평일 05:30 | MASTER(마스터 3종 + theme_code.mst → KRX·THEME 섹터맵, 테마 실패 시 THEME 만 건너뜀 `themeError`) → HOLIDAY(1페이지) | 15m |
-| `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → MARKET_INVESTOR(시장별 오늘 1회, +2호출) → ETF_NAV(활성 ETF 최근 1윈도우, +≈1,000호출) → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED (총 ≈19분) | 40m |
+| `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → MARKET_INVESTOR(시장별 오늘 1회, +2호출) → ETF_NAV(활성 ETF 최근 1윈도우, +≈1,000호출) → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED(MV 3개 전체 REFRESH ≈5분 고정 + 지표 140일 증분) (총 ≈22분) | 40m |
 | `StockOverseasScheduler` | 화~토 06:30 | OVERSEAS_DAILY | 15m |
-| `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → STOCK_INFO(기업행사에만 있는 종목을 조회해 상폐일 있는 것만 비활성 마스터 행으로, 메타 `stockInfoCandidates`/`stockInfoApplied`) → ADJUST_FACTOR → FINANCIAL(정정 감지) → DERIVED_FULL(지표 테이블 전체 재계산 ≈25분) | 2h |
+| `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → STOCK_INFO(기업행사에만 있는 종목을 조회해 상폐일 있는 것만 비활성 마스터 행으로, 메타 `stockInfoCandidates`/`stockInfoApplied`) → ADJUST_FACTOR → FINANCIAL(정정 감지) → DERIVED_FULL(지표 테이블 전체 재계산 ≈22분 + MV ≈5분) | 2h |
 
 - DAILY 는 휴장일이면 run 만 남기고 끝난다(`force:true` 로 무시). PRICE 단계 실패 시 DERIVED 만 건너뛴다. 단계별 상태·소요는 run `metadata_json.steps[]`.
 - `/admin` 스케줄러 카탈로그(`SchedulerCatalog`)에 4개가 등록되어 있다.
@@ -147,7 +147,7 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 - 윈도우 상한(`max-windows`) 도달은 FAILED 가 아니라 **PAUSED** 로 남고 attempt 를 소모하지 않는다. 같은 잡을 다시 트리거하면 커서부터 이어받는다. (2026-09-08 이전 상한 40 으로 FAILED 가 된 INVESTOR_BACKFILL 2,185건도 attempt 1 이라 `POST /INVESTOR_BACKFILL` 재트리거만으로 이어간다.)
 - KIS 장애로 하루 결손: 다음 날 DAILY 가 최근 100건 윈도우를 재수집하므로 자동 복구. 2일 이상은 reload.
 - MV 미적용 상태(psql 전): `ADJUST_FACTOR`·`DERIVED_REFRESH` 는 경고만 남기고 건너뛴다.
-- **MV 갱신 시간**: 2026-09-08 실측 `mv_stock_daily_metric` 6,294,938ms(105분, work_mem 4MB + CONCURRENTLY). `kis.derived.work-mem`(기본 512MB, REFRESH 세션에만 SET/RESET)과 `kis.derived.concurrently`(기본 false, 야간은 읽는 쪽이 없음)로 조정한다. work_mem 을 올리자 병렬 해시 조인이 `/dev/shm` 공유 메모리를 잡다 Docker 기본 64MB 에서 `could not resize shared memory segment … No space left on device` 로 실패했다(같은 날 실측) → `kis.derived.max-parallel-workers`(기본 0, 직렬) 로 막았고, PG 컨테이너에 `shm_size: 1g` 를 주면 2~4 로 올려 병렬 스캔을 살릴 수 있다. 그래도 25분(1,509,788ms)이라 같은 날 **테이블 증분 재계산으로 전환**했다: DAILY 는 최근 140일만 다시 계산해 upsert(≈수십 초), WEEKLY 가 전체 재계산(≈25분). 첫 적재·과거 재계산은 `POST /DERIVED_REFRESH -d '{"startDate":"2015-01-01"}'` (202).
+- **MV 갱신 시간**: 2026-09-08 실측 `mv_stock_daily_metric` 6,294,938ms(105분, work_mem 4MB + CONCURRENTLY). `kis.derived.work-mem`(기본 512MB, REFRESH 세션에만 SET/RESET)과 `kis.derived.concurrently`(기본 false, 야간은 읽는 쪽이 없음)로 조정한다. work_mem 을 올리자 병렬 해시 조인이 `/dev/shm` 공유 메모리를 잡다 Docker 기본 64MB 에서 `could not resize shared memory segment … No space left on device` 로 실패했다(같은 날 실측) → `kis.derived.max-parallel-workers`(기본 0, 직렬) 로 막았고, PG 컨테이너에 `shm_size: 1g` 를 주면 2~4 로 올려 병렬 스캔을 살릴 수 있다. 그래도 25분(1,509,788ms)이라 같은 날 **테이블 증분 재계산으로 전환**했다: DAILY 는 최근 140일만 다시 계산해 upsert, WEEKLY 가 전체 재계산. 2026-09-09 실측(run 76·77): 전체 재계산 `tb_stock_daily_metric` 1,346,783ms/1,296,491ms(≈22분, 611만 행), MV 고정 비용 `mv_stock_index_metric` ≈150s + `mv_stock_adjust_factor` ≈87s + `mv_stock_sector_daily` ≈50s ≈ 5분(증분이어도 매번). 요청 해석: **본문 없음 = 증분(140일)**, `{"startDate":…}` = 그 날짜부터, `{"force":true}` = 전체 — 09-09 이전엔 본문 없는 호출이 전체로 돌았다(run 77 `metricFrom: ALL`, 수정됨). 경고 임계는 증분 10분·전체 45분(`DerivedMetricRefreshService.WARN_*`). 첫 적재 때 `startDate` 로 돌리면 일봉 백필이 목표일을 지나쳐 받은 앞 구간(≈7.3만 행, 2014-12)이 빠지므로 첫 적재는 `force` 가 맞다(run 77 의 rows 73,007 이 그 구간).
 - MV 정의를 바꿨을 때(파생 재구축): `CREATE MATERIALIZED VIEW IF NOT EXISTS` 는 기존 MV 를 바꾸지 못하므로 의존 역순 DROP 후 재생성한다. 한 트랜잭션이라 소비자가 뷰 부재를 보지 않지만 수 분 락이 걸리므로 DAILY 18:30 창 밖에서 실행한다.
   ```bash
   cat src/main/resources/db/stock-derived-rebuild.sql src/main/resources/db/stock-derived.sql | psql -1 "$DATABASE_URL"

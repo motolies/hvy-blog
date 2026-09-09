@@ -86,12 +86,15 @@ public class FullBackfillJob implements CollectJob {
   /**
    * 하위 잡에 넘길 요청. 휴장일은 백필 시작일과 무관하게 오늘부터 1년치를 받도록 startDate=오늘로 바꾼다.
    * 밸류에이션·시장통계는 당일 스냅샷이라(endDate 를 스냅샷 날짜로 쓰므로) 날짜·지수·리셋을 떼고 종목 필터와 force 만 넘긴다.
+   * 파생 갱신은 방금 받은 전 기간 일봉 위에서 지표 테이블을 처음 채우는 것이므로 force=true 로 전체 재계산을 시킨다
+   * (본문 없는 DERIVED_REFRESH 는 최근 140일 증분이라 그대로 넘기면 과거 구간이 비어 버린다).
    */
   static BackfillRequest subRequest(CollectJobType type, BackfillRequest request) {
     return switch (type) {
       case HOLIDAY -> new BackfillRequest(MarketClock.today(), null, null, null, null, null, null, null);
       case VALUATION, MARKET_STAT -> new BackfillRequest(null, null, request.tickerFrom(), request.tickerTo(),
           request.tickers(), null, null, request.force());
+      case DERIVED_REFRESH -> new BackfillRequest(null, null, null, null, null, null, null, true);
       default -> request;
     };
   }

@@ -17,7 +17,7 @@ import kr.hvy.blog.modules.stock.application.service.CollectRequestException;
  * @param tickers         명시 종목 목록 (있으면 범위 무시)
  * @param indexCodes      지수 백필 대상 코드 (없으면 지수 마스터 전체)
  * @param resetCheckpoint true 면 체크포인트를 PENDING 으로 되돌려 처음부터 다시 받는다
- * @param force           일부 잡의 안전장치를 무시한다 (예: DAILY 의 휴장일 스킵)
+ * @param force           일부 잡의 안전장치를 무시한다 (DAILY 의 휴장일 스킵 해제, DERIVED_REFRESH 의 지표 전체 재계산)
  */
 public record BackfillRequest(
     LocalDate startDate,

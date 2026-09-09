@@ -72,6 +72,21 @@ class DerivedMetricRefreshServiceTest {
   }
 
   @Test
+  @DisplayName("API 본문 없는 호출은 DAILY 와 같은 증분이고, force:true 만 전체 재계산이다 (2026-09-09 본문 없는 호출이 전체로 돌던 결함)")
+  void executeDefaultsToIncrementalAndForceMeansFull() {
+    CollectExecution incremental = execution(BackfillRequest.empty());
+    service.execute(incremental);
+    LocalDate from = MarketClock.today().minusDays(140);
+    verify(refresher).recomputeDailyMetric(eq(from), eq(from.minusDays(420)), eq("512MB"), eq(0));
+    assertThat(incremental.metadataSnapshot()).containsEntry("metricFrom", from.toString());
+
+    CollectExecution full = execution(new BackfillRequest(LocalDate.of(2015, 1, 1), null, null, null, null, null, null, true));
+    service.execute(full);
+    verify(refresher).recomputeDailyMetric(isNull(), isNull(), eq("512MB"), eq(0));
+    assertThat(full.metadataSnapshot()).containsEntry("metricFrom", "ALL");
+  }
+
+  @Test
   @DisplayName("지표 테이블이 없으면(psql 미적용) MISSING 으로 남기고 나머지는 계속 간다")
   void missingTableIsSkipped() {
     when(refresher.tableExists(DerivedViewRefresher.TB_DAILY_METRIC)).thenReturn(false);

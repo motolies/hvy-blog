@@ -51,6 +51,10 @@ class FullBackfillJobTest {
         BackfillRequest req = inv.getArgument(1);
         assertThat(req.startDate()).isNotNull(); // 휴장일은 오늘부터
         assertThat(req.tickers()).isNull();
+      } else if (type == CollectJobType.DERIVED_REFRESH) {
+        BackfillRequest req = inv.getArgument(1);
+        assertThat(req.isForce()).isTrue();      // 파생은 종목 필터 없이 전체 재계산
+        assertThat(req.tickers()).isNull();
       } else {
         assertThat(((BackfillRequest) inv.getArgument(1)).tickers()).containsExactly("005930");
       }
@@ -97,6 +101,16 @@ class FullBackfillJobTest {
     assertThat(FullBackfillJob.ORDER).containsSubsequence(CollectJobType.INVESTOR_BACKFILL, CollectJobType.VALUATION,
         CollectJobType.MARKET_STAT, CollectJobType.MARKET_INVESTOR_BACKFILL, CollectJobType.ETF_NAV_BACKFILL,
         CollectJobType.FINANCIAL_BACKFILL);
+  }
+
+  @Test
+  @DisplayName("파생 갱신 하위 요청은 force=true 로 지표 테이블 전체 재계산을 시킨다 (증분이면 방금 받은 과거 일봉 구간이 비어 버림)")
+  void derivedSubRequestForcesFullRecompute() {
+    BackfillRequest sub = FullBackfillJob.subRequest(CollectJobType.DERIVED_REFRESH, BackfillRequest.empty());
+
+    assertThat(sub.isForce()).isTrue();
+    assertThat(sub.startDate()).isNull();
+    assertThat(sub.tickers()).isNull();
   }
 
   @Test

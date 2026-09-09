@@ -15,10 +15,11 @@ import org.springframework.stereotype.Service;
 /**
  * 파생 계층 갱신(DERIVED_REFRESH 잡 + DAILY 마지막 단계 + WEEKLY 전체 재계산). 순서가 의존성이다:
  * 수정계수 MV → 종목 일별 지표 테이블(증분 재계산) → 지수 지표 MV → 섹터 일별 MV.
- * 없는 객체는 건너뛰고 경고만 남긴다(psql 미적용 상태 허용). 총 소요가 3분을 넘으면 경고를 남긴다.
+ * 없는 객체는 건너뛰고 경고만 남긴다(psql 미적용 상태 허용). 총 소요가 임계(증분 10분·전체 45분)를 넘으면 경고를 남긴다.
  * <p>
- * 종목 일별 지표는 2026-09-08 MV 에서 테이블로 바꿨다. 전체 재계산이 25분이라 DAILY 는 최근 metric-recompute-days 만 다시 계산하고,
- * WEEKLY 가 전체를 다시 계산해 수정계수 변경 같은 과거 구간 변화를 흡수한다.
+ * 종목 일별 지표는 2026-09-08 MV 에서 테이블로 바꿨다. 전체 재계산이 22분(2026-09-09 실측)이라 DAILY 는 최근 metric-recompute-days 만
+ * 다시 계산하고, WEEKLY 가 전체를 다시 계산해 수정계수 변경 같은 과거 구간 변화를 흡수한다. MV 3개는 매번 전체 REFRESH 라
+ * 증분이어도 약 5분의 고정 비용이 있다.
  */
 @Slf4j
 @Service
@@ -30,7 +31,10 @@ public class DerivedMetricRefreshService implements CollectJob {
       DerivedViewRefresher.TB_DAILY_METRIC,
       "mv_stock_index_metric",
       "mv_stock_sector_daily");
-  static final long WARN_THRESHOLD_MS = 3 * 60_000L;
+  /** 증분 갱신 경고 임계. MV 고정 비용 ≈5분에 지표 증분을 더한 값이 이를 넘으면 무언가 느려진 것이다. */
+  static final long WARN_INCREMENTAL_MS = 10 * 60_000L;
+  /** 전체 재계산 경고 임계. 실측 22분 기준 여유를 두었고 WEEKLY 락(2시간) 안이어야 한다. */
+  static final long WARN_FULL_MS = 45 * 60_000L;
 
   private final DerivedViewRefresher viewRefresher;
   private final KisProperties properties;
@@ -41,11 +45,18 @@ public class DerivedMetricRefreshService implements CollectJob {
   }
 
   /**
-   * API 트리거: startDate 가 있으면 그 날짜부터 지표를 다시 계산한다(2015-01-01 이면 사실상 전체). 없으면 증분.
+   * API 트리거. 요청 해석: {@code force:true} 면 전체 재계산, {@code startDate} 가 있으면 그 날짜부터, 둘 다 없으면 DAILY 와 같은 증분.
+   * (2026-09-09 이전엔 본문 없는 호출이 전체로 돌아 22분이 걸렸다 — 증분 실측이 목적이었는데 결과가 같아 발견.)
    */
   @Override
   public void execute(CollectExecution execution) {
-    refreshAll(execution, execution.request().startDate());
+    if (execution.request().isForce()) {
+      refreshAllFull(execution);
+    } else if (execution.request().startDate() != null) {
+      refreshAll(execution, execution.request().startDate());
+    } else {
+      refreshAll(execution);
+    }
   }
 
   /**
@@ -103,9 +114,11 @@ public class DerivedMetricRefreshService implements CollectJob {
     }
     execution.putMetadata("refreshMs", timings);
     execution.putMetadata("refreshTotalMs", total);
-    if (total > WARN_THRESHOLD_MS) {
-      log.warn("파생 갱신이 3분을 넘었습니다({}ms, metricFrom={})", total, metricFrom);
-      execution.putMetadata("warning", "파생 갱신 3분 초과");
+    long threshold = metricFrom == null ? WARN_FULL_MS : WARN_INCREMENTAL_MS;
+    if (total > threshold) {
+      long minutes = threshold / 60_000L;
+      log.warn("파생 갱신이 {}분을 넘었습니다({}ms, metricFrom={})", minutes, total, metricFrom);
+      execution.putMetadata("warning", "파생 갱신 " + minutes + "분 초과");
     }
     return refreshed;
   }

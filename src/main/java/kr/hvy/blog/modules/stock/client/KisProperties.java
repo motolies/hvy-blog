@@ -61,7 +61,8 @@ public class KisProperties {
   @PostConstruct
   void logStatus() {
     if (isConfigured()) {
-      log.info("KIS Open API 설정 확인: baseUrl={}, rateLimit={}건/{}ms", baseUrl, rateLimit.permits, rateLimit.windowMs);
+      log.info("KIS Open API 설정 확인: baseUrl={}, rateLimit=호출 간격 {}ms(≈{}건/초, 상한 {}ms)", baseUrl,
+          rateLimit.minIntervalMs, 1000 / Math.max(1, rateLimit.minIntervalMs), rateLimit.maxIntervalMs);
     } else {
       log.warn("KIS Open API 앱키가 설정되지 않았습니다(KIS_APP_KEY/KIS_APP_SECRET). 주식 수집 잡은 실행 시 실패합니다");
     }
@@ -86,15 +87,25 @@ public class KisProperties {
   public static class RateLimit {
 
     /**
-     * 고정 윈도우 길이(ms). 1초 창 하나로 잡으면 창 경계에서 순간 2배가 나가 KIS 한도(20건/초)를 넘길 수 있어
-     * 200ms 로 잘게 쪼갠다. 200ms × 3건이면 임의의 1초 슬라이딩 창 최댓값이 18건으로 억제된다.
+     * 호출 사이 최소 간격(ms). 67ms ≈ 15건/초로 KIS 실전 한도(20건/초) 아래에서 버스트 없이 균등 분산된다.
+     * 2026-09-09 이전의 200ms 창 × 3건 방식은 창 시작에 3건이 동시에 나가 EGW00201 이 호출의 약 0.3% 로 상시 발생했다(4시간 270회).
+     * 균등 간격에서도 같은 비율로 적중하면 버스트 가설이 틀린 것이므로 80 정도로 올린다(run 메타 rateLimitHits 로 비교).
      */
-    private int windowMs = 200;
+    private int minIntervalMs = 67;
 
-    /** 윈도우당 허용 호출 수 */
-    private int permits = 3;
+    /** 적응 확대의 상한(ms). 500ms = 2건/초 */
+    private int maxIntervalMs = 500;
 
-    /** EGW00201 로 낮춘 한도를 원복하기까지 필요한 연속 성공 횟수 */
+    /** 버스트 판정 시 간격을 늘리는 배수. 원복은 같은 배수로 나눈다 */
+    private double backoffFactor = 1.5;
+
+    /** burstWindowMs 안에 이 횟수 이상 EGW00201 이 오면 버스트로 보고 간격을 늘린다. 단발은 KisApiClient 재시도(1초 대기)가 흡수한다 */
+    private int burstThreshold = 3;
+
+    /** 버스트 판정 창(ms) */
+    private int burstWindowMs = 10_000;
+
+    /** 늘어난 간격을 한 단계 되돌리기까지 필요한 연속 성공 횟수 */
     private int recoveryStreak = 200;
   }
 

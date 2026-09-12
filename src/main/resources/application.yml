@@ -164,9 +164,12 @@ kis:
     response-timeout: 15      # 초
     max-connections: 16
   rate-limit:
-    window-ms: 200
-    permits: 3
-    recovery-streak: 200      # EGW00201 로 낮춘 한도를 원복하기까지 필요한 연속 성공 수
+    min-interval-ms: 67       # 호출 사이 최소 간격 ≈ 15건/초, 버스트 없이 균등 분산 (2026-09-12, 이전 200ms×3 창은 창 시작 버스트로 EGW00201 상시 발생)
+    max-interval-ms: 500      # 적응 확대 상한 (2건/초)
+    backoff-factor: 1.5       # 버스트 판정 시 간격 ×1.5, 원복은 ÷1.5
+    burst-threshold: 3        # burst-window 안에 EGW00201 3회 이상이면 버스트 (단발은 KisApiClient 재시도가 흡수)
+    burst-window-ms: 10000
+    recovery-streak: 200      # 늘어난 간격을 한 단계 되돌리기까지 필요한 연속 성공 수
   token:
     refresh-buffer: 10        # 분. 만료 10분 전부터 갱신
     issue-interval: 60        # 초. 이 안에 재발급 요청이 오면 기존 토큰 유지

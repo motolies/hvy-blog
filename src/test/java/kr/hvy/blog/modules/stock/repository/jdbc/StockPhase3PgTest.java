@@ -112,6 +112,21 @@ class StockPhase3PgTest {
   }
 
   @Test
+  @DisplayName("ETF NAV 비율 컬럼 확장 마이그레이션은 재실행해도 안전하고 결과 정밀도가 12,4 다")
+  void etfNavRateWidthMigrationIsIdempotent() throws Exception {
+    String script;
+    try (var in = getClass().getClassLoader().getResourceAsStream("db/migrate/20260912_01_etf_nav_rate_width.sql")) {
+      assertThat(in).isNotNull();
+      script = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+    jdbc.execute(script);
+    jdbc.execute(script);
+    Integer widened = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'tb_stock_etf_nav_daily' "
+        + "AND column_name IN ('change_rate','nav_change_rate','disparity_rate') AND numeric_precision = 12 AND numeric_scale = 4", Integer.class);
+    assertThat(widened).isEqualTo(3);
+  }
+
+  @Test
   @DisplayName("해외 일봉 writer 와 섹터-글로벌 시드가 적용된다")
   void globalMarket() {
     GlobalMarketWriter writer = new GlobalMarketWriter(support);

@@ -718,14 +718,14 @@ CREATE TABLE IF NOT EXISTS tb_stock_etf_nav_daily
     close_price        NUMERIC(18,2)  NOT NULL,
     prev_diff          NUMERIC(18,2)           DEFAULT NULL,
     prev_diff_sign     VARCHAR(1)              DEFAULT NULL,
-    change_rate        NUMERIC(8,4)            DEFAULT NULL,
+    change_rate        NUMERIC(12,4)           DEFAULT NULL,
     volume             BIGINT                  DEFAULT NULL,
     nav                NUMERIC(18,4)           DEFAULT NULL,
     nav_prev_diff      NUMERIC(18,4)           DEFAULT NULL,
     nav_prev_diff_sign VARCHAR(1)              DEFAULT NULL,
-    nav_change_rate    NUMERIC(8,4)            DEFAULT NULL,
+    nav_change_rate    NUMERIC(12,4)           DEFAULT NULL,
     nav_diff           NUMERIC(18,4)           DEFAULT NULL,
-    disparity_rate     NUMERIC(8,4)            DEFAULT NULL,
+    disparity_rate     NUMERIC(12,4)           DEFAULT NULL,
     collected_at       TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
     CONSTRAINT pk_stock_etf_nav_daily PRIMARY KEY (ticker, trade_date)
 );
@@ -743,7 +743,7 @@ COMMENT ON COLUMN tb_stock_etf_nav_daily.nav_prev_diff      IS 'NAV 전일 대�
 COMMENT ON COLUMN tb_stock_etf_nav_daily.nav_prev_diff_sign IS 'NAV 전일 대비 부호 (nav_prdy_vrss_sign)';
 COMMENT ON COLUMN tb_stock_etf_nav_daily.nav_change_rate    IS 'NAV 전일 대비율 (%, nav_prdy_ctrt)';
 COMMENT ON COLUMN tb_stock_etf_nav_daily.nav_diff           IS 'NAV 대비 현재가 차이 (원, nav_vrss_prpr)';
-COMMENT ON COLUMN tb_stock_etf_nav_daily.disparity_rate     IS '괴리율 (%, dprt). 부호 규약은 실측 항목';
+COMMENT ON COLUMN tb_stock_etf_nav_daily.disparity_rate     IS '괴리율 (%, dprt). NAV 가 0/누락이면 KIS 가 10^4 이상 값을 주므로 |값| >= 10000 은 NAV 없음으로 취급 (2026-09-09 265690)';
 COMMENT ON COLUMN tb_stock_etf_nav_daily.collected_at       IS '마지막 수집 시각';
 
 CREATE INDEX IF NOT EXISTS idx_stock_etf_nav_daily_date

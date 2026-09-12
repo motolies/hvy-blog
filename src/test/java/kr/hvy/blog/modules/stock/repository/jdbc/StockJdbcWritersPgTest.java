@@ -65,6 +65,13 @@ class StockJdbcWritersPgTest {
     assertThat(writer.upsert(List.of(changed))).isEqualTo(1);
     BigDecimal nav = jdbc.queryForObject("SELECT nav FROM tb_stock_etf_nav_daily WHERE ticker = '069500'", BigDecimal.class);
     assertThat(nav).isEqualByComparingTo("45200");
+
+    // 2026-09-09 265690: NAV 없는 날 KIS 가 10^4 이상 비율을 줘 NUMERIC(8,4) 에서 overflow → NUMERIC(12,4) 로 넓혀 그대로 저장한다
+    EtfNavRow navMissing = new EtfNavRow("265690", D1, new BigDecimal("10000"), null, null, new BigDecimal("12345.6789"), 10L,
+        BigDecimal.ZERO, null, null, new BigDecimal("-99999.9999"), new BigDecimal("10000"), new BigDecimal("99999999.9999"));
+    assertThat(writer.upsert(List.of(navMissing))).isEqualTo(1);
+    BigDecimal disparity = jdbc.queryForObject("SELECT disparity_rate FROM tb_stock_etf_nav_daily WHERE ticker = '265690'", BigDecimal.class);
+    assertThat(disparity).isEqualByComparingTo("99999999.9999");
   }
 
   @Test

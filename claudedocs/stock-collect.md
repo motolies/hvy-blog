@@ -61,7 +61,7 @@ curl -X POST $B/HOLIDAY -H "$H" -d '{"startDate":"2026-01-01"}'   # startDate �
 curl -X POST $B/INDEX_BACKFILL                           # 지수 마스터 전체 × 10년 (202)
 curl -X POST $B/PRICE_BACKFILL -H "$H" -d '{"tickerFrom":"000000","tickerTo":"099999"}'   # 900종목씩 3일 밤 분할 권장
 curl -X POST $B/STOCK_INFO                               # 상장일·상폐일 보강
-curl -X POST $B/CORP_ACTION                              # 예탁원 7종 2015~ (전 종목 기간 조회라 호출 수 적음)
+curl -X POST $B/CORP_ACTION                              # 예탁원 7종 2015~ 92일 청크. 페이지 상한(100)에 걸리면 기간을 반으로 나눠 재조회 — run 메타 ksdSplits / ksdTruncatedDays(1일에서도 잘림, 0 이어야) / ksdRepeatedPages(같은 페이지 반복)
 curl -X POST $B/ADJUST_FACTOR                            # 계수 산출 → MV → KIS 수정주가 표본 20종목 대조
 curl -X POST $B/INVESTOR_BACKFILL                        # 소급 깊이 실측 (EXHAUSTED 분포 확인)
 curl -X POST $B/VALUATION                                # 오늘 스냅샷(시총·PER·PBR). 당일만 제공되므로 DAILY 로 누적 (BACKFILL_ALL 은 날짜 필터를 떼고 넘김)
@@ -148,6 +148,11 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 - KIS 장애로 하루 결손: 다음 날 DAILY 가 최근 100건 윈도우를 재수집하므로 자동 복구. 2일 이상은 reload.
 - MV 미적용 상태(psql 전): `ADJUST_FACTOR`·`DERIVED_REFRESH` 는 경고만 남기고 건너뛴다.
 - **ETF NAV `numeric field overflow`(2026-09-09, 265690)**: 등락률·NAV 등락률·괴리율이 NUMERIC(8,4) 였는데 NAV 없는 날 KIS 가 10^4 이상 값을 줘 그 종목의 배치가 통째로 실패하고 체크포인트가 FAILED 로 남았다. `migrate/20260912_01_etf_nav_rate_width.sql` 로 12,4 확장 후 `POST /ETF_NAV_BACKFILL` 재트리거(FAILED 는 attempt<5 라 커서부터 이어감). 소비자는 |괴리율| ≥ 10000 을 NAV 없음으로 취급한다.
+- **예탁원 연속조회 잘림(2026-09-09 로그 `연속조회 페이지 상한 도달 maxPages=30` 94회: LIST_INFO 47·DIVIDEND 43·REV_SPLIT 3·BONUS_ISSUE 1)**: 페이지네이터가 상한에서 WARN 만 남기고 부분 목록을 돌려줘 run 은 SUCCESS 였다 — 전 종목 92일 청크가 고볼륨 종류에서 거의 매번 잘렸고, 분할·무증 이벤트 누락은 수정계수 누락으로 이어진다. 수정: `TrContPaginator` 가 `PageResult(truncated, repeated)` 를 돌려주고(휴장일 15페이지·투자자 5페이지는 의도된 창이라 DEBUG), `CorporateActionCollectService` 는 잘린 기간을 반으로 나눠 재귀(상한 100, 하루에서도 잘리면 실패 기록), 같은 페이지 반복은 즉시 중단·`ksdRepeatedPages` 로 집계. **재적재**: `POST /CORP_ACTION`(2015~ 전체) → `POST /ADJUST_FACTOR` → 다음 WEEKLY 가 지표 전체 재계산. 페이지 크기·연속조회 지원 여부는 `KisKsdInfoManualTest` 로 실측(§10).
+  ```sql
+  -- 잘림 규모 추정: 92일 청크별 행 수에 같은 최댓값이 반복되면 그 값이 (30페이지 × 페이지 크기) 상한
+  SELECT action_type, (record_date - DATE '2015-01-01') / 92 AS chunk, COUNT(*) FROM tb_stock_corporate_action GROUP BY 1, 2 ORDER BY 1, 3 DESC;
+  ```
 - **MV 갱신 시간**: 2026-09-08 실측 `mv_stock_daily_metric` 6,294,938ms(105분, work_mem 4MB + CONCURRENTLY). `kis.derived.work-mem`(기본 512MB, REFRESH 세션에만 SET/RESET)과 `kis.derived.concurrently`(기본 false, 야간은 읽는 쪽이 없음)로 조정한다. work_mem 을 올리자 병렬 해시 조인이 `/dev/shm` 공유 메모리를 잡다 Docker 기본 64MB 에서 `could not resize shared memory segment … No space left on device` 로 실패했다(같은 날 실측) → `kis.derived.max-parallel-workers`(기본 0, 직렬) 로 막았고, PG 컨테이너에 `shm_size: 1g` 를 주면 2~4 로 올려 병렬 스캔을 살릴 수 있다. 그래도 25분(1,509,788ms)이라 같은 날 **테이블 증분 재계산으로 전환**했다: DAILY 는 최근 140일만 다시 계산해 upsert, WEEKLY 가 전체 재계산. 2026-09-09 실측(run 76·77): 전체 재계산 `tb_stock_daily_metric` 1,346,783ms/1,296,491ms(≈22분, 611만 행), MV 고정 비용 `mv_stock_index_metric` ≈150s + `mv_stock_adjust_factor` ≈87s + `mv_stock_sector_daily` ≈50s ≈ 5분(증분이어도 매번). 요청 해석: **본문 없음 = 증분(140일)**, `{"startDate":…}` = 그 날짜부터, `{"force":true}` = 전체 — 09-09 이전엔 본문 없는 호출이 전체로 돌았다(run 77 `metricFrom: ALL`, 수정됨). 경고 임계는 증분 10분·전체 45분(`DerivedMetricRefreshService.WARN_*`). 첫 적재 때 `startDate` 로 돌리면 일봉 백필이 목표일을 지나쳐 받은 앞 구간(≈7.3만 행, 2014-12)이 빠지므로 첫 적재는 `force` 가 맞다(run 77 의 rows 73,007 이 그 구간).
 - **지표 증분 3.7분의 정체(2026-09-09 run 78 `EXPLAIN (ANALYZE, BUFFERS)`)**: SELECT 161초 = ① `idx_stock_daily_price_date` 비트맵 인덱스 스캔 33초(6,153 블록을 블록당 5ms 랜덤 읽기 — 백필이 종목별 역순으로 넣어 인덱스 리프가 흩어짐, 순차 읽기는 60MB/s 로 정상) ② 창 함수 6단계 112초(프레임 폭에 비례: 60행 25초·120행 33초·MAX 252행 36초) ③ 나머지 조인·정렬 ≈15초, 여기에 ON CONFLICT 비교 25만 행 ≈58초. ②의 원인은 `double precision` 의 AVG/SUM 에 역전이 함수(moving-aggregate)가 없어 행마다 프레임을 다시 훑는 것(`pg_aggregate.aggminvtransfn` 이 `-`; numeric·bigint 는 있음, MAX 는 전부 없음). numeric 으로 바꾸면 double↔numeric 변환이 문자열 왕복이라 오히려 느렸다(합성 99만 행 22.1초 → 24.9초). 채택: **누적합(UNBOUNDED PRECEDING) − LAG(cum, n)** 으로 이동평균, **21행 블록 MAX × 12 를 GREATEST** 로 52주 고점(252 = 21×12, 정확히 동일) → 같은 데이터 23.5초 → 6.9초, 값 차이 1e-14 이내·NULL 의미 유지. `mv_stock_index_metric` 도 같은 형태로 재정의(**rebuild 필요**). `metric-recompute-days` 140 → 30(ON CONFLICT 비교 25만 → 5.5만 행; 과거 정정은 WEEKLY 가 7일 안에 흡수). 운영 적용:
   ```bash
@@ -175,7 +180,7 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 | 시가총액 `hts_avls` | 억원 → ×1e8 | `tb_stock_valuation_daily.market_cap` 대조 |
 | 마스터 `lstn_stcn` | 헤더 주석은 "(천)" 이나 원값 저장 | 현재가 API `lstn_stcn` 과 비교 후 필요 시 `StockMaster.applyFrom` 보정 |
 | 예탁원 배정율 단위 | 주당 주수(0.5 = 1주당 0.5주) | 무상증자 종목 계수 대조 결과 |
-| ksdinfo 연속조회 | CTS 승계 없이 tr_cont=N, 동일 페이지 반복 시 중단 | run 실패 목록 |
+| ksdinfo 연속조회 | CTS 승계 없이 tr_cont=N. **2026-09-09 실측: 전 종목 92일 청크가 30페이지 상한에 걸려 잘림(94회)** → 잘리면 기간 분할(상한 100). 페이지 크기·"같은 페이지 반복" 여부는 미확인 | `KisKsdInfoManualTest`(배당 2024Q1 3페이지 + 005930 2015~) 로그 → run 메타 `ksdRepeatedPages` 가 0 이 아니면 종목별 조회로 전환 필요 |
 | 해외 코드 `FX@KRW`, `SOX`, AMS 거래소 ETF | **확인됨(2026-09-08)** — yml 29심볼 전부 적재(82,805행, 2014-09~) | 심볼별 행 수가 극단적으로 적은 것만 재확인 |
 | 재무 API 파라미터 대소문자 | **확인됨(2026-09-08)** — 손익·대차·재무비율 3종 116K행·2,565종목·2004~ 적재 | — |
 | 재무 성장성·수익성·안정성 3종 필드명 | data.csv column_mapping 그대로(`bsop_prfi_inrt`, `cptl_ntin_rate`, `crnt_rate` 등) | `FINANCIAL_BACKFILL {"tickers":["005930"],"resetCheckpoint":true}` 후 `raw_json` 키·9컬럼 값 확인 |
@@ -209,3 +214,4 @@ H2 로는 `ON CONFLICT`·부분 유니크·MV 가 검증되지 않으므로 PG �
 - 종목 일별 지표 `mv_stock_daily_metric` 은 테이블 `tb_stock_daily_metric` 로 전환(2026-09-08, 전체 재계산 25분 실측). 외부 SQL 에서 MV 이름을 쓰고 있었다면 테이블명으로 바꾼다. 계산식은 그대로이며 `DerivedViewRefresher.DAILY_METRIC_UPSERT_SQL` 이 단일 출처.
 - 테마 매핑(계획 P2)은 2026-09-08 구현. 테마명 마스터 테이블을 두지 않고 `tb_stock_sector_map.sector_name` 에 보관한다(`tb_stock_index_master` 에 넣으면 INDEX_BACKFILL 대상으로 새어 나감). 줄 끝 10자 종목코드의 체계(6자/A 접두/기타)는 `KisThemeFileManualTest` 로 실측 후 `ThemeCodeRecord.ticker()` 규칙 확정.
 - 실시간 웹소켓·Python 분석 환경은 범위 밖(계획대로). `KisMarketDataPort` 가 확장 경계.
+- 연속조회 페이지네이터는 상한 도달을 `PageResult.truncated` 로 돌려주고 스스로 WARN 하지 않는다(2026-09-12). 의도된 창(휴장일·투자자)과 잘림(예탁원)을 호출부만 구분할 수 있기 때문. 예탁원은 잘리면 기간 분할, `KsdInfoPage.repeated` 는 연속조회 미지원 신호.

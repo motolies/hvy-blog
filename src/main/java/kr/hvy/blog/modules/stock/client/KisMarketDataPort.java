@@ -15,6 +15,7 @@ import kr.hvy.blog.modules.stock.client.dto.KisHolidayResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
+import kr.hvy.blog.modules.stock.client.dto.KsdInfoPage;
 import kr.hvy.blog.modules.stock.client.dto.KisPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisStockInfoResponse;
 
@@ -62,9 +63,9 @@ public interface KisMarketDataPort {
   KisPriceResponse.Output fetchPrice(String ticker, KisCallContext context);
 
   /**
-   * 예탁원정보 일정 [from, to]. ticker 가 null 이면 전 종목.
+   * 예탁원정보 일정 [from, to]. ticker 가 null 이면 전 종목. 페이지 상한에 걸리면 {@code truncated} 로 알려 호출부가 기간을 나눈다.
    */
-  List<Map<String, String>> fetchKsdInfo(KsdInfoKind kind, LocalDate from, LocalDate to, String ticker, int maxPages,
+  KsdInfoPage fetchKsdInfo(KsdInfoKind kind, LocalDate from, LocalDate to, String ticker, int maxPages,
       KisCallContext context);
 
   /**

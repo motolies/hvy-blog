@@ -21,7 +21,10 @@ import kr.hvy.blog.modules.stock.domain.code.MarketType;
 import kr.hvy.blog.modules.stock.client.dto.KisKsdInfoResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisStockInfoResponse;
+import kr.hvy.blog.modules.stock.client.dto.KsdInfoPage;
+import kr.hvy.blog.modules.stock.client.paginator.PageResult;
 import kr.hvy.blog.modules.stock.client.paginator.TrContPaginator;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -110,15 +113,18 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
     params.put("BASS_DT", KisValues.format(baseDate));
     params.put("CTX_AREA_FK", "");
     params.put("CTX_AREA_NK", "");
-    List<KisHolidayResponse> pages = trContPaginator.paginate(HOLIDAY_PATH, HOLIDAY_TR_ID, params,
+    PageResult<KisHolidayResponse> result = trContPaginator.paginate(HOLIDAY_PATH, HOLIDAY_TR_ID, params,
         KisHolidayResponse.class, context.withTarget("HOLIDAY"), maxPages, page -> {
           Map<String, String> next = new LinkedHashMap<>();
           next.put("CTX_AREA_FK", page.ctxAreaFk() == null ? "" : page.ctxAreaFk());
           next.put("CTX_AREA_NK", page.ctxAreaNk() == null ? "" : page.ctxAreaNk());
           return next;
         });
+    if (result.truncated()) {
+      log.debug("휴장일 연속조회 {}페이지 상한 도달 — 의도된 창(1페이지 ≈ 1개월)이라 잘림이 아니다", maxPages);
+    }
     List<KisHolidayResponse.Day> days = new ArrayList<>();
-    for (KisHolidayResponse page : pages) {
+    for (KisHolidayResponse page : result.pages()) {
       if (page.output() != null) {
         days.addAll(page.output());
       }
@@ -135,10 +141,11 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
     params.put("FID_INPUT_DATE_1", KisValues.format(baseDate));
     params.put("FID_ORG_ADJ_PRC", "");
     params.put("FID_ETC_CLS_CODE", "");
-    List<KisInvestorDailyResponse> pages = trContPaginator.paginate(INVESTOR_DAILY_PATH, INVESTOR_DAILY_TR_ID, params,
-        KisInvestorDailyResponse.class, context.withTarget(ticker), Math.max(1, maxPages), page -> Map.of());
+    PageResult<KisInvestorDailyResponse> result = trContPaginator.paginate(INVESTOR_DAILY_PATH, INVESTOR_DAILY_TR_ID,
+        params, KisInvestorDailyResponse.class, context.withTarget(ticker), Math.max(1, maxPages), page -> Map.of());
+    // 상한(백필 5·증분 1)은 날짜 창의 크기다. 남은 과거는 다음 윈도우(체크포인트 커서)가 받으므로 잘림이 아니다.
     List<KisInvestorDailyResponse.Row> rows = new ArrayList<>();
-    for (KisInvestorDailyResponse page : pages) {
+    for (KisInvestorDailyResponse page : result.pages()) {
       if (page.output2() != null) {
         rows.addAll(page.output2());
       }
@@ -155,8 +162,12 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
         .body().output();
   }
 
+  /**
+   * 예탁원정보 한 기간. CTS 승계 없이 tr_cont=N 으로만 넘기며, 같은 페이지가 반복되면 즉시 멈춘다(페이지 단위 감지라 호출을 낭비하지 않는다).
+   * 상한 도달은 잘림이므로 {@link KsdInfoPage#truncated()} 로 알려 호출부가 기간을 나누게 한다 (2026-09-09 이전엔 조용히 잘렸다).
+   */
   @Override
-  public List<Map<String, String>> fetchKsdInfo(KsdInfoKind kind, LocalDate from, LocalDate to, String ticker,
+  public KsdInfoPage fetchKsdInfo(KsdInfoKind kind, LocalDate from, LocalDate to, String ticker,
       int maxPages, KisCallContext context) {
     Map<String, String> params = new LinkedHashMap<>();
     params.put("CTS", "");
@@ -164,21 +175,16 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
     params.put("T_DT", KisValues.format(to));
     params.put("SHT_CD", ticker == null ? "" : ticker);
     params.putAll(kind.getFixedParams());
-    List<KisKsdInfoResponse> pages = trContPaginator.paginate(kind.getPath(), kind.getTrId(), params,
-        KisKsdInfoResponse.class, context.withTarget(ticker == null ? kind.getCode() : ticker), maxPages, page -> Map.of());
+    PageResult<KisKsdInfoResponse> result = trContPaginator.paginate(kind.getPath(), kind.getTrId(), params,
+        KisKsdInfoResponse.class, context.withTarget(ticker == null ? kind.getCode() : ticker), maxPages, page -> Map.of(),
+        (previous, current) -> Objects.equals(previous.output1(), current.output1()));
     List<Map<String, String>> rows = new ArrayList<>();
-    List<Map<String, String>> previous = null;
-    for (KisKsdInfoResponse page : pages) {
-      List<Map<String, String>> current = page.output1() == null ? List.of() : page.output1();
-      if (previous != null && previous.equals(current)) {
-        // 승계 키 없이 같은 페이지가 반복되면 더 볼 것이 없다
-        log.debug("ksdinfo 동일 페이지 반복 → 중단: kind={}", kind);
-        break;
+    for (KisKsdInfoResponse page : result.pages()) {
+      if (page.output1() != null) {
+        rows.addAll(page.output1());
       }
-      rows.addAll(current);
-      previous = current;
     }
-    return rows;
+    return new KsdInfoPage(rows, result.truncated(), result.repeated(), result.pageCount());
   }
 
   @Override

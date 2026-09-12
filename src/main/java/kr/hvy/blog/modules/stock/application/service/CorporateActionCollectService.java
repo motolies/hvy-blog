@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.stock.application.service;
 
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -9,6 +10,7 @@ import kr.hvy.blog.modules.stock.application.dto.BackfillRequest;
 import kr.hvy.blog.modules.stock.client.KisMarketDataPort;
 import kr.hvy.blog.modules.stock.client.KisProperties;
 import kr.hvy.blog.modules.stock.client.KsdInfoKind;
+import kr.hvy.blog.modules.stock.client.dto.KsdInfoPage;
 import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
 import kr.hvy.blog.modules.stock.domain.model.CorporateActionRow;
 import kr.hvy.blog.modules.stock.domain.model.DailyPriceRow;
@@ -30,7 +32,11 @@ public class CorporateActionCollectService implements CollectJob {
   /** 한 호출의 조회 기간(일). 상한이 문서에 없어 분기 단위로 나눈다 */
   static final int CHUNK_DAYS = 92;
   static final int FUTURE_DAYS = 90;
-  private static final int MAX_PAGES = 30;
+  /**
+   * 한 기간의 페이지 상한. 2026-09-09 실측: 전 종목 92일 청크가 LIST_INFO 47·DIVIDEND 43·REV_SPLIT 3·BONUS 1 회 상한(당시 30)에 걸려 조용히 잘렸다.
+   * 잘리면 기간을 반으로 나눠 다시 받으므로 이 값은 무한 루프 안전장치이자 "잘린 탐침 1회의 호출 비용" 이다 — 너무 작으면 분할이 늘고 너무 크면 낭비.
+   */
+  static final int MAX_PAGES = 100;
 
   private final KisMarketDataPort marketDataPort;
   private final CorporateActionWriter actionWriter;
@@ -66,11 +72,20 @@ public class CorporateActionCollectService implements CollectJob {
     return actionWriter.tickersMissingFromMaster().stream().filter(BackfillRequest::isTicker).toList();
   }
 
+  /** 한 번의 collect 동안 분할·반복·잘림 횟수를 센다 (run 메타로 남겨 페이지 크기·연속조회 지원 여부를 운영에서 읽는다). */
+  private static final class Tally {
+
+    int splits;
+    int repeatedPages;
+    int truncatedDays;
+  }
+
   /**
-   * [from, to] 를 청크로 나눠 7종을 모두 받는다. 청크 단위 실패는 기록하고 계속한다.
+   * [from, to] 를 청크로 나눠 7종을 모두 받는다. 청크가 페이지 상한에 걸리면 기간을 반으로 나눠 다시 받고, 청크 단위 실패는 기록하고 계속한다.
    */
   public void collect(CollectExecution execution, LocalDate from, LocalDate to, String ticker) {
     Map<KsdInfoKind, Integer> counts = new EnumMap<>(KsdInfoKind.class);
+    Tally tally = new Tally();
     for (KsdInfoKind kind : KsdInfoKind.values()) {
       int upserted = 0;
       LocalDate cursor = from;
@@ -82,17 +97,7 @@ public class CorporateActionCollectService implements CollectJob {
         if (chunkEnd.isAfter(to)) {
           chunkEnd = to;
         }
-        String target = kind.getCode() + ":" + cursor;
-        try {
-          List<Map<String, String>> raw = marketDataPort.fetchKsdInfo(kind, cursor, chunkEnd, ticker, MAX_PAGES,
-              execution.context(target));
-          List<CorporateActionRow> rows = CorporateActionMapper.fromKsd(kind, raw);
-          upserted += actionWriter.upsert(rows);
-          execution.targetDone();
-        } catch (RuntimeException e) {
-          execution.recordFailure(target, e.getMessage());
-          log.warn("기업행사 수집 실패: kind={}, range={}~{}, cause={}", kind, cursor, chunkEnd, e.getMessage());
-        }
+        upserted += collectRange(execution, kind, cursor, chunkEnd, ticker, tally);
         cursor = chunkEnd.plusDays(1);
       }
       counts.put(kind, upserted);
@@ -102,7 +107,52 @@ public class CorporateActionCollectService implements CollectJob {
     Map<String, Integer> metadata = new java.util.LinkedHashMap<>();
     counts.forEach((k, v) -> metadata.put(k.getCode(), v));
     execution.putMetadata("upsertedByKind", metadata);
-    log.info("기업행사 수집: range={}~{}, ticker={}, counts={}", from, to, ticker, counts);
+    execution.putMetadata("ksdSplits", tally.splits);
+    execution.putMetadata("ksdRepeatedPages", tally.repeatedPages);
+    execution.putMetadata("ksdTruncatedDays", tally.truncatedDays);
+    log.info("기업행사 수집: range={}~{}, ticker={}, counts={}, splits={}, repeatedPages={}, truncatedDays={}",
+        from, to, ticker, counts, tally.splits, tally.repeatedPages, tally.truncatedDays);
+  }
+
+  /**
+   * [from, to] 한 기간을 받아 upsert 한 행 수를 돌려준다. 페이지 상한에 걸리면(잘림) 기간을 반으로 나눠 재귀한다(92일 → 깊이 ≤ 7).
+   * 하루 범위에서도 잘리면 받은 행은 저장하되 실패로 기록한다 — 그 날의 행 수가 상한 × 페이지 크기를 넘는 것이므로 MAX_PAGES 를 조정해야 한다.
+   * 호출 예외는 그 기간만 실패로 기록하고 0 을 돌려준다.
+   */
+  private int collectRange(CollectExecution execution, KsdInfoKind kind, LocalDate from, LocalDate to, String ticker,
+      Tally tally) {
+    if (execution.isCancelRequested()) {
+      return 0;
+    }
+    String target = kind.getCode() + ":" + from;
+    KsdInfoPage page;
+    try {
+      page = marketDataPort.fetchKsdInfo(kind, from, to, ticker, MAX_PAGES, execution.context(target));
+    } catch (RuntimeException e) {
+      execution.recordFailure(target, e.getMessage());
+      log.warn("기업행사 수집 실패: kind={}, range={}~{}, cause={}", kind, from, to, e.getMessage());
+      return 0;
+    }
+    if (page.repeated()) {
+      tally.repeatedPages++;
+    }
+    if (page.truncated() && from.isBefore(to)) {
+      tally.splits++;
+      LocalDate mid = from.plusDays(ChronoUnit.DAYS.between(from, to) / 2);
+      log.info("기업행사 페이지 상한 {} 도달 → 기간 분할: kind={}, {}~{} → ~{} | {}~", MAX_PAGES, kind, from, to, mid, mid.plusDays(1));
+      return collectRange(execution, kind, from, mid, ticker, tally)
+          + collectRange(execution, kind, mid.plusDays(1), to, ticker, tally);
+    }
+    List<CorporateActionRow> rows = CorporateActionMapper.fromKsd(kind, page.rows());
+    int upserted = actionWriter.upsert(rows);
+    if (page.truncated()) {
+      tally.truncatedDays++;
+      execution.recordFailure(target, "1일 범위에서도 페이지 상한 " + MAX_PAGES + " 초과 — 행 잘림 (페이지 크기 실측 후 MAX_PAGES 조정)");
+      log.warn("기업행사 하루치가 페이지 상한을 넘어 잘림: kind={}, date={}, pages={}", kind, from, page.pageCount());
+    } else {
+      execution.targetDone();
+    }
+    return upserted;
   }
 
   /**

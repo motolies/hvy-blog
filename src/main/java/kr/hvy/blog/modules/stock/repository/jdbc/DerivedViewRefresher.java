@@ -132,11 +132,23 @@ public class DerivedViewRefresher {
   }
 
   /**
-   * MV 존재 여부 (pg_matviews).
+   * MV 존재 여부 (relkind m).
    */
   public boolean materializedViewExists(String name) {
+    return relationExists(name, "m");
+  }
+
+  /**
+   * 현재 스키마에 이름·종류가 맞는 관계가 있는지 pg_class 로 본다. information_schema 뷰는 권한 검사 때문에 운영에서 0.5초씩 걸렸다
+   * (2026-09-09 느린 쿼리 로그, run 마다 3회). 카탈로그 직접 조회는 인덱스 한 번이다.
+   *
+   * @param relkinds 'r'/'p' 테이블, 'm' MV, 'v' 뷰
+   */
+  private boolean relationExists(String name, String... relkinds) {
     Integer count = jdbcTemplate.queryForObject(
-        "SELECT COUNT(*) FROM pg_matviews WHERE schemaname = current_schema() AND matviewname = ?", Integer.class, name);
+        "SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            + "WHERE n.nspname = current_schema() AND c.relname = ? AND c.relkind::text = ANY(?)",
+        Integer.class, name, relkinds);
     return count != null && count > 0;
   }
 
@@ -198,12 +210,10 @@ public class DerivedViewRefresher {
   }
 
   /**
-   * 테이블 존재 여부 (information_schema.tables).
+   * 테이블 존재 여부 (relkind r/p).
    */
   public boolean tableExists(String name) {
-    Integer count = jdbcTemplate.queryForObject(
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?", Integer.class, name);
-    return count != null && count > 0;
+    return relationExists(name, "r", "p");
   }
 
   /**
@@ -257,12 +267,9 @@ public class DerivedViewRefresher {
   }
 
   /**
-   * 뷰(일반 뷰) 존재 여부.
+   * 뷰(일반 뷰) 존재 여부 (relkind v).
    */
   public boolean viewExists(String name) {
-    Integer count = jdbcTemplate.queryForObject(
-        "SELECT COUNT(*) FROM information_schema.views WHERE table_schema = current_schema() AND table_name = ?",
-        Integer.class, name);
-    return count != null && count > 0;
+    return relationExists(name, "v");
   }
 }

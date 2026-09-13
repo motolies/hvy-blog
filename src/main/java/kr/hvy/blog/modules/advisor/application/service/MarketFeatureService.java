@@ -17,7 +17,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * 시장 국면 특징 SQL (지수·시장 수급·해외·섹터·σ). 프롬프트 market/sectors 블록과 국면 채점 밴드의 원천이다.
+ * 시장 국면 특징 SQL (지수·시장 수급·해외·섹터·σ·규칙 추세·데이터 기준일·적용 구간). 프롬프트 market/sectors/dataAsOf/window 블록과 국면 채점 밴드의 원천이다.
  * 모든 조회는 기준일 이하만 본다. 해외는 화~토 06:30 수집이라 국내 18:30 판단 시점에 T-1 미국 종가까지 있다(누수 없음).
  */
 @Service
@@ -27,12 +27,16 @@ public class MarketFeatureService {
   static final List<String> INDEX_CODES = List.of("0001", "1001", "2001");
   static final List<String> BENCH_CODES = List.of("0001", "1001");
   static final List<String> GLOBAL_SYMBOLS = List.of("SPX", "COMP", "SOX", ".DJI", "FX@KRW");
+  /** 데이터 기준일(globalAsOf) 판정에 쓰는 지수 심볼 — 환율은 미국 휴장일에도 갱신되므로 뺀다 */
+  static final List<String> GLOBAL_INDEX_SYMBOLS = List.of("SPX", "COMP", "SOX", ".DJI");
   static final int TOP_SECTORS = 8;
   static final int BOTTOM_SECTORS = 3;
   static final int MIN_SECTOR_MEMBERS = 5;
 
   private final NamedParameterJdbcTemplate jdbc;
   private final AdvisorProperties properties;
+  private final MarketTrendService trendService;
+  private final TradingCalendar tradingCalendar;
 
   public MarketFeatures features(LocalDate asOf) {
     Map<String, Object> p = Map.of("d", asOf);
@@ -67,7 +71,12 @@ public class MarketFeatureService {
                 d(rs.getObject("r1")), d(rs.getObject("r5")))
             : null)
         .stream().filter(g -> g != null).toList();
-    LocalDate globalAsOf = global.stream().map(GlobalFeature::date).max(Comparator.naturalOrder()).orElse(null);
+    // 지수 심볼 중 가장 오래된 날짜 — 하나라도 뒤처졌으면 그 블록 전체를 오래된 것으로 본다
+    LocalDate globalAsOf = global.stream().filter(g -> GLOBAL_INDEX_SYMBOLS.contains(g.symbol())).map(GlobalFeature::date)
+        .min(Comparator.naturalOrder()).orElse(null);
+    Integer globalAge = globalAsOf == null ? null : tradingCalendar.tradingDaysBetween(globalAsOf, asOf);
+    LocalDate flowAsOf = jdbc.queryForObject("SELECT MAX(trade_date) FROM tb_stock_market_investor_daily WHERE trade_date <= :d", p, LocalDate.class);
+    LocalDate sectorAsOf = jdbc.queryForObject("SELECT MAX(trade_date) FROM mv_stock_sector_daily WHERE trade_date <= :d", p, LocalDate.class);
 
     // 동일가중 등락 합 — SECTOR_STRENGTH 시그널과 같은 정의 (시총가중은 밸류 스냅샷이 없는 과거에 NULL)
     List<SectorFeature> sectors = jdbc.query("SELECT s.sector_code, n.sector_name, SUM(s.avg_change_rate) AS cw5, "
@@ -98,7 +107,9 @@ public class MarketFeatureService {
           sigma.put(rs.getString("index_code"), rs.getDouble("sigma5"));
         });
 
-    return new MarketFeatures(asOf, indices, flows, global, top, bottom, sigma, globalAsOf);
+    TradingCalendar.Window window = tradingCalendar.window(asOf, properties.getHorizonDays());
+    return new MarketFeatures(asOf, indices, flows, global, top, bottom, sigma, globalAsOf, globalAge, flowAsOf, sectorAsOf,
+        window.entry(), window.exit(), trendService.trends(asOf));
   }
 
   private static Double d(Object value) {

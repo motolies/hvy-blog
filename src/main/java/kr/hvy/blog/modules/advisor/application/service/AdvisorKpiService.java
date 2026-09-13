@@ -103,6 +103,31 @@ public class AdvisorKpiService {
     return new RegimeSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), brier, brier == null ? null : 1 - brier / 0.25);
   }
 
+  /** 추세 전망 콜 요약 (h = trend.score-horizon-days): 지속 버킷 적중률·Brier(적중 기준), 무효화 신호 적중률 */
+  public record TrendSummary(int calls, Double hitRate, Double meanBrier, int invalidationCalls, Double invalidationHitRate) {
+  }
+
+  /**
+   * 추세 지속(TREND)·무효화(TREND_INV) 콜 요약. INDEX 의 국면 요약과 Brier 정의가 달라 따로 보고한다.
+   */
+  public TrendSummary trendSummary(AdviceVariant variant, LocalDate from, LocalDate to) {
+    Map<String, Object> p = params(from, to);
+    p.put("variant", variant.getCode());
+    p.put("th", properties.getTrend().getScoreHorizonDays());
+    Map<String, Object> row = jdbc.queryForMap("""
+        SELECT COUNT(*) FILTER (WHERE c.subject_type = 'TREND') AS n,
+               AVG(CASE WHEN c.hit THEN 1.0 ELSE 0.0 END) FILTER (WHERE c.subject_type = 'TREND') AS hit_rate,
+               AVG(c.brier) FILTER (WHERE c.subject_type = 'TREND') AS brier,
+               COUNT(*) FILTER (WHERE c.subject_type = 'TREND_INV') AS inv_n,
+               AVG(CASE WHEN c.hit THEN 1.0 ELSE 0.0 END) FILTER (WHERE c.subject_type = 'TREND_INV') AS inv_hit_rate
+        FROM tb_advisor_call_score c JOIN tb_advisor_advice a ON a.advice_id = c.advice_id
+        WHERE a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type IN ('TREND', 'TREND_INV')
+          AND c.horizon_days = :th AND c.status = 'SCORED'
+        """, p);
+    return new TrendSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), d(row.get("brier")),
+        ((Number) row.get("inv_n")).intValue(), d(row.get("inv_hit_rate")));
+  }
+
   /**
    * 신뢰도 버킷별 보정 표 (LIVE, LONG).
    */

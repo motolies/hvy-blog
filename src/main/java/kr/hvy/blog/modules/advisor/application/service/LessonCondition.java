@@ -1,28 +1,39 @@
 package kr.hvy.blog.modules.advisor.application.service;
 
 import java.util.Map;
+import java.util.Set;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
+import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.SignalValue;
 
 /**
- * 교훈 condition 술어 평가. 형식: {"regime": RISK_ON|NEUTRAL|RISK_OFF|null, "signal": 시그널코드|null, "op": ">="|"<"|null, "pct": 0~1|null, "sector": 코드|null}.
+ * 교훈 condition 술어 평가. 형식:
+ * {"regime": RISK_ON|NEUTRAL|RISK_OFF|null, "trend": BULL|SIDEWAYS|BEAR|null, "signal": 시그널코드|null, "op": ">="|"<"|null, "pct": 0~1|null, "sector": 코드|null}.
  * 키가 하나 이상 null 이 아니어야 하며, null 인 키는 조건에서 제외된다. 기계 판정이 가능해야 "적용된 픽 vs 아닌 픽" 을 비교할 수 있다.
+ * <p>
+ * regime 은 LLM 출력이라 판단 시점엔 어제 값으로 평가하지만(AdviseJob), trend 는 규칙이 기준일에 확정한 오늘 값이라 지연이 없다(advice-v2).
  */
 public final class LessonCondition {
+
+  static final Set<String> KEYS = Set.of("regime", "trend", "signal", "op", "pct", "sector");
 
   private LessonCondition() {
   }
 
   /**
-   * 후보에 조건이 참인지. regime 은 그날 판단 국면(없으면 regime 조건은 판정 불가 → false).
+   * 후보에 조건이 참인지. regime 은 그날 판단 국면, trend 는 후보 소속 시장의 규칙 추세(없으면 해당 조건은 판정 불가 → false).
    */
-  public static boolean matches(Map<String, Object> condition, CandidateRow candidate, MarketRegimeCode regime) {
+  public static boolean matches(Map<String, Object> condition, CandidateRow candidate, MarketRegimeCode regime, MarketTrendCode trend) {
     if (condition == null || condition.isEmpty() || !isWellFormed(condition)) {
       return false;
     }
     Object r = condition.get("regime");
     if (r != null && (regime == null || !regime.name().equals(String.valueOf(r)))) {
+      return false;
+    }
+    Object t = condition.get("trend");
+    if (t != null && (trend == null || !trend.name().equals(String.valueOf(t)))) {
       return false;
     }
     Object sector = condition.get("sector");
@@ -40,12 +51,12 @@ public final class LessonCondition {
       if (op == null || !(pct instanceof Number threshold)) {
         return false;
       }
-      double t = threshold.doubleValue();
+      double th = threshold.doubleValue();
       return switch (String.valueOf(op)) {
-        case ">=" -> value.pct() >= t;
-        case "<" -> value.pct() < t;
-        case ">" -> value.pct() > t;
-        case "<=" -> value.pct() <= t;
+        case ">=" -> value.pct() >= th;
+        case "<" -> value.pct() < th;
+        case ">" -> value.pct() > th;
+        case "<=" -> value.pct() <= th;
         default -> false;
       };
     }
@@ -60,11 +71,12 @@ public final class LessonCondition {
       return false;
     }
     for (String key : condition.keySet()) {
-      if (!(key.equals("regime") || key.equals("signal") || key.equals("op") || key.equals("pct") || key.equals("sector"))) {
+      if (!KEYS.contains(key)) {
         return false;
       }
     }
-    boolean any = condition.get("regime") != null || condition.get("signal") != null || condition.get("sector") != null;
+    boolean any = condition.get("regime") != null || condition.get("trend") != null || condition.get("signal") != null
+        || condition.get("sector") != null;
     if (!any) {
       return false;
     }

@@ -7,8 +7,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
+import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
+import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
 import kr.hvy.blog.modules.advisor.domain.model.PromptPayload;
 import kr.hvy.blog.modules.advisor.domain.model.ScreeningResult;
 import kr.hvy.blog.modules.advisor.domain.model.SignalValue;
@@ -17,7 +20,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
 /**
- * 입력 JSON 규약: null 생략·4자리 반올림·후보 표 형태·길이 상한 초과 시 후보 절단·스키마 enum 재료(티커·섹터) 제공.
+ * 입력 JSON 규약: null 생략·4자리 반올림·후보 표 형태·길이 상한 초과 시 후보 절단·스키마 enum 재료(티커·섹터) 제공,
+ * advice-v2 의 dataAsOf·window·dataQuality·market.trend 블록.
  */
 class AdvicePromptBuilderTest {
 
@@ -27,7 +31,7 @@ class AdvicePromptBuilderTest {
   @Test
   @DisplayName("JSON 에는 market·sectors·candidates(columns/rows)·weights 가 있고 null 은 빠지며 실수는 4자리다")
   void buildsCompactJson() {
-    PromptPayload payload = builder.build(market(), screening(3), null, List.of(), Map.of("MOM_20D", 0.123456789));
+    PromptPayload payload = builder.build(market(), screening(3), null, List.of(), Map.of("MOM_20D", 0.123456789), DataQuality.OK);
     String json = payload.json();
     assertThat(json).startsWith("{\"asOf\":\"2026-09-11\",\"horizonDays\":5,\"market\":{\"index\":[");
     assertThat(json).contains("\"columns\":[\"tkr\",\"name\",\"sec\",\"score\",\"r20\"");
@@ -44,13 +48,30 @@ class AdvicePromptBuilderTest {
   }
 
   @Test
-  @DisplayName("길이 상한을 넘으면 점수 낮은 후보부터 5개씩 잘라내고 truncated 를 표시한다")
+  @DisplayName("advice-v2: market.trend(규칙 추세·기저율)·dataAsOf·window·dataQuality 가 market 뒤에 실린다")
+  void includesTimeAxisBlocks() {
+    String json = builder.build(market(), screening(2), null, List.of(), Map.of(), DataQuality.DEGRADED).json();
+    assertThat(json).contains("\"trend\":[{\"index\":\"0001\",\"code\":\"BULL\",\"score\":4,\"components\":{\"ma20\":1,\"ma60\":1,\"ma120\":1,\"ret60\":1,\"breadth\":0},"
+        + "\"since\":\"2026-07-28\",\"days\":32,\"close\":2731.44,\"ma20\":2612.4,\"ma60\":2540.1,\"ma120\":2488.7,\"breadth\":0.58,"
+        + "\"base\":{\"episodes\":9,\"medianDays\":27.0,\"fwd5\":{\"n\":400,\"pUp\":0.61,\"mean\":0.006},\"fwd20\":{\"n\":380,\"pUp\":0.66,\"mean\":0.021}}}]");
+    int marketEnd = json.indexOf("\"dataAsOf\"");
+    assertThat(marketEnd).as("dataAsOf 는 market 뒤").isGreaterThan(json.indexOf("\"sigma5d\""));
+    assertThat(json).contains("\"dataAsOf\":{\"domestic\":\"2026-09-11\",\"flow\":\"2026-09-11\",\"flowProvisional\":true,\"sector\":\"2026-09-11\","
+        + "\"global\":\"2026-09-10\",\"globalAgeTradingDays\":1}");
+    assertThat(json).contains("\"window\":{\"entry\":\"2026-09-14\",\"exit\":\"2026-09-18\",\"entryRule\":\"다음 영업일 시가\",\"exitRule\":\"5번째 영업일 종가\"}");
+    assertThat(json).contains("\"dataQuality\":\"DEGRADED\"");
+    assertThat(json.indexOf("\"dataQuality\"")).isLessThan(json.indexOf("\"sectors\""));
+  }
+
+  @Test
+  @DisplayName("길이 상한을 넘으면 점수 낮은 후보부터 5개씩 잘라내고 truncated 를 표시한다 (추세 블록은 살아남는다)")
   void truncatesCandidatesToFitBudget() {
-    properties.getPrompt().setMaxInputChars(1_800);
-    PromptPayload payload = builder.build(market(), screening(30), null, List.of(), Map.of());
+    properties.getPrompt().setMaxInputChars(2_400);
+    PromptPayload payload = builder.build(market(), screening(30), null, List.of(), Map.of(), DataQuality.OK);
     assertThat(payload.truncated()).isTrue();
     assertThat(payload.candidatesIncluded()).isLessThan(30).isGreaterThanOrEqualTo(5);
     assertThat(payload.candidateTickers()).hasSize(payload.candidatesIncluded()).startsWith("T00");
+    assertThat(payload.json()).contains("\"trend\":[").contains("\"window\":{");
   }
 
   @Test
@@ -58,9 +79,10 @@ class AdvicePromptBuilderTest {
   void includesScoreboardAndLessons() {
     kr.hvy.blog.modules.advisor.domain.model.LessonRow lesson = kr.hvy.blog.modules.advisor.domain.model.LessonRow.builder().lessonId(12L)
         .condition(Map.of("regime", "RISK_OFF")).lessonText("[관찰] ... [규칙] ...").observation("obs").rule("rule").build();
-    PromptPayload payload = builder.build(market(), screening(2), Map.of("window", "20d", "hit5d", 0.55), List.of(lesson), Map.of());
+    PromptPayload payload = builder.build(market(), screening(2), Map.of("window", "20d", "hit5d", 0.55), List.of(lesson), Map.of(), null);
     assertThat(payload.json()).contains("\"scoreboard\":{").contains("\"lessons\":[{\"id\":12,\"condition\":{\"regime\":\"RISK_OFF\"},\"text\":\"[관찰] ... [규칙] ...\"}]");
     assertThat(payload.json()).doesNotContain("obs").doesNotContain("\"rule\"");
+    assertThat(payload.json()).as("quality null 은 OK").contains("\"dataQuality\":\"OK\"");
   }
 
   static MarketFeatures market() {
@@ -70,7 +92,20 @@ class AdvicePromptBuilderTest {
         List.of(new MarketFeatures.GlobalFeature("SPX", LocalDate.of(2026, 9, 10), 6500.5, 0.0061, 0.0154)),
         List.of(new MarketFeatures.SectorFeature("G2510", "반도체", 0.0412, 0.71, 0.34, 286000000000L, 58)),
         List.of(new MarketFeatures.SectorFeature("G3020", "음식료", -0.0231, 0.19, 0.03, -41000000000L, 42)),
-        Map.of("0001", 0.01023), LocalDate.of(2026, 9, 10));
+        Map.of("0001", 0.01023), LocalDate.of(2026, 9, 10), 1, LocalDate.of(2026, 9, 11), LocalDate.of(2026, 9, 11),
+        LocalDate.of(2026, 9, 14), LocalDate.of(2026, 9, 18), List.of(trend()));
+  }
+
+  static MarketTrend trend() {
+    java.util.LinkedHashMap<String, Integer> components = new java.util.LinkedHashMap<>();
+    components.put("ma20", 1);
+    components.put("ma60", 1);
+    components.put("ma120", 1);
+    components.put("ret60", 1);
+    components.put("breadth", 0);
+    return MarketTrend.builder().indexCode("0001").tradeDate(LocalDate.of(2026, 9, 11)).code(MarketTrendCode.BULL).rawCode(MarketTrendCode.BULL)
+        .score(4).components(components).since(LocalDate.of(2026, 7, 28)).days(32).close(2731.44).ma20(2612.4).ma60(2540.1).ma120(2488.7).breadth(0.58)
+        .base(new MarketTrend.Base(9, 27.0, new MarketTrend.Forward(400, 0.61, 0.006), new MarketTrend.Forward(380, 0.66, 0.021))).build();
   }
 
   static ScreeningResult screening(int n) {

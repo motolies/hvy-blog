@@ -8,12 +8,16 @@ import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.domain.code.CallSubject;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
+import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
+import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.ScoreStage;
 import kr.hvy.blog.modules.advisor.domain.code.ScoreStatus;
+import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CallScoreRow;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateScoreRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
+import kr.hvy.blog.modules.advisor.domain.model.TrendOutlook;
 import kr.hvy.blog.modules.advisor.repository.jdbc.ScoreWriter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,8 +30,9 @@ import org.springframework.stereotype.Service;
  *   <li>종목: 진입 = 기준일 다음 영업일 수정 시가, 청산 = h번째 영업일 수정 종가(뷰 재조회), 벤치마크 = 소속 시장 지수 같은 규약(시가→종가), β=1</li>
  *   <li>배당락(DIVIDEND, 계수 없음)은 현금배당/진입일 원주가를 가산. 비용(왕복 bp)은 보고 전용 컬럼</li>
  *   <li>청산일 행이 없으면 구간 마지막 거래일 종가로 청산: 상폐면 DELISTED, 아니면 SUSPENDED — 학습에 포함(빼면 낙관 편향)</li>
- *   <li>국면: close-to-close, 밴드 = band-sigma × σ_5d, NEUTRAL 은 밴드 안이 적중, Brier 는 부호 기준</li>
+ *   <li>국면: close-to-close, 밴드 = band-sigma × σ_1d × √h(h=5 면 σ_5d), NEUTRAL 은 밴드 안이 적중, Brier 는 부호 기준</li>
  *   <li>섹터: 업종 지수(tb_stock_index_daily 에 섹터 코드가 있으면) 아니면 MV 동일가중 등락 합, 시장 지수 대비 초과 > 0 이 적중</li>
+ *   <li>추세 전망(advice-v2, h=20 패스만): TREND 는 지속 버킷 일치, TREND_INV 는 무효화 신호와 실제 전환의 일치 — {@link #trendScores}</li>
  *   <li>잠정(PROVISIONAL) → 확정(CONFIRMED) 은 같은 SQL 을 다시 돌려 덮어쓴다 (유상증자 계수 지연 반영)</li>
  * </ul>
  */
@@ -68,17 +73,44 @@ public class AdviceScoringService {
       ORDER BY c.ticker
       """;
 
+  // σ 는 호라이즌에 맞춰 σ_1d × √h — 2026-09-13 이전엔 √5 고정이라 진단 h=1 은 거의 NEUTRAL, h=20 은 거의 UP/DOWN 으로 찍혔다
   private static final String INDEX_SQL = """
       WITH cal AS (SELECT trade_date, ROW_NUMBER() OVER (ORDER BY trade_date) AS rn FROM vw_stock_market_calendar),
       base AS (SELECT rn FROM cal WHERE trade_date = :baseDate),
       win AS (SELECT ch.trade_date AS exit_date FROM base b JOIN cal ch ON ch.rn = b.rn + :h)
       SELECT i0.index_code, i0.close_price AS base_close, ix.close_price AS exit_close,
-             (SELECT STDDEV_SAMP(ret_1d) * SQRT(5) FROM (SELECT ret_1d FROM mv_stock_index_metric im
-                 WHERE im.index_code = i0.index_code AND im.trade_date <= :baseDate ORDER BY trade_date DESC LIMIT :sigmaN) s) AS sigma5
+             (SELECT STDDEV_SAMP(ret_1d) * SQRT(:h) FROM (SELECT ret_1d FROM mv_stock_index_metric im
+                 WHERE im.index_code = i0.index_code AND im.trade_date <= :baseDate ORDER BY trade_date DESC LIMIT :sigmaN) s) AS sigma_h
       FROM tb_stock_index_daily i0
                CROSS JOIN win w
                LEFT JOIN tb_stock_index_daily ix ON ix.index_code = i0.index_code AND ix.trade_date = w.exit_date
       WHERE i0.trade_date = :baseDate AND i0.index_code IN (:codes)
+      """;
+
+  /**
+   * 추세 전망 채점 창: 기준일 다음 영업일부터 h번째 영업일까지의 확정 라벨(TrendSql, 판단 때와 같은 정의)과 MA 이벤트 최초 발생 오프셋.
+   * 지수 1개씩 호출한다(:codes 에 하나, :baseLabel 은 판단 시점에 동결된 라벨).
+   */
+  private static final String TREND_SQL = """
+      WITH cal AS (SELECT trade_date, ROW_NUMBER() OVER (ORDER BY trade_date) AS rn FROM vw_stock_market_calendar),
+      base AS (SELECT rn FROM cal WHERE trade_date = :baseDate),
+      win AS (SELECT c.trade_date, c.rn - b.rn AS off FROM base b JOIN cal c ON c.rn > b.rn AND c.rn <= b.rn + :h),
+      """ + TrendSql.labelCtes() + """
+
+      SELECT (SELECT l0.close_value FROM lbl l0 WHERE l0.trade_date = :baseDate)      AS base_close,
+             COUNT(*)                                                                  AS n_days,
+             MAX(CASE WHEN w.off = :h THEN l.close_value END)                           AS exit_close,
+             MIN(CASE WHEN l.trend_code <> :baseLabel THEN w.off END)                   AS flip_off,
+             MIN(CASE WHEN l.trend_code <> :baseLabel THEN w.trade_date END)            AS flip_date,
+             MIN(CASE WHEN l.close_value < l.ma_20 THEN w.off END)                      AS below_ma20_off,
+             MIN(CASE WHEN l.close_value < l.ma_20 THEN w.trade_date END)               AS below_ma20_date,
+             MIN(CASE WHEN l.close_value < l.ma_60 THEN w.off END)                      AS below_ma60_off,
+             MIN(CASE WHEN l.close_value < l.ma_60 THEN w.trade_date END)               AS below_ma60_date,
+             MIN(CASE WHEN l.close_value > l.ma_20 THEN w.off END)                      AS above_ma20_off,
+             MIN(CASE WHEN l.close_value > l.ma_20 THEN w.trade_date END)               AS above_ma20_date,
+             MIN(CASE WHEN l.close_value > l.ma_60 THEN w.off END)                      AS above_ma60_off,
+             MIN(CASE WHEN l.close_value > l.ma_60 THEN w.trade_date END)               AS above_ma60_date
+      FROM win w JOIN lbl l ON l.trade_date = w.trade_date
       """;
 
   private static final String SECTOR_SQL = """
@@ -120,6 +152,7 @@ public class AdviceScoringService {
     scoreWriter.upsertCandidateScores(rows);
     List<CallScoreRow> calls = new ArrayList<>(indexScores(advice, horizonDays, stage));
     calls.addAll(sectorScores(advice, horizonDays, stage));
+    calls.addAll(trendScores(advice, horizonDays, stage));
     if (!calls.isEmpty()) {
       scoreWriter.upsertCallScores(calls);
     }
@@ -190,7 +223,7 @@ public class AdviceScoringService {
       }
       Double baseClose = nullable(rs.getObject("base_close"));
       Double exitClose = nullable(rs.getObject("exit_close"));
-      Double sigma = nullable(rs.getObject("sigma5"));
+      Double sigma = nullable(rs.getObject("sigma_h"));
       Double band = sigma == null ? null : bandSigma * sigma;
       if (baseClose == null || exitClose == null || baseClose <= 0) {
         return CallScoreRow.builder().adviceId(advice.adviceId()).subjectType(CallSubject.INDEX).subjectCode(code).horizonDays(h).stage(stage)
@@ -239,6 +272,84 @@ public class AdviceScoringService {
           .status(scored ? ScoreStatus.SCORED : ScoreStatus.MISSING).predicted("LEAD").baseValue(idxBase).exitValue(idxExit)
           .actualRet(actual).benchRet(bench).hit(scored ? actual - bench > 0 : null).build();
     });
+  }
+
+  /** 추세 채점 창 조회 결과 (지수 1개) */
+  record TrendWindow(int nDays, Double baseClose, Double exitClose, Integer flipOff, LocalDate flipDate, Map<InvalidationType, Event> events) {
+  }
+
+  record Event(Integer offset, LocalDate date) {
+  }
+
+  /**
+   * 추세 지속 전망 채점 (h = advisor.trend.score-horizon-days 패스에서만, 그 밖의 h 는 빈 목록).
+   * <ul>
+   *   <li>TREND: predicted = persist 버킷, actual_dir = 실현 버킷(확정 라벨이 동결 라벨과 처음 달라진 오프셋: 1~horizon → WITHIN_5D, ~h → ABOUT_20D,
+   *       없음 → BEYOND_20D), hit = 일치, brier = (confidence − 1[hit])² — INDEX 의 부호 기준 Brier 와 섞지 않는다</li>
+   *   <li>TREND_INV: predicted = 무효화 타입, actual_dir = FIRED|QUIET, hit = 전환·발동이 둘 다 없거나 둘 다 있고 허용 거리 안(조기 신호로 작동),
+   *       NONE 은 MISSING(채점 제외)</li>
+   * </ul>
+   * 정답 라벨은 판단 때와 같은 TrendSql 로 만들어지므로 LLM 선택과 무관하게 결정론으로 정해진다.
+   */
+  List<CallScoreRow> trendScores(AdviceHeader advice, int h, ScoreStage stage) {
+    AdvisorProperties.Trend cfg = properties.getTrend();
+    if (h != cfg.getScoreHorizonDays() || advice.outlooks() == null || advice.outlooks().isEmpty()) {
+      return List.of();
+    }
+    List<CallScoreRow> rows = new ArrayList<>();
+    for (TrendOutlook o : advice.outlooks()) {
+      MarketTrendCode baseLabel = advice.trendOf(o.indexCode());
+      if (baseLabel == null || o.persist() == null) {
+        continue;
+      }
+      Map<String, Object> p = TrendSql.params(cfg, List.of(o.indexCode()), advice.baseDate().plusDays(h * 3L + 30));
+      p.put("baseDate", advice.baseDate());
+      p.put("h", h);
+      p.put("baseLabel", baseLabel.getCode());
+      TrendWindow w = jdbc.query(TREND_SQL, p, (rs, i) -> {
+        Map<InvalidationType, Event> events = new java.util.EnumMap<>(InvalidationType.class);
+        events.put(InvalidationType.BELOW_MA20, new Event(intOrNull(rs.getObject("below_ma20_off")), rs.getObject("below_ma20_date", LocalDate.class)));
+        events.put(InvalidationType.BELOW_MA60, new Event(intOrNull(rs.getObject("below_ma60_off")), rs.getObject("below_ma60_date", LocalDate.class)));
+        events.put(InvalidationType.ABOVE_MA20, new Event(intOrNull(rs.getObject("above_ma20_off")), rs.getObject("above_ma20_date", LocalDate.class)));
+        events.put(InvalidationType.ABOVE_MA60, new Event(intOrNull(rs.getObject("above_ma60_off")), rs.getObject("above_ma60_date", LocalDate.class)));
+        return new TrendWindow(rs.getInt("n_days"), nullable(rs.getObject("base_close")), nullable(rs.getObject("exit_close")),
+            intOrNull(rs.getObject("flip_off")), rs.getObject("flip_date", LocalDate.class), events);
+      }).stream().findFirst().orElse(null);
+      boolean complete = w != null && w.nDays() >= h && w.baseClose() != null && w.exitClose() != null && w.baseClose() > 0;
+      double confidence = o.confidence();
+
+      // TREND
+      CallScoreRow.CallScoreRowBuilder trend = CallScoreRow.builder().adviceId(advice.adviceId()).subjectType(CallSubject.TREND)
+          .subjectCode(o.indexCode()).horizonDays(h).stage(stage).predicted(o.persist().getCode()).pUp(confidence);
+      if (!complete) {
+        rows.add(trend.status(ScoreStatus.MISSING).build());
+      } else {
+        TrendHorizon realized = TrendHorizon.realized(w.flipOff(), properties.getHorizonDays(), h);
+        boolean hit = realized == o.persist();
+        rows.add(trend.status(ScoreStatus.SCORED).baseValue(w.baseClose()).exitValue(w.exitClose()).actualRet(w.exitClose() / w.baseClose() - 1)
+            .actualDir(realized.getCode()).hit(hit).brier(Math.pow(confidence - (hit ? 1 : 0), 2)).eventDate(w.flipDate()).build());
+      }
+
+      // TREND_INV
+      InvalidationType inv = o.invalidation() == null ? InvalidationType.NONE : o.invalidation();
+      CallScoreRow.CallScoreRowBuilder invRow = CallScoreRow.builder().adviceId(advice.adviceId()).subjectType(CallSubject.TREND_INV)
+          .subjectCode(o.indexCode()).horizonDays(h).stage(stage).predicted(inv.getCode()).pUp(confidence);
+      if (!complete || inv == InvalidationType.NONE) {
+        rows.add(invRow.status(ScoreStatus.MISSING).build());
+      } else {
+        Event e = w.events().get(inv);
+        Integer invOff = e == null ? null : e.offset();
+        boolean hit = (w.flipOff() == null && invOff == null)
+            || (w.flipOff() != null && invOff != null && Math.abs(w.flipOff() - invOff) <= cfg.getInvalidationToleranceDays());
+        rows.add(invRow.status(ScoreStatus.SCORED).baseValue(w.baseClose()).exitValue(w.exitClose()).actualRet(w.exitClose() / w.baseClose() - 1)
+            .actualDir(invOff == null ? "QUIET" : "FIRED").hit(hit).eventDate(e == null ? null : e.date()).build());
+      }
+    }
+    return rows;
+  }
+
+  private static Integer intOrNull(Object value) {
+    return value == null ? null : ((Number) value).intValue();
   }
 
   private static Double nullable(Object value) {

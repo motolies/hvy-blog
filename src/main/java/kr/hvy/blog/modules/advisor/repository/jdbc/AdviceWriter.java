@@ -13,13 +13,16 @@ import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
+import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.CitedFeature;
+import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
 import kr.hvy.blog.modules.advisor.domain.model.SignalValue;
+import kr.hvy.blog.modules.advisor.domain.model.TrendOutlook;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -41,8 +44,14 @@ public class AdviceWriter {
   private static final TypeReference<List<CitedFeature>> CITED = new TypeReference<>() {
   };
 
+  private static final TypeReference<List<MarketTrend>> TRENDS = new TypeReference<>() {
+  };
+  private static final TypeReference<List<TrendOutlook>> OUTLOOKS = new TypeReference<>() {
+  };
+
   private static final String HEADER_COLUMNS = "advice_id, run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, "
-      + "kosdaq_dir, p_up, regime_rationale, leading_sectors, summary, prompt_version, model, system_fingerprint, weight_set_id, "
+      + "kosdaq_dir, p_up, regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, "
+      + "entry_date, exit_date, prompt_version, model, system_fingerprint, weight_set_id, "
       + "active_lesson_ids, data_quality, guard_json, published_at, created_at";
 
   private final JdbcTemplate jdbc;
@@ -54,13 +63,16 @@ public class AdviceWriter {
   public long insertHeader(AdviceHeader h) {
     return jdbc.queryForObject(
         "INSERT INTO tb_advisor_advice (run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, kosdaq_dir, p_up, "
-            + "regime_rationale, leading_sectors, summary, prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, "
-            + "data_quality, guard_json, published_at) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
+            + "regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, entry_date, exit_date, "
+            + "prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, data_quality, guard_json, published_at) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
         Long.class,
         h.runId(), h.baseDate(), h.adviceKind(), h.variant().getCode(), h.horizonDays(),
         code(h.regimeCode()), code(h.kospiDir()), code(h.kosdaqDir()), h.pUp(),
-        h.regimeRationale(), AdvisorJdbc.jsonb(h.leadingSectors()), h.summary(), h.promptVersion(), h.model(), h.systemFingerprint(),
+        h.regimeRationale(), AdvisorJdbc.jsonb(h.leadingSectors()), h.summary(),
+        code(h.trendKospi()), code(h.trendKosdaq()), AdvisorJdbc.jsonb(h.trends()), AdvisorJdbc.jsonb(h.outlooks()), AdvisorJdbc.jsonb(h.dataAsOf()),
+        h.entryDate(), h.exitDate(),
+        h.promptVersion(), h.model(), h.systemFingerprint(),
         h.weightSetId(), AdvisorJdbc.jsonb(h.activeLessonIds()),
         (h.dataQuality() == null ? DataQuality.OK : h.dataQuality()).getCode(), AdvisorJdbc.jsonb(h.guard()), AdvisorJdbc.ts(h.publishedAt()));
   }
@@ -226,6 +238,13 @@ public class AdviceWriter {
       .regimeRationale(rs.getString("regime_rationale"))
       .leadingSectors(readSectors(rs))
       .summary(rs.getString("summary"))
+      .trendKospi(AdvisorJdbc.enumOrNull(rs, "trend_kospi", MarketTrendCode.class))
+      .trendKosdaq(AdvisorJdbc.enumOrNull(rs, "trend_kosdaq", MarketTrendCode.class))
+      .trends(readJson(rs, "trend_json", TRENDS))
+      .outlooks(readJson(rs, "outlook_json", OUTLOOKS))
+      .dataAsOf(AdvisorJdbc.jsonMap(rs, "data_as_of_json"))
+      .entryDate(rs.getObject("entry_date", LocalDate.class))
+      .exitDate(rs.getObject("exit_date", LocalDate.class))
       .promptVersion(rs.getString("prompt_version"))
       .model(rs.getString("model"))
       .systemFingerprint(rs.getString("system_fingerprint"))
@@ -240,6 +259,14 @@ public class AdviceWriter {
   private static List<SectorCall> readSectors(ResultSet rs) throws SQLException {
     String json = rs.getString("leading_sectors");
     return json == null || json.isBlank() ? List.of() : AdvisorJson.MAPPER.readValue(json, SECTORS);
+  }
+
+  /**
+   * JSONB 목록 컬럼을 레코드 목록으로. NULL 이면 빈 목록.
+   */
+  private static <T> List<T> readJson(ResultSet rs, String column, TypeReference<List<T>> type) throws SQLException {
+    String json = rs.getString(column);
+    return json == null || json.isBlank() ? List.of() : AdvisorJson.MAPPER.readValue(json, type);
   }
 
   static final RowMapper<CandidateRow> CANDIDATE_MAPPER = (rs, i) -> CandidateRow.builder()

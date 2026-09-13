@@ -53,10 +53,12 @@ class DerivedMetricRefreshServiceTest {
     verify(refresher).recomputeDailyMetric(eq(from), eq(from.minusDays(420)), eq("512MB"), eq(0));
     verify(refresher).refresh(eq(DerivedViewRefresher.MV_ADJUST_FACTOR), eq(false), eq("512MB"), eq(0));
     verify(refresher).refresh(eq("mv_stock_sector_daily"), eq(false), eq("512MB"), eq(0));
-    assertThat(refreshed).isEqualTo(4);
+    verify(refresher).refresh(eq("mv_stock_market_breadth_daily"), eq(false), eq("512MB"), eq(0));
+    assertThat(refreshed).isEqualTo(5);
     assertThat(exec.totalRows()).isEqualTo(1234);
     Map<String, Object> timings = (Map<String, Object>) exec.metadataSnapshot().get("refreshMs");
-    assertThat(timings).containsKeys("mv_stock_adjust_factor", "tb_stock_daily_metric", "mv_stock_index_metric", "mv_stock_sector_daily");
+    assertThat(timings).containsKeys("mv_stock_adjust_factor", "tb_stock_daily_metric", "mv_stock_index_metric", "mv_stock_sector_daily",
+        "mv_stock_market_breadth_daily");
     assertThat(exec.metadataSnapshot()).containsEntry("metricFrom", from.toString());
   }
 
@@ -94,7 +96,7 @@ class DerivedMetricRefreshServiceTest {
 
     int refreshed = service.refreshAll(exec);
 
-    assertThat(refreshed).isEqualTo(3);
+    assertThat(refreshed).isEqualTo(4);
     @SuppressWarnings("unchecked")
     Map<String, Object> timings = (Map<String, Object>) exec.metadataSnapshot().get("refreshMs");
     assertThat(timings).containsEntry("tb_stock_daily_metric", "MISSING");

@@ -210,6 +210,88 @@ class AdviceScoringPgTest {
     assertThat(kpi.recentPicks(D.getFirst(), D.getLast(), 5)).hasSize(2);
   }
 
+  @Test
+  @DisplayName("추세 전망 채점(h=20): 라벨이 안 바뀌면 BEYOND_20D 적중, WITHIN_5D 는 빗나감, 무효화는 QUIET·전환 없음이면 적중, NONE 은 MISSING, √h 밴드")
+  void trendOutlookScoring() {
+    // 합성 지수는 2500 상수·MA 성분 0, 종목은 전부 MA20 위라 breadth +1 → 두 시장 모두 SIDEWAYS 로 고정
+    AdviceHeader advice = AdviceHeader.builder().adviceId(9L).runId(runId).baseDate(D.get(5)).adviceKind(AdviceHeader.KIND_DAILY).variant(AdviceVariant.LIVE)
+        .horizonDays(5).kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.UP).pUp(0.7)
+        .trendKospi(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.SIDEWAYS).trendKosdaq(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.SIDEWAYS)
+        .outlooks(List.of(
+            new kr.hvy.blog.modules.advisor.domain.model.TrendOutlook("0001", kr.hvy.blog.modules.advisor.domain.code.TrendHorizon.BEYOND_20D, 0.70,
+                kr.hvy.blog.modules.advisor.domain.code.InvalidationType.BELOW_MA20),
+            new kr.hvy.blog.modules.advisor.domain.model.TrendOutlook("1001", kr.hvy.blog.modules.advisor.domain.code.TrendHorizon.WITHIN_5D, 0.60,
+                kr.hvy.blog.modules.advisor.domain.code.InvalidationType.NONE)))
+        .build();
+
+    assertThat(scoring.trendScores(advice, 5, ScoreStage.PROVISIONAL)).as("결정 호라이즌 패스에서는 채점하지 않는다").isEmpty();
+    List<CallScoreRow> rows = scoring.trendScores(advice, 20, ScoreStage.PROVISIONAL);
+    assertThat(rows).hasSize(4);
+    Map<String, CallScoreRow> byKey = new java.util.HashMap<>();
+    rows.forEach(r -> byKey.put(r.subjectType() + ":" + r.subjectCode(), r));
+
+    CallScoreRow kospi = byKey.get("TREND:0001");
+    assertThat(kospi.status()).isEqualTo(ScoreStatus.SCORED);
+    assertThat(kospi.predicted()).isEqualTo("BEYOND_20D");
+    assertThat(kospi.actualDir()).isEqualTo("BEYOND_20D");
+    assertThat(kospi.hit()).isTrue();
+    assertThat(kospi.brier()).isCloseTo(Math.pow(0.70 - 1, 2), within(1e-9));
+    assertThat(kospi.eventDate()).isNull();
+    assertThat(kospi.baseValue()).isEqualTo(2500.0);
+    assertThat(kospi.exitValue()).isEqualTo(2500.0);
+
+    CallScoreRow kosdaq = byKey.get("TREND:1001");
+    assertThat(kosdaq.hit()).isFalse();
+    assertThat(kosdaq.brier()).isCloseTo(Math.pow(0.60, 2), within(1e-9));
+
+    CallScoreRow inv = byKey.get("TREND_INV:0001");
+    assertThat(inv.status()).isEqualTo(ScoreStatus.SCORED);
+    assertThat(inv.predicted()).isEqualTo("BELOW_MA20");
+    assertThat(inv.actualDir()).as("종가 == MA20 이라 하향 이탈 없음").isEqualTo("QUIET");
+    assertThat(inv.hit()).as("전환도 발동도 없음 = 적중").isTrue();
+    assertThat(byKey.get("TREND_INV:1001").status()).isEqualTo(ScoreStatus.MISSING);
+
+    // 저장·재조회 (event_date 컬럼 왕복)
+    long adviceId = insertAdvice(D.get(5), AdviceVariant.LIVE, List.of(1), Map.of(1, PickDirection.LONG));
+    List<CallScoreRow> persisted = rows.stream().map(r -> r.toBuilder().adviceId(adviceId).build()).toList();
+    scoreWriter.upsertCallScores(persisted);
+    assertThat(scoreWriter.callScores(adviceId)).hasSize(4).extracting(CallScoreRow::subjectType)
+        .containsExactly(CallSubject.TREND, CallSubject.TREND, CallSubject.TREND_INV, CallSubject.TREND_INV);
+    AdviceHeader saved = adviceWriter.findById(adviceId).orElseThrow();
+    assertThat(saved.trendKospi()).isNull();
+
+    // INDEX 진단 채점의 σ 가 √h 로 커진다 (변동성 0 인 합성 데이터라 밴드는 0 이지만 :h 파라미터 SQL 이 실행되는지 확인)
+    assertThat(scoring.indexScores(advice, 20, ScoreStage.PROVISIONAL)).hasSize(2).allMatch(r -> r.band() != null && r.band() == 0.0);
+  }
+
+  @Test
+  @DisplayName("advice-v2 헤더 컬럼(규칙 추세·전망·관측 기준일·적용 구간)이 JSONB 로 왕복한다")
+  void headerRoundTripsTrendColumns() {
+    kr.hvy.blog.modules.advisor.domain.model.MarketTrend trend = AdvicePromptBuilderTest.trend();
+    AdviceHeader header = AdviceHeader.builder().runId(runId).baseDate(D.get(3)).adviceKind(AdviceHeader.KIND_DAILY).variant(AdviceVariant.LIVE).horizonDays(5)
+        .regimeCode(MarketRegimeCode.NEUTRAL).kospiDir(DirectionCall.NEUTRAL).kosdaqDir(DirectionCall.NEUTRAL).pUp(0.55)
+        .trendKospi(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL).trendKosdaq(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BEAR)
+        .trends(List.of(trend))
+        .outlooks(List.of(new kr.hvy.blog.modules.advisor.domain.model.TrendOutlook("0001", kr.hvy.blog.modules.advisor.domain.code.TrendHorizon.ABOUT_20D, 0.65,
+            kr.hvy.blog.modules.advisor.domain.code.InvalidationType.BELOW_MA60)))
+        .dataAsOf(Map.of("domestic", D.get(3).toString(), "globalAgeTradingDays", 1, "flowProvisional", true))
+        .entryDate(D.get(4)).exitDate(D.get(8)).dataQuality(DataQuality.OK).promptVersion("advice-v2").model("m").build();
+
+    long id = adviceWriter.insertHeader(header);
+    AdviceHeader saved = adviceWriter.findById(id).orElseThrow();
+
+    assertThat(saved.trendKospi()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
+    assertThat(saved.trendKosdaq()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BEAR);
+    assertThat(saved.trends()).hasSize(1);
+    assertThat(saved.trends().getFirst()).isEqualTo(trend);
+    assertThat(saved.outlooks()).containsExactlyElementsOf(header.outlooks());
+    assertThat(saved.dataAsOf()).containsEntry("domestic", D.get(3).toString()).containsEntry("globalAgeTradingDays", 1).containsEntry("flowProvisional", true);
+    assertThat(saved.entryDate()).isEqualTo(D.get(4));
+    assertThat(saved.exitDate()).isEqualTo(D.get(8));
+    assertThat(saved.trendOf("1001")).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BEAR);
+    assertThat(saved.outlookOf("0001").invalidation()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.InvalidationType.BELOW_MA60);
+  }
+
   private long insertAdvice(LocalDate baseDate, AdviceVariant variant, List<Integer> candidateIdx, Map<Integer, PickDirection> picks) {
     AdviceHeader header = AdviceHeader.builder().runId(runId).baseDate(baseDate).adviceKind(AdviceHeader.KIND_DAILY).variant(variant).horizonDays(5)
         .regimeCode(MarketRegimeCode.RISK_ON).kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.UP).pUp(0.7)

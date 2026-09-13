@@ -81,6 +81,7 @@ class WeeklyReviewJobTest {
     when(kpi.variantSummaries(any(), any())).thenReturn(List.of(
         new AdvisorKpiService.VariantSummary(AdviceVariant.LIVE, 10, 60, 0.55, 0.006, 0.004, 0.003, 0.002, 0.004, null, 0)));
     when(kpi.regimeSummary(any(), any(), any())).thenReturn(new AdvisorKpiService.RegimeSummary(10, 0.6, 0.22, 0.12));
+    when(kpi.trendSummary(any(), any(), any())).thenReturn(new AdvisorKpiService.TrendSummary(0, null, null, 0, null));
     when(kpi.calibration(any(), any())).thenReturn(List.of(new AdvisorKpiService.CalibrationRow(0.7, 20, 0.55, 0.004)));
     when(adviceWriter.countLivePicks()).thenReturn(0);
     when(adviceWriter.findLatest(any(), any())).thenReturn(Optional.of(AdviceHeader.builder().adviceId(842L).runId(77L).baseDate(today.minusDays(2)).build()));

@@ -242,11 +242,20 @@ advisor:
   advise:
     deadline: "19:55"             # DAILY 완료 대기 마감(KST). 이후 미완료면 SKIPPED + #hvy-error
   prompt:
-    version: advice-v1
+    version: advice-v2            # 시간축·추세 국면·전망 (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
+  trend:                          # 규칙 기반 중기 추세(강세·보합·약세). 성분 5개 합 [-5,+5]. 배포 후 10년 라벨 분포(강세≈40/보합≈35/약세≈25%)로 조정
+    bull-threshold: 2
+    bear-threshold: -2
+    ret60-threshold: 0.05         # 60일 수익률 성분 컷(±)
+    breadth-high: 0.60            # MA20 상회 종목 비율 상단(+1)
+    breadth-low: 0.40             # 하단(-1)
+    confirm-days: 2               # 전환 확인 연속 거래일(휩소 방지)
+    score-horizon-days: 20        # 추세 전망(TREND·TREND_INV) 채점 창 — diagnostic-horizons 에 포함돼야 함
+    invalidation-tolerance-days: 2
   scoring:
     cost-bps: 30                  # 왕복 거래비용 — 보고 전용(학습·IC 는 총수익)
-    band-sigma: 0.5               # 국면 적중 밴드 = 0.5 × σ_5d
+    band-sigma: 0.5               # 국면 적중 밴드 = 0.5 × σ_1d × √h (h=5 면 σ_5d)
     sigma-lookback-days: 60
   ic:
     window-days: 120              # rank-IC 창(영업일), n_eff = 120/5 = 24

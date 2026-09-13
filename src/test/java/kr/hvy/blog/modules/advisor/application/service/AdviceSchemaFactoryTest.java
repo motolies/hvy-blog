@@ -19,7 +19,14 @@ class AdviceSchemaFactoryTest {
     Map<String, Object> schema = AdviceSchemaFactory.schema(List.of("005930", "000660"), List.of("G2510"));
     assertStrict(schema);
     Map<String, Object> props = (Map<String, Object>) schema.get("properties");
-    assertThat(props).containsKeys("regime", "sectors", "picks", "summary");
+    assertThat(props).containsKeys("regime", "trendOutlook", "sectors", "picks", "summary");
+    Map<String, Object> outlook = (Map<String, Object>) ((Map<String, Object>) ((Map<String, Object>) props.get("trendOutlook")).get("properties")).get("kospi");
+    Map<String, Object> outlookProps = (Map<String, Object>) outlook.get("properties");
+    assertThat(outlookProps).containsOnlyKeys("confidence", "invalidation", "persist");
+    assertThat((List<String>) ((Map<String, Object>) outlookProps.get("persist")).get("enum")).containsExactly("WITHIN_5D", "ABOUT_20D", "BEYOND_20D");
+    assertThat((List<String>) ((Map<String, Object>) outlookProps.get("invalidation")).get("enum"))
+        .containsExactly("NONE", "BELOW_MA20", "BELOW_MA60", "ABOVE_MA20", "ABOVE_MA60");
+    assertThat((List<String>) ((Map<String, Object>) outlookProps.get("confidence")).get("enum")).isEqualTo(AdviceSchemaFactory.CONVICTIONS);
     Map<String, Object> pick = (Map<String, Object>) ((Map<String, Object>) props.get("picks")).get("items");
     Map<String, Object> pickProps = (Map<String, Object>) pick.get("properties");
     assertThat((List<String>) ((Map<String, Object>) pickProps.get("ticker")).get("enum")).containsExactly("005930", "000660");

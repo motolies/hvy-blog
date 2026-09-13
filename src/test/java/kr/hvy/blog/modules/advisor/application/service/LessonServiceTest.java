@@ -154,7 +154,7 @@ class LessonServiceTest {
   }
 
   private static LessonProposalResponse.Condition cond(String regime, String signal, String op, Double pct, String sector) {
-    return new LessonProposalResponse.Condition(regime, signal, op, pct, sector);
+    return new LessonProposalResponse.Condition(regime, null, signal, op, pct, sector);
   }
 
   private static LessonProposalResponse.Proposal proposal(String scope, LessonProposalResponse.Condition c, String observation, int n, double t, String rule) {

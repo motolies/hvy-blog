@@ -30,12 +30,12 @@ public class ScoreWriter {
       + "cost_adj_excess = EXCLUDED.cost_adj_excess, scored_at = NOW()";
 
   private static final String CALL_UPSERT = "INSERT INTO tb_advisor_call_score (advice_id, subject_type, subject_code, horizon_days, stage, status, "
-      + "predicted, p_up, base_value, exit_value, actual_ret, bench_ret, band, actual_dir, hit, brier, scored_at) "
-      + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) "
+      + "predicted, p_up, base_value, exit_value, actual_ret, bench_ret, band, actual_dir, hit, brier, event_date, scored_at) "
+      + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) "
       + "ON CONFLICT (advice_id, subject_type, subject_code, horizon_days) DO UPDATE SET stage = EXCLUDED.stage, status = EXCLUDED.status, "
       + "predicted = EXCLUDED.predicted, p_up = EXCLUDED.p_up, base_value = EXCLUDED.base_value, exit_value = EXCLUDED.exit_value, "
       + "actual_ret = EXCLUDED.actual_ret, bench_ret = EXCLUDED.bench_ret, band = EXCLUDED.band, actual_dir = EXCLUDED.actual_dir, "
-      + "hit = EXCLUDED.hit, brier = EXCLUDED.brier, scored_at = NOW()";
+      + "hit = EXCLUDED.hit, brier = EXCLUDED.brier, event_date = EXCLUDED.event_date, scored_at = NOW()";
 
   private final BatchUpsertSupport upsert;
   private final JdbcTemplate jdbc;
@@ -62,7 +62,7 @@ public class ScoreWriter {
 
   @Transactional
   public int upsertCallScores(List<CallScoreRow> rows) {
-    return upsert.batchUpsert(CALL_UPSERT, rows, 16, (ps, r) -> {
+    return upsert.batchUpsert(CALL_UPSERT, rows, 17, (ps, r) -> {
       ps.setLong(1, r.adviceId());
       ps.setString(2, r.subjectType().getCode());
       ps.setString(3, r.subjectCode());
@@ -79,6 +79,7 @@ public class ScoreWriter {
       ps.setString(14, r.actualDir());
       ps.setObject(15, r.hit());
       ps.setObject(16, r.brier());
+      ps.setObject(17, r.eventDate());
     });
   }
 
@@ -101,7 +102,8 @@ public class ScoreWriter {
 
   public List<CallScoreRow> callScores(long adviceId) {
     return jdbc.query("SELECT advice_id, subject_type, subject_code, horizon_days, stage, status, predicted, p_up, base_value, exit_value, "
-            + "actual_ret, bench_ret, band, actual_dir, hit, brier FROM tb_advisor_call_score WHERE advice_id = ? ORDER BY subject_type, subject_code",
+            + "actual_ret, bench_ret, band, actual_dir, hit, brier, event_date FROM tb_advisor_call_score WHERE advice_id = ? "
+            + "ORDER BY subject_type, subject_code, horizon_days",
         CALL_SCORE_MAPPER, adviceId);
   }
 
@@ -139,5 +141,6 @@ public class ScoreWriter {
       .actualDir(rs.getString("actual_dir"))
       .hit(AdvisorJdbc.nullableBoolean(rs, "hit"))
       .brier(AdvisorJdbc.nullableDouble(rs, "brier"))
+      .eventDate(rs.getObject("event_date", LocalDate.class))
       .build();
 }

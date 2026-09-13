@@ -52,6 +52,7 @@ public class AdvisorProperties {
 
   private Advise advise = new Advise();
   private Prompt prompt = new Prompt();
+  private Trend trend = new Trend();
   private Scoring scoring = new Scoring();
   private Ic ic = new Ic();
   private Lesson lesson = new Lesson();
@@ -87,9 +88,14 @@ public class AdvisorProperties {
       log.info("advisor 비활성(advisor.enabled=false) — AI 판단 잡·ChatClient 미등록");
       return;
     }
+    if (!diagnosticHorizons.contains(trend.getScoreHorizonDays())) {
+      log.warn("advisor.trend.score-horizon-days={} 가 diagnostic-horizons={} 에 없어 추세 전망(TREND) 채점이 영원히 돌지 않습니다",
+          trend.getScoreHorizonDays(), diagnosticHorizons);
+    }
     if (isConfigured()) {
-      log.info("advisor 설정 확인: judge={}, assist={}, horizon={}일, candidates={}, picks={}~{}",
-          model.getJudge(), model.getAssist(), horizonDays, candidateLimit, pickMin, pickMax);
+      log.info("advisor 설정 확인: judge={}, assist={}, horizon={}일, candidates={}, picks={}~{}, trend=[{}..{}] confirm {}일",
+          model.getJudge(), model.getAssist(), horizonDays, candidateLimit, pickMin, pickMax, trend.getBearThreshold(), trend.getBullThreshold(),
+          trend.getConfirmDays());
     } else {
       log.warn("advisor 가 켜져 있으나 OpenAI 키(OPENAI_API_KEY) 또는 모델 ID(ADVISOR_JUDGE_MODEL/ADVISOR_ASSIST_MODEL)가 비어 있어 잡 실행 시 거부됩니다");
     }
@@ -110,6 +116,38 @@ public class AdvisorProperties {
 
     /** 사용자 메시지(JSON) 길이 상한. 넘으면 후보를 뒤에서 잘라내고 run 메타에 경고 (≈8k 토큰) */
     private int maxInputChars = 26_000;
+  }
+
+  /**
+   * 규칙 기반 중기 추세(강세·보합·약세) 판정 손잡이. 성분 5개(종가/MA20, MA20/MA60, MA60/MA120, 60일 수익률, MA20 상회 비율) 각 -1/0/+1 의 합으로
+   * 판정하며 임계는 전부 여기서 온다. 배포 후 10년 라벨 분포(목표 강세≈40/보합≈35/약세≈25%)를 보고 조정한다.
+   */
+  @Data
+  public static class Trend {
+
+    /** 성분 합이 이 값 이상이면 BULL */
+    private int bullThreshold = 2;
+
+    /** 성분 합이 이 값 이하면 BEAR */
+    private int bearThreshold = -2;
+
+    /** 60일 수익률 성분 컷 (±) */
+    private double ret60Threshold = 0.05;
+
+    /** MA20 상회 종목 비율이 이 값 이상이면 +1 */
+    private double breadthHigh = 0.60;
+
+    /** 이 값 이하면 -1 */
+    private double breadthLow = 0.40;
+
+    /** 전환 확인에 필요한 연속 거래일 수 (휩소 방지) */
+    private int confirmDays = 2;
+
+    /** 추세 전망(TREND·TREND_INV) 채점 호라이즌. diagnostic-horizons 에 포함돼야 한다 (기동 시 검증) */
+    private int scoreHorizonDays = 20;
+
+    /** TREND_INV 적중 판정: 무효화 발동일과 전환일의 허용 거리(거래일) */
+    private int invalidationToleranceDays = 2;
   }
 
   @Data

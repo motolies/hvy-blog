@@ -15,6 +15,7 @@ import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.LessonStatus;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
+import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
@@ -153,18 +154,19 @@ public class AdviseJob implements AdvisorJob {
     WeightSet weightSet = weightSets.find(result.weightSetId()).orElseThrow();
 
     // ③ 정량 top-N 섀도 (LLM 없음) — 격리
-    steps.run("SHADOW_QUANT", () -> saveQuantShadow(execution, result, decision));
+    steps.run("SHADOW_QUANT", () -> saveQuantShadow(execution, result, decision, market[0]));
 
     // ④ 프롬프트: 실적 블록·교훈은 누적 픽 게이트를 넘긴 뒤에만
     boolean memoryOn = adviceWriter.countLivePicks() >= properties.getLesson().getMinPicks();
     final List<LessonRow> activeLessons = memoryOn ? activeLessons() : List.of();
-    // 교훈의 regime 조건은 오늘 국면을 모르는 시점이라 직전 LIVE 판단의 국면으로 평가한다
+    // 교훈의 regime 조건은 오늘 국면을 모르는 시점이라 직전 LIVE 판단의 국면으로 평가한다. trend 조건은 규칙이 기준일에 확정한 오늘 값으로 즉시 판정한다
     MarketRegimeCode previousRegime = adviceWriter.findLatest(AdviceVariant.LIVE, baseDate.minusDays(1))
         .map(AdviceHeader::regimeCode).orElse(null);
-    List<CandidateRow> candidates = tagLessons(result.candidates(), activeLessons, previousRegime);
+    Map<String, MarketTrendCode> trendCodes = market[0].trendCodes();
+    List<CandidateRow> candidates = tagLessons(result.candidates(), activeLessons, previousRegime, trendCodes);
     ScreeningResult tagged = new ScreeningResult(result.baseDate(), result.universeSize(), result.cutSize(), result.weightSetId(), candidates);
     Map<String, Object> promptScoreboard = memoryOn ? scoreboard[0].promptBlock() : null;
-    PromptPayload payload = promptBuilder.build(market[0], tagged, promptScoreboard, activeLessons, weightSet.enabledWeights());
+    PromptPayload payload = promptBuilder.build(market[0], tagged, promptScoreboard, activeLessons, weightSet.enabledWeights(), decision.quality());
     if (payload.truncated()) {
       execution.warn("입력 길이 상한으로 후보를 " + payload.candidatesIncluded() + "개로 줄였습니다");
     }
@@ -179,7 +181,7 @@ public class AdviseJob implements AdvisorJob {
     MarketJudgeClient.JudgeResult jr = judged[0];
     execution.recordLlmUsage(jr.model(), PromptResources.ADVICE_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
     List<CandidateRow> included = candidates.subList(0, payload.candidatesIncluded());
-    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorNames);
+    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorNames, trendCodes);
     execution.putMetadata("guard", guarded.stats());
     if (guarded.tooFew(properties.getPickMin())) {
       promptInputs.upsert(new PromptInputRow(execution.runId(), AdviceVariant.LIVE, PromptResources.ADVICE_VERSION, prompts.adviceSha256(),
@@ -197,6 +199,8 @@ public class AdviseJob implements AdvisorJob {
         .horizonDays(properties.getHorizonDays())
         .regimeCode(guarded.regime()).kospiDir(guarded.kospiDir()).kosdaqDir(guarded.kosdaqDir()).pUp(guarded.pUp())
         .regimeRationale(guarded.rationale()).leadingSectors(guarded.sectors()).summary(guarded.summary())
+        .trendKospi(trendCodes.get("0001")).trendKosdaq(trendCodes.get("1001")).trends(market[0].trends()).outlooks(guarded.outlooks())
+        .dataAsOf(market[0].dataAsOf()).entryDate(market[0].entryDate()).exitDate(market[0].exitDate())
         .promptVersion(PromptResources.ADVICE_VERSION).model(jr.model()).systemFingerprint(jr.responseId())
         .weightSetId(result.weightSetId()).activeLessonIds(activeLessons.stream().map(LessonRow::lessonId).toList())
         .dataQuality(decision.quality()).guard(guarded.stats())
@@ -253,13 +257,15 @@ public class AdviseJob implements AdvisorJob {
   /**
    * 정량 top-N 동일가중 섀도: LLM 없이 점수 상위 N 을 LONG·확신 0.55 로 저장 (LLM 부가가치의 대조군).
    */
-  private void saveQuantShadow(AdvisorExecution execution, ScreeningResult result, AdvisorGateService.Decision decision) {
+  private void saveQuantShadow(AdvisorExecution execution, ScreeningResult result, AdvisorGateService.Decision decision, MarketFeatures market) {
     if (adviceWriter.find(result.baseDate(), AdviceHeader.KIND_DAILY, AdviceVariant.QUANT_TOPN).isPresent()) {
       return;
     }
     int n = Math.min(properties.getShadow().getQuantTopN(), result.candidates().size());
+    Map<String, MarketTrendCode> trendCodes = market.trendCodes();
     AdviceHeader header = AdviceHeader.builder().runId(execution.runId()).baseDate(result.baseDate()).adviceKind(AdviceHeader.KIND_DAILY)
         .variant(AdviceVariant.QUANT_TOPN).horizonDays(properties.getHorizonDays()).weightSetId(result.weightSetId())
+        .trendKospi(trendCodes.get("0001")).trendKosdaq(trendCodes.get("1001")).entryDate(market.entryDate()).exitDate(market.exitDate())
         .dataQuality(decision.quality()).promptVersion("quant").model("quant-top-" + n).build();
     long id = adviceWriter.insertHeader(header);
     adviceWriter.insertCandidates(id, result.candidates());
@@ -279,16 +285,19 @@ public class AdviseJob implements AdvisorJob {
     if (adviceWriter.find(screened.baseDate(), AdviceHeader.KIND_DAILY, AdviceVariant.LLM_NOMEM).isPresent()) {
       return;
     }
-    PromptPayload payload = promptBuilder.build(market, screened, null, List.of(), weightSet.enabledWeights());
+    PromptPayload payload = promptBuilder.build(market, screened, null, List.of(), weightSet.enabledWeights(), decision.quality());
     String schema = AdviceSchemaFactory.schemaJson(payload.candidateTickers(), payload.sectorCodes());
     MarketJudgeClient.JudgeResult jr = judge.judge(prompts.adviceSystem(), payload, schema);
     execution.recordLlmUsage(jr.model(), PromptResources.ADVICE_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
     List<CandidateRow> included = screened.candidates().subList(0, payload.candidatesIncluded());
-    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorNames);
+    Map<String, MarketTrendCode> trendCodes = market.trendCodes();
+    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorNames, trendCodes);
     AdviceHeader header = AdviceHeader.builder().runId(execution.runId()).baseDate(screened.baseDate()).adviceKind(AdviceHeader.KIND_DAILY)
         .variant(AdviceVariant.LLM_NOMEM).horizonDays(properties.getHorizonDays())
         .regimeCode(guarded.regime()).kospiDir(guarded.kospiDir()).kosdaqDir(guarded.kosdaqDir()).pUp(guarded.pUp())
         .regimeRationale(guarded.rationale()).leadingSectors(guarded.sectors()).summary(guarded.summary())
+        .trendKospi(trendCodes.get("0001")).trendKosdaq(trendCodes.get("1001")).trends(market.trends()).outlooks(guarded.outlooks())
+        .dataAsOf(market.dataAsOf()).entryDate(market.entryDate()).exitDate(market.exitDate())
         .promptVersion(PromptResources.ADVICE_VERSION).model(jr.model()).systemFingerprint(jr.responseId())
         .weightSetId(screened.weightSetId()).activeLessonIds(List.of()).dataQuality(decision.quality()).guard(guarded.stats()).build();
     long id = adviceWriter.insertHeader(header);
@@ -301,14 +310,17 @@ public class AdviseJob implements AdvisorJob {
 
   /**
    * 활성 교훈의 condition 을 후보마다 평가해 appliedLessonIds 를 태깅한다 (효과 상대 비교의 근거).
+   * regime 조건은 직전 LIVE 국면(어제 값), trend 조건은 후보 소속 시장의 오늘 규칙 추세로 판정한다.
    */
-  static List<CandidateRow> tagLessons(List<CandidateRow> candidates, List<LessonRow> activeLessons, MarketRegimeCode regime) {
+  static List<CandidateRow> tagLessons(List<CandidateRow> candidates, List<LessonRow> activeLessons, MarketRegimeCode regime,
+      Map<String, MarketTrendCode> trends) {
     if (activeLessons.isEmpty()) {
       return candidates;
     }
     List<CandidateRow> tagged = new ArrayList<>();
     for (CandidateRow c : candidates) {
-      List<Long> ids = activeLessons.stream().filter(l -> LessonCondition.matches(l.condition(), c, regime)).map(LessonRow::lessonId).toList();
+      MarketTrendCode trend = trends == null || c.benchIndexCode() == null ? null : trends.get(c.benchIndexCode());
+      List<Long> ids = activeLessons.stream().filter(l -> LessonCondition.matches(l.condition(), c, regime, trend)).map(LessonRow::lessonId).toList();
       tagged.add(c.toBuilder().appliedLessonIds(ids).build());
     }
     return tagged;

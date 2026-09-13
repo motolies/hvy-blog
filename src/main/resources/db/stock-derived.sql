@@ -55,7 +55,7 @@ WHERE index_code = '0001';
 
 -- =============================================
 -- 지표 계층 (선순환의 출발점). 모두 vw_stock_daily_price_adj(수정주가) 위에서 계산하며 DOUBLE PRECISION 이다. 종목 일별 지표는 테이블(위 참조).
--- 갱신 순서: mv_stock_adjust_factor → tb_stock_daily_metric(증분 재계산) → mv_stock_index_metric → mv_stock_sector_daily
+-- 갱신 순서: mv_stock_adjust_factor → tb_stock_daily_metric(증분 재계산) → mv_stock_index_metric → mv_stock_sector_daily → mv_stock_market_breadth_daily
 -- (DerivedMetricRefreshService.REFRESH_ORDER). 갱신이 3분을 넘으면 증분 테이블로 전환하되 뷰 이름은 유지한다.
 -- =============================================
 
@@ -120,6 +120,24 @@ FROM tb_stock_daily_price p
 GROUP BY s.sector_code, p.trade_date
 WITH DATA;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_mv_stock_sector_daily ON mv_stock_sector_daily (sector_code, trade_date);
+
+-- ---------------------------------------------
+-- 시장 breadth (시장별 일별): MA20·MA60 상회 종목 비율, 상승 종목 비율. advisor 의 규칙 기반 추세 국면(강세·보합·약세) 성분이다.
+-- 현재 is_active 로 거르지 않는다 — 그날 지표 행이 있으면 그날 거래된 종목이며, 현재 상태로 과거를 거르면 생존 편향이 생긴다.
+-- 하루 시장 2행이라 비용은 무시할 수준이고, 10년 기저율·20일 채점이 같은 정의를 쓰려면 온더플라이 집계가 아니라 MV 여야 한다.
+-- ---------------------------------------------
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stock_market_breadth_daily AS
+SELECT m.market_type,
+       d.trade_date,
+       COUNT(d.ma_20)                                                                                          AS member_count,
+       AVG(CASE WHEN d.ma_20 IS NULL THEN NULL WHEN d.adj_close > d.ma_20 THEN 1.0 ELSE 0.0 END)::double precision AS above_ma20_ratio,
+       AVG(CASE WHEN d.ma_60 IS NULL THEN NULL WHEN d.adj_close > d.ma_60 THEN 1.0 ELSE 0.0 END)::double precision AS above_ma60_ratio,
+       AVG(CASE WHEN d.ret_1d IS NULL THEN NULL WHEN d.ret_1d > 0 THEN 1.0 ELSE 0.0 END)::double precision         AS rising_ratio
+FROM tb_stock_daily_metric d
+         JOIN tb_stock_master m ON m.ticker = d.ticker AND m.security_group = 'ST'
+GROUP BY m.market_type, d.trade_date
+WITH DATA;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_mv_stock_market_breadth_daily ON mv_stock_market_breadth_daily (market_type, trade_date);
 
 -- ---------------------------------------------
 -- 유니버스: 활성·주권·비거래정지·비관리·비정리매매 + 시총 1,000억·거래대금 5일 평균 10억 하한 (1차 상수, 추후 테이블화).

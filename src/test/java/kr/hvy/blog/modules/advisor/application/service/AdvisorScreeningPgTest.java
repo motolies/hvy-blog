@@ -82,7 +82,13 @@ class AdvisorScreeningPgTest {
     WeightSetRepository weightSets = new WeightSetRepository(jdbc);
     screening = new CandidateScreeningService(named, weightSets, properties);
     icService = new SignalIcService(named, new SignalIcWriter(new BatchUpsertSupport(jdbc), jdbc), weightSets, properties);
-    marketFeatures = new MarketFeatureService(named, properties);
+    kr.hvy.blog.modules.stock.application.service.MarketCalendarService calendar =
+        org.mockito.Mockito.mock(kr.hvy.blog.modules.stock.application.service.MarketCalendarService.class);
+    org.mockito.Mockito.when(calendar.isTradingDay(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> {
+      DayOfWeek day = ((LocalDate) inv.getArgument(0)).getDayOfWeek();
+      return day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY;
+    });
+    marketFeatures = new MarketFeatureService(named, properties, new MarketTrendService(named, properties), new TradingCalendar(calendar));
     jdbc.update("TRUNCATE tb_advisor_signal_ic_daily");
     jdbc.update("DELETE FROM tb_stock_daily_metric WHERE trade_date > ?", BASE);
     jdbc.update("DELETE FROM tb_stock_daily_price WHERE trade_date > ?", BASE);
@@ -130,6 +136,7 @@ class AdvisorScreeningPgTest {
     }
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_index_metric");
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_sector_daily");
+    jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_market_breadth_daily");
     ScreeningResult after = screening.screen(BASE);
     assertThat(after.candidates().stream().map(CandidateRow::ticker).toList())
         .containsExactlyElementsOf(before.candidates().stream().map(CandidateRow::ticker).toList());
@@ -208,6 +215,27 @@ class AdvisorScreeningPgTest {
     assertThat(f.topSectors().getFirst().members()).isEqualTo(10);
     assertThat(f.flows()).isEmpty();
     assertThat(f.global()).isEmpty();
+    // advice-v2: 관측 기준일·적용 구간·규칙 추세
+    assertThat(f.globalAsOf()).as("해외 데이터 없음").isNull();
+    assertThat(f.globalAgeTradingDays()).isNull();
+    assertThat(f.flowAsOf()).isNull();
+    assertThat(f.sectorAsOf()).isEqualTo(BASE);
+    assertThat(f.entryDate()).isAfter(BASE);
+    assertThat(f.exitDate()).isAfter(f.entryDate());
+    assertThat(f.trends()).extracting(kr.hvy.blog.modules.advisor.domain.model.MarketTrend::indexCode).containsExactly("0001", "1001");
+    kr.hvy.blog.modules.advisor.domain.model.MarketTrend kospi = f.trendOf("0001");
+    assertThat(kospi.tradeDate()).isEqualTo(BASE);
+    assertThat(kospi.components()).as("지수 상수 2500 → MA·60일 성분 0, 모든 종목이 MA20(90) 위라 breadth +1")
+        .containsEntry("ma20", 0).containsEntry("ma60", 0).containsEntry("ma120", 0).containsEntry("ret60", 0).containsEntry("breadth", 1);
+    assertThat(kospi.score()).isEqualTo(1);
+    assertThat(kospi.code()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.SIDEWAYS);
+    assertThat(kospi.breadth()).isEqualTo(1.0);
+    assertThat(kospi.days()).isEqualTo(30);
+    assertThat(kospi.base()).isNotNull();
+    assertThat(kospi.base().episodes()).as("진행 중인 구간만 있어 완료된 에피소드 없음").isZero();
+    assertThat(kospi.base().fwd5().n()).isEqualTo(25);
+    assertThat(kospi.base().fwd5().mean()).isEqualTo(0.0);
+    assertThat(f.dataAsOf()).containsEntry("domestic", BASE.toString()).containsEntry("flowProvisional", true);
   }
 
   // ---------- 합성 데이터 ----------
@@ -236,6 +264,7 @@ class AdvisorScreeningPgTest {
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_adjust_factor");
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_index_metric");
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_sector_daily");
+    jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_market_breadth_daily");
   }
 
   static void insertPrice(JdbcTemplate jdbc, String ticker, LocalDate date, double close) {

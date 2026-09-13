@@ -6,9 +6,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.LessonRow;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
+import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
 import kr.hvy.blog.modules.advisor.domain.model.PromptPayload;
 import kr.hvy.blog.modules.advisor.domain.model.ScreeningResult;
 import lombok.RequiredArgsConstructor;
@@ -34,13 +36,14 @@ public class AdvicePromptBuilder {
    * @param scoreboard 실적 블록(없으면 null) — 픽 n 게이트를 넘긴 뒤에만 주입
    * @param lessons    활성 교훈(없으면 빈 목록)
    * @param weights    적용 가중치 (code → weight)
+   * @param quality    게이트가 판정한 데이터 품질 (DEGRADED 면 프롬프트가 확신을 낮추게 한다, null 은 OK)
    */
   public PromptPayload build(MarketFeatures market, ScreeningResult screening, Map<String, Object> scoreboard, List<LessonRow> lessons,
-      Map<String, Double> weights) {
+      Map<String, Double> weights, DataQuality quality) {
     int limit = screening.candidates().size();
     while (true) {
       List<CandidateRow> included = screening.candidates().subList(0, limit);
-      String json = AdvisorJson.write(payload(market, screening, included, scoreboard, lessons, weights));
+      String json = AdvisorJson.write(payload(market, screening, included, scoreboard, lessons, weights, quality));
       if (json.length() <= properties.getPrompt().getMaxInputChars() || limit <= Math.max(properties.getPickMin(), 5)) {
         List<String> tickers = included.stream().map(CandidateRow::ticker).toList();
         LinkedHashSet<String> sectors = new LinkedHashSet<>();
@@ -55,7 +58,7 @@ public class AdvicePromptBuilder {
   }
 
   Map<String, Object> payload(MarketFeatures market, ScreeningResult screening, List<CandidateRow> candidates, Map<String, Object> scoreboard,
-      List<LessonRow> lessons, Map<String, Double> weights) {
+      List<LessonRow> lessons, Map<String, Double> weights, DataQuality quality) {
     Map<String, Object> root = new LinkedHashMap<>();
     root.put("asOf", screening.baseDate().toString());
     root.put("horizonDays", properties.getHorizonDays());
@@ -103,7 +106,22 @@ public class AdvicePromptBuilder {
     Map<String, Object> sigma = new LinkedHashMap<>();
     market.sigma5d().forEach((k, v) -> sigma.put(k, round(v)));
     m.put("sigma5d", sigma);
+    if (market.trends() != null && !market.trends().isEmpty()) {
+      m.put("trend", market.trends().stream().map(AdvicePromptBuilder::trendRow).toList());
+    }
     root.put("market", m);
+
+    // 관측 기준일·적용 구간·품질 — 새 루트 키는 market 뒤에 둔다 (asOf·horizonDays·market 순서에 기대는 소비자가 있다)
+    root.put("dataAsOf", market.dataAsOf());
+    if (market.entryDate() != null && market.exitDate() != null) {
+      Map<String, Object> window = new LinkedHashMap<>();
+      window.put("entry", market.entryDate().toString());
+      window.put("exit", market.exitDate().toString());
+      window.put("entryRule", "다음 영업일 시가");
+      window.put("exitRule", properties.getHorizonDays() + "번째 영업일 종가");
+      root.put("window", window);
+    }
+    root.put("dataQuality", (quality == null ? DataQuality.OK : quality).getCode());
 
     Map<String, Object> sectors = new LinkedHashMap<>();
     sectors.put("columns", SECTOR_COLUMNS);
@@ -134,6 +152,48 @@ public class AdvicePromptBuilder {
     weights.forEach((k, v) -> w.put(k, round(v)));
     root.put("weights", w);
     return root;
+  }
+
+  /**
+   * 규칙 추세 1행: 라벨·점수·성분·지속·이동평균·breadth·기저율. 라벨은 확정 사실이라 LLM 이 바꿀 수 없음을 프롬프트가 명시한다.
+   */
+  private static Map<String, Object> trendRow(MarketTrend t) {
+    Map<String, Object> row = new LinkedHashMap<>();
+    row.put("index", t.indexCode());
+    row.put("code", t.code().getCode());
+    row.put("score", t.score());
+    row.put("components", t.components());
+    row.put("since", str(t.since()));
+    row.put("days", t.days());
+    row.put("close", round(t.close(), 2));
+    row.put("ma20", round(t.ma20(), 2));
+    row.put("ma60", round(t.ma60(), 2));
+    row.put("ma120", round(t.ma120(), 2));
+    row.put("breadth", round(t.breadth()));
+    if (t.base() != null) {
+      Map<String, Object> base = new LinkedHashMap<>();
+      base.put("episodes", t.base().episodes());
+      base.put("medianDays", round(t.base().medianDays(), 1));
+      base.put("fwd5", forward(t.base().fwd5()));
+      base.put("fwd20", forward(t.base().fwd20()));
+      row.put("base", base);
+    }
+    return row;
+  }
+
+  private static Map<String, Object> forward(MarketTrend.Forward f) {
+    Map<String, Object> m = new LinkedHashMap<>();
+    if (f == null) {
+      return m;
+    }
+    m.put("n", f.n());
+    m.put("pUp", round(f.pUp()));
+    m.put("mean", round(f.mean()));
+    return m;
+  }
+
+  private static String str(java.time.LocalDate date) {
+    return date == null ? null : date.toString();
   }
 
   private static List<Object> sectorRow(MarketFeatures.SectorFeature s) {

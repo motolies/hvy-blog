@@ -296,6 +296,7 @@ public class LessonService {
   static Map<String, Object> condition(LessonProposalResponse.Condition c) {
     Map<String, Object> m = new LinkedHashMap<>();
     m.put("regime", c.regime());
+    m.put("trend", c.trend());
     m.put("signal", c.signal());
     m.put("op", c.op());
     m.put("pct", c.pct());

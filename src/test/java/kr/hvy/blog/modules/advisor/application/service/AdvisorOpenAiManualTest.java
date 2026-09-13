@@ -42,7 +42,7 @@ class AdvisorOpenAiManualTest {
     AdvisorProperties properties = new AdvisorProperties(new MockEnvironment());
     AdvicePromptBuilder builder = new AdvicePromptBuilder(properties);
     PromptPayload payload = builder.build(AdvicePromptBuilderTest.market(), AdvicePromptBuilderTest.screening(8), null, List.of(),
-        Map.of("MOM_20D", 0.12, "FOREIGN_FLOW", 0.12));
+        Map.of("MOM_20D", 0.12, "FOREIGN_FLOW", 0.12), kr.hvy.blog.modules.advisor.domain.code.DataQuality.OK);
     String schema = AdviceSchemaFactory.schemaJson(payload.candidateTickers(), payload.sectorCodes());
 
     MarketJudgeClient client = new MarketJudgeClient(chatClient, model);
@@ -54,6 +54,10 @@ class AdvisorOpenAiManualTest {
     assertThat(result.response().picks()).isNotEmpty();
     assertThat(result.response().picks()).allMatch(p -> payload.candidateTickers().contains(p.ticker()));
     assertThat(result.response().picks()).allMatch(p -> AdviceSchemaFactory.CONVICTIONS.contains(p.conviction()));
+    // advice-v2: 2단계 중첩 객체(trendOutlook.kospi.invalidation)를 strict 가 수용하는지가 실측의 핵심
+    assertThat(result.response().trendOutlook()).as("trendOutlook 블록").isNotNull();
+    assertThat(result.response().trendOutlook().kospi().persist()).isIn("WITHIN_5D", "ABOUT_20D", "BEYOND_20D");
+    assertThat(result.response().trendOutlook().kospi().invalidation()).isIn("NONE", "BELOW_MA20", "BELOW_MA60", "ABOVE_MA20", "ABOVE_MA60");
     assertThat(result.usage().getPromptTokens()).isLessThan(8000);
   }
 }

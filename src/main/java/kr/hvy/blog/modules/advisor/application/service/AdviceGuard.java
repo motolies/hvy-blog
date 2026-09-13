@@ -9,12 +9,16 @@ import java.util.Set;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.client.llm.AdviceResponse;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
+import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
+import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
+import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.CitedFeature;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
+import kr.hvy.blog.modules.advisor.domain.model.TrendOutlook;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -39,9 +43,10 @@ public final class AdviceGuard {
   static final double CITED_REL_TOLERANCE = 0.02;
   static final double CITED_ABS_TOLERANCE = 1e-4;
 
-  /** 검증 결과 */
+  /** 검증 결과. outlooks 는 지수별 추세 지속 전망(0001·1001 순, 폴백 포함 항상 2개) */
   public record Result(MarketRegimeCode regime, DirectionCall kospiDir, DirectionCall kosdaqDir, double pUp, String rationale,
-                       List<SectorCall> sectors, List<PickRow> picks, String summary, Map<String, Object> stats, int originalPicks, int removed) {
+                       List<SectorCall> sectors, List<PickRow> picks, String summary, Map<String, Object> stats, int originalPicks, int removed,
+                       List<TrendOutlook> outlooks) {
 
     public boolean tooFew(int min) {
       return picks.size() < min;
@@ -58,7 +63,11 @@ public final class AdviceGuard {
     this.properties = properties;
   }
 
-  public Result validate(AdviceResponse response, List<CandidateRow> candidates, Map<String, String> sectorNames) {
+  /**
+   * @param trends 지수 코드 → 규칙 추세 (무효화 조건의 방향 일관성 검사용, 없으면 빈 맵)
+   */
+  public Result validate(AdviceResponse response, List<CandidateRow> candidates, Map<String, String> sectorNames,
+      Map<String, MarketTrendCode> trends) {
     Map<String, Object> stats = new LinkedHashMap<>();
     Map<String, CandidateRow> byTicker = new LinkedHashMap<>();
     candidates.forEach(c -> byTicker.put(c.ticker(), c));
@@ -70,6 +79,12 @@ public final class AdviceGuard {
     DirectionCall kosdaq = enumOr(DirectionCall.class, r == null ? null : r.kosdaqDir(), DirectionCall.NEUTRAL, stats, "badKosdaqDir");
     double pUp = conviction(r == null ? null : r.pUp(), stats, "clampedPUp");
     String rationale = sanitize(r == null ? null : r.rationale(), RATIONALE_LIMIT, stats);
+
+    // ----- 추세 지속 전망 (오류는 폴백·기록만, 픽 제거율에 넣지 않는다) -----
+    AdviceResponse.TrendOutlookView tv = response.trendOutlook();
+    List<TrendOutlook> outlooks = List.of(
+        outlook("0001", tv == null ? null : tv.kospi(), trends == null ? null : trends.get("0001"), stats),
+        outlook("1001", tv == null ? null : tv.kosdaq(), trends == null ? null : trends.get("1001"), stats));
 
     // ----- 섹터 -----
     List<SectorCall> sectors = new ArrayList<>();
@@ -152,7 +167,26 @@ public final class AdviceGuard {
     stats.put("originalPicks", original);
     stats.put("removed", removed);
     return new Result(regime, kospi, kosdaq, pUp, rationale, sectors, ranked, sanitize(response.summary(), SUMMARY_LIMIT, stats), stats,
-        original, removed);
+        original, removed, outlooks);
+  }
+
+  /**
+   * 지수 1개의 추세 전망 검증: enum 밖은 ABOUT_20D / NONE 폴백, 추세 방향과 모순되는 무효화(강세인데 상향 돌파 등)는 NONE 으로 강등. 블록 자체가 없으면
+   * (구버전 응답) missingOutlook 만 세고 기본값을 돌려준다.
+   */
+  static TrendOutlook outlook(String indexCode, AdviceResponse.Outlook o, MarketTrendCode trend, Map<String, Object> stats) {
+    if (o == null) {
+      increment(stats, "missingOutlook");
+      return new TrendOutlook(indexCode, TrendHorizon.ABOUT_20D, 0.55, InvalidationType.NONE);
+    }
+    TrendHorizon persist = enumOr(TrendHorizon.class, o.persist(), TrendHorizon.ABOUT_20D, stats, "badPersist");
+    double confidence = conviction(o.confidence(), stats, "clampedOutlookConfidence");
+    InvalidationType invalidation = enumOr(InvalidationType.class, o.invalidation(), InvalidationType.NONE, stats, "badInvalidation");
+    if (!invalidation.consistentWith(trend)) {
+      increment(stats, "inconsistentInvalidation");
+      invalidation = InvalidationType.NONE;
+    }
+    return new TrendOutlook(indexCode, persist, confidence, invalidation);
   }
 
   /**

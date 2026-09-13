@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.domain.code.LessonScope;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
+import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.SignalCode;
 
 /**
@@ -18,6 +19,7 @@ public final class LessonSchemaFactory {
   public static String schemaJson(List<String> sectorCodes) {
     Map<String, Object> condition = AdviceSchemaFactory.object(Map.of(
         "regime", nullableEnum(List.of(MarketRegimeCode.RISK_ON.getCode(), MarketRegimeCode.NEUTRAL.getCode(), MarketRegimeCode.RISK_OFF.getCode())),
+        "trend", nullableEnum(List.of(MarketTrendCode.BULL.getCode(), MarketTrendCode.SIDEWAYS.getCode(), MarketTrendCode.BEAR.getCode())),
         "signal", nullableEnum(SignalCode.scorable().stream().map(SignalCode::getCode).toList()),
         "op", nullableEnum(List.of(">=", "<", ">", "<=")),
         "pct", nullable("number"),

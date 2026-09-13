@@ -193,6 +193,12 @@ public class WeeklyReviewJob implements AdvisorJob {
       if (regime.calls() > 0) {
         kpiLines.add(String.format("국면 적중 %.0f%% (n=%d) · Brier skill %.2f", pct(regime.hitRate()), regime.calls(), nz(regime.brierSkill())));
       }
+      // 추세 전망은 20영업일 뒤에야 첫 행이 생기고 4주간은 적중률을 판정하지 않는다(운영 문서 §7)
+      AdvisorKpiService.TrendSummary trend = kpi.trendSummary(AdviceVariant.LIVE, from, today);
+      if (trend.calls() > 0) {
+        kpiLines.add(String.format("%d일 추세 지속 적중 %.0f%% (n=%d) · 무효화 신호 적중 %.0f%% (n=%d)", properties.getTrend().getScoreHorizonDays(),
+            pct(trend.hitRate()), trend.calls(), pct(trend.invalidationHitRate()), trend.invalidationCalls()));
+      }
       if (kpiLines.isEmpty()) {
         kpiLines.add("채점된 픽 없음");
       }

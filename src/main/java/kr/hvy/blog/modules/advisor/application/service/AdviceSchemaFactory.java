@@ -5,8 +5,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
+import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
+import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
+import kr.hvy.common.core.code.base.EnumCode;
 
 /**
  * 판단 출력 JSON 스키마(OpenAI strict). 그날의 후보 티커·섹터 코드를 enum 으로 주입해 환각을 API 계층에서 막는다.
@@ -40,11 +43,28 @@ public final class AdviceSchemaFactory {
     Map<String, Object> sector = object(Map.of(
         "code", sectorCodes == null || sectorCodes.isEmpty() ? string() : enumOf(sectorCodes),
         "reason", string()));
+    // 추세 지속 전망: 규칙이 확정한 추세가 얼마나 더 갈지(버킷) + 깨졌다고 볼 첫 신호(MA 이벤트 enum, 수치 없음)
+    Map<String, Object> outlook = object(Map.of(
+        "persist", enumOf(codes(TrendHorizon.values())),
+        "confidence", enumOf(CONVICTIONS),
+        "invalidation", enumOf(codes(InvalidationType.values()))));
+    Map<String, Object> trendOutlook = object(Map.of(
+        "kospi", outlook,
+        "kosdaq", outlook));
     return object(Map.of(
         "regime", regime,
+        "trendOutlook", trendOutlook,
         "sectors", array(sector),
         "picks", array(pick),
         "summary", string()));
+  }
+
+  private static List<String> codes(EnumCode<String>[] values) {
+    List<String> list = new ArrayList<>();
+    for (EnumCode<String> v : values) {
+      list.add(v.getCode());
+    }
+    return list;
   }
 
   /**

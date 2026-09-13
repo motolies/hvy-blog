@@ -13,7 +13,11 @@ import lombok.Getter;
 @AllArgsConstructor
 public enum CallSubject implements EnumCode<String> {
   INDEX("INDEX", "지수 방향"),
-  SECTOR("SECTOR", "주도 섹터");
+  SECTOR("SECTOR", "주도 섹터"),
+  /** 추세 지속 기간 버킷 (h=20 진단 패스, Brier 는 적중 기준 — INDEX 의 부호 기준과 섞지 않는다) */
+  TREND("TREND", "추세 지속"),
+  /** 무효화 조건의 조기 신호 적중 (혼동행렬: 전환·발동 일치가 적중) */
+  TREND_INV("TREND_INV", "추세 무효화");
 
   private final String code;
   private final String desc;

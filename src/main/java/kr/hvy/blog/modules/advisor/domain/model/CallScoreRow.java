@@ -25,5 +25,7 @@ public record CallScoreRow(
     Double band,
     String actualDir,
     Boolean hit,
-    Double brier) {
+    Double brier,
+    /** TREND: 라벨 전환일 | TREND_INV: 무효화 조건 최초 충족일 (없으면 null) */
+    java.time.LocalDate eventDate) {
 }

@@ -149,6 +149,13 @@ CREATE TABLE IF NOT EXISTS tb_advisor_advice
     regime_rationale   VARCHAR(1000)           DEFAULT NULL,
     leading_sectors    JSONB                   DEFAULT NULL,
     summary            VARCHAR(1000)           DEFAULT NULL,
+    trend_kospi        VARCHAR(20)             DEFAULT NULL,
+    trend_kosdaq       VARCHAR(20)             DEFAULT NULL,
+    trend_json         JSONB                   DEFAULT NULL,
+    outlook_json       JSONB                   DEFAULT NULL,
+    data_as_of_json    JSONB                   DEFAULT NULL,
+    entry_date         DATE                    DEFAULT NULL,
+    exit_date          DATE                    DEFAULT NULL,
     prompt_version     VARCHAR(40)             DEFAULT NULL,
     model              VARCHAR(80)             DEFAULT NULL,
     system_fingerprint VARCHAR(80)             DEFAULT NULL,
@@ -175,6 +182,13 @@ COMMENT ON COLUMN tb_advisor_advice.p_up               IS '국면 예측 신뢰�
 COMMENT ON COLUMN tb_advisor_advice.regime_rationale   IS '국면 근거';
 COMMENT ON COLUMN tb_advisor_advice.leading_sectors    IS '주도 섹터 [{code,name,reason}]';
 COMMENT ON COLUMN tb_advisor_advice.summary            IS '총평 (300자)';
+COMMENT ON COLUMN tb_advisor_advice.trend_kospi        IS 'KOSPI 규칙 기반 중기 추세: BULL | SIDEWAYS | BEAR (LLM 이 아니라 TrendSql 이 확정, advice-v2)';
+COMMENT ON COLUMN tb_advisor_advice.trend_kosdaq       IS 'KOSDAQ 규칙 기반 중기 추세';
+COMMENT ON COLUMN tb_advisor_advice.trend_json         IS '추세 상세 [{indexCode,code,score,components,since,days,ma20,ma60,ma120,breadth,base}]';
+COMMENT ON COLUMN tb_advisor_advice.outlook_json       IS 'LLM 추세 지속 전망 [{indexCode,persist,confidence,invalidation}] — h=20 패스에서 TREND·TREND_INV 로 채점';
+COMMENT ON COLUMN tb_advisor_advice.data_as_of_json    IS '입력 관측 기준일 {domestic,flow,sector,global,globalAgeTradingDays}';
+COMMENT ON COLUMN tb_advisor_advice.entry_date         IS '적용 진입일(예정) = 기준일 다음 영업일 시가. 실제는 채점 시 캘린더로 재확정';
+COMMENT ON COLUMN tb_advisor_advice.exit_date          IS '적용 청산일(예정) = horizon 번째 영업일 종가';
 COMMENT ON COLUMN tb_advisor_advice.prompt_version     IS '프롬프트 버전';
 COMMENT ON COLUMN tb_advisor_advice.model              IS '모델 ID';
 COMMENT ON COLUMN tb_advisor_advice.system_fingerprint IS 'OpenAI system_fingerprint (재현성 추적)';
@@ -304,37 +318,39 @@ CREATE TABLE IF NOT EXISTS tb_advisor_call_score
     horizon_days SMALLINT         NOT NULL,
     stage        VARCHAR(20)      NOT NULL,
     status       VARCHAR(20)      NOT NULL,
-    predicted    VARCHAR(10)      NOT NULL,
+    predicted    VARCHAR(20)      NOT NULL,
     p_up         DOUBLE PRECISION          DEFAULT NULL,
     base_value   DOUBLE PRECISION          DEFAULT NULL,
     exit_value   DOUBLE PRECISION          DEFAULT NULL,
     actual_ret   DOUBLE PRECISION          DEFAULT NULL,
     bench_ret    DOUBLE PRECISION          DEFAULT NULL,
     band         DOUBLE PRECISION          DEFAULT NULL,
-    actual_dir   VARCHAR(10)               DEFAULT NULL,
+    actual_dir   VARCHAR(20)               DEFAULT NULL,
     hit          BOOLEAN                   DEFAULT NULL,
     brier        DOUBLE PRECISION          DEFAULT NULL,
+    event_date   DATE                      DEFAULT NULL,
     scored_at    TIMESTAMPTZ(6)   NOT NULL DEFAULT NOW(),
     CONSTRAINT pk_advisor_call_score PRIMARY KEY (advice_id, subject_type, subject_code, horizon_days)
 );
 
-COMMENT ON TABLE  tb_advisor_call_score              IS '국면(지수 방향)·주도 섹터 콜 채점';
+COMMENT ON TABLE  tb_advisor_call_score              IS '국면(지수 방향)·주도 섹터·추세 지속·무효화 콜 채점';
 COMMENT ON COLUMN tb_advisor_call_score.advice_id    IS '판단 식별자';
-COMMENT ON COLUMN tb_advisor_call_score.subject_type IS 'INDEX (0001/1001 방향) | SECTOR (주도 섹터)';
+COMMENT ON COLUMN tb_advisor_call_score.subject_type IS 'INDEX (0001/1001 방향) | SECTOR (주도 섹터) | TREND (추세 지속 버킷, h=20) | TREND_INV (무효화 조기 신호, h=20)';
 COMMENT ON COLUMN tb_advisor_call_score.subject_code IS '지수 코드 또는 섹터 코드';
-COMMENT ON COLUMN tb_advisor_call_score.horizon_days IS '호라이즌 (5)';
+COMMENT ON COLUMN tb_advisor_call_score.horizon_days IS '호라이즌 (INDEX·SECTOR 5 + 진단 1·20, TREND·TREND_INV 20)';
 COMMENT ON COLUMN tb_advisor_call_score.stage        IS 'PROVISIONAL | CONFIRMED';
 COMMENT ON COLUMN tb_advisor_call_score.status       IS 'SCORED | MISSING';
-COMMENT ON COLUMN tb_advisor_call_score.predicted    IS 'INDEX: UP|NEUTRAL|DOWN, SECTOR: LEAD (주도 예측)';
+COMMENT ON COLUMN tb_advisor_call_score.predicted    IS 'INDEX: UP|NEUTRAL|DOWN, SECTOR: LEAD, TREND: WITHIN_5D|ABOUT_20D|BEYOND_20D, TREND_INV: BELOW_MA20|BELOW_MA60|ABOVE_MA20|ABOVE_MA60';
 COMMENT ON COLUMN tb_advisor_call_score.p_up         IS 'INDEX 예측 신뢰도';
 COMMENT ON COLUMN tb_advisor_call_score.base_value   IS '기준일 종가 (close-to-close)';
 COMMENT ON COLUMN tb_advisor_call_score.exit_value   IS '청산일 종가';
 COMMENT ON COLUMN tb_advisor_call_score.actual_ret   IS '실현 수익률 (지수 또는 섹터 지수)';
 COMMENT ON COLUMN tb_advisor_call_score.bench_ret    IS 'SECTOR: 같은 구간 시장 지수 수익률 (INDEX 는 NULL)';
 COMMENT ON COLUMN tb_advisor_call_score.band         IS 'INDEX: NEUTRAL 판정 밴드 = band-sigma × σ_5d';
-COMMENT ON COLUMN tb_advisor_call_score.actual_dir   IS 'INDEX: |ret| < band 면 NEUTRAL, 아니면 부호';
-COMMENT ON COLUMN tb_advisor_call_score.hit          IS 'INDEX: predicted == actual_dir, SECTOR: actual_ret − bench_ret > 0';
-COMMENT ON COLUMN tb_advisor_call_score.brier        IS 'INDEX: (p_up − 1[ret>0])² (부호 기준, 밴드 무관)';
+COMMENT ON COLUMN tb_advisor_call_score.actual_dir   IS 'INDEX: |ret| < band 면 NEUTRAL, 아니면 부호. TREND: 실현 버킷';
+COMMENT ON COLUMN tb_advisor_call_score.hit          IS 'INDEX·TREND: predicted == actual_dir, SECTOR: actual_ret − bench_ret > 0, TREND_INV: 전환·발동 일치(둘 다 없음 또는 ±허용일 안)';
+COMMENT ON COLUMN tb_advisor_call_score.brier        IS 'INDEX: (p_up − 1[ret>0])² 부호 기준 | TREND: (p_up − 1[hit])² 적중 기준 — KPI 에서 섞지 않는다';
+COMMENT ON COLUMN tb_advisor_call_score.event_date   IS 'TREND: 라벨 전환일 | TREND_INV: 무효화 조건 최초 충족일 (없으면 NULL)';
 COMMENT ON COLUMN tb_advisor_call_score.scored_at    IS '채점 시각';
 
 
@@ -465,3 +481,18 @@ COMMENT ON COLUMN tb_advisor_prompt_input.user_payload   IS '사용자 메시지
 COMMENT ON COLUMN tb_advisor_prompt_input.options_json   IS '모델·출력 상한·응답 스키마';
 COMMENT ON COLUMN tb_advisor_prompt_input.raw_output     IS '가드 이전 원본 응답';
 COMMENT ON COLUMN tb_advisor_prompt_input.created_at     IS '생성일시';
+
+-- =============================================
+-- 마이그레이션 (advice-v2, 2026-09-13). 신규 설치는 위 CREATE 본문에 이미 포함돼 있고, 기존 설치는 아래가 컬럼을 보탠다. 재실행 안전.
+-- CREATE TABLE IF NOT EXISTS 는 있는 테이블에 컬럼을 넣지 않으므로 본문과 이 블록을 함께 고친다. varchar 확대는 메타데이터 변경이라 재작성 없음.
+-- =============================================
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS trend_kospi     VARCHAR(20) DEFAULT NULL;
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS trend_kosdaq    VARCHAR(20) DEFAULT NULL;
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS trend_json      JSONB       DEFAULT NULL;
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS outlook_json    JSONB       DEFAULT NULL;
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS data_as_of_json JSONB       DEFAULT NULL;
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS entry_date      DATE        DEFAULT NULL;
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS exit_date       DATE        DEFAULT NULL;
+ALTER TABLE tb_advisor_call_score ALTER COLUMN predicted  TYPE VARCHAR(20);
+ALTER TABLE tb_advisor_call_score ALTER COLUMN actual_dir TYPE VARCHAR(20);
+ALTER TABLE tb_advisor_call_score ADD COLUMN IF NOT EXISTS event_date DATE DEFAULT NULL;

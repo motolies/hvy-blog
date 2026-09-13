@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
+import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.SignalValue;
 import org.junit.jupiter.api.DisplayName;
@@ -20,20 +21,31 @@ class LessonConditionTest {
       .signals(Map.of("TV_SURGE", new SignalValue(0.95, 0.1, 2.1), "MOM_20D", new SignalValue(0.4, 0.12, 0.01))).appliedLessonIds(List.of()).build();
 
   @Test
-  @DisplayName("regime·sector·signal(op,pct) 조합이 전부 참일 때만 매치, null 키는 무시")
+  @DisplayName("regime·trend·sector·signal(op,pct) 조합이 전부 참일 때만 매치, null 키는 무시")
   void matches() {
-    assertThat(LessonCondition.matches(Map.of("regime", "RISK_OFF", "signal", "TV_SURGE", "op", ">=", "pct", 0.9), candidate, MarketRegimeCode.RISK_OFF)).isTrue();
-    assertThat(LessonCondition.matches(Map.of("regime", "RISK_OFF", "signal", "TV_SURGE", "op", ">=", "pct", 0.9), candidate, MarketRegimeCode.RISK_ON)).isFalse();
-    assertThat(LessonCondition.matches(Map.of("regime", "RISK_OFF"), candidate, null)).as("국면 미상이면 국면 조건은 거짓").isFalse();
-    assertThat(LessonCondition.matches(Map.of("sector", "G2510"), candidate, null)).isTrue();
-    assertThat(LessonCondition.matches(Map.of("sector", "G3020"), candidate, null)).isFalse();
-    assertThat(LessonCondition.matches(Map.of("signal", "MOM_20D", "op", "<", "pct", 0.5), candidate, null)).isTrue();
-    assertThat(LessonCondition.matches(Map.of("signal", "MOM_20D", "op", ">", "pct", 0.5), candidate, null)).isFalse();
-    assertThat(LessonCondition.matches(Map.of("signal", "VOL_20D", "op", ">", "pct", 0.5), candidate, null)).as("시그널 없음").isFalse();
+    assertThat(LessonCondition.matches(Map.of("regime", "RISK_OFF", "signal", "TV_SURGE", "op", ">=", "pct", 0.9), candidate, MarketRegimeCode.RISK_OFF, null)).isTrue();
+    assertThat(LessonCondition.matches(Map.of("regime", "RISK_OFF", "signal", "TV_SURGE", "op", ">=", "pct", 0.9), candidate, MarketRegimeCode.RISK_ON, null)).isFalse();
+    assertThat(LessonCondition.matches(Map.of("regime", "RISK_OFF"), candidate, null, null)).as("국면 미상이면 국면 조건은 거짓").isFalse();
+    assertThat(LessonCondition.matches(Map.of("sector", "G2510"), candidate, null, null)).isTrue();
+    assertThat(LessonCondition.matches(Map.of("sector", "G3020"), candidate, null, null)).isFalse();
+    assertThat(LessonCondition.matches(Map.of("signal", "MOM_20D", "op", "<", "pct", 0.5), candidate, null, null)).isTrue();
+    assertThat(LessonCondition.matches(Map.of("signal", "MOM_20D", "op", ">", "pct", 0.5), candidate, null, null)).isFalse();
+    assertThat(LessonCondition.matches(Map.of("signal", "VOL_20D", "op", ">", "pct", 0.5), candidate, null, null)).as("시그널 없음").isFalse();
     Map<String, Object> nullRegime = new HashMap<>();
     nullRegime.put("regime", null);
     nullRegime.put("sector", "G2510");
-    assertThat(LessonCondition.matches(nullRegime, candidate, null)).as("null 키는 조건에서 제외").isTrue();
+    assertThat(LessonCondition.matches(nullRegime, candidate, null, null)).as("null 키는 조건에서 제외").isTrue();
+  }
+
+  @Test
+  @DisplayName("trend 조건은 후보 소속 시장의 규칙 추세로 판정하고, 추세 미상이면 거짓 (lesson-v2)")
+  void matchesTrend() {
+    assertThat(LessonCondition.matches(Map.of("trend", "BULL", "sector", "G2510"), candidate, null, MarketTrendCode.BULL)).isTrue();
+    assertThat(LessonCondition.matches(Map.of("trend", "BULL"), candidate, null, MarketTrendCode.BEAR)).isFalse();
+    assertThat(LessonCondition.matches(Map.of("trend", "BULL"), candidate, null, null)).as("추세 미상").isFalse();
+    assertThat(LessonCondition.matches(Map.of("trend", "SIDEWAYS", "regime", "RISK_ON"), candidate, MarketRegimeCode.RISK_ON, MarketTrendCode.SIDEWAYS)).isTrue();
+    assertThat(LessonCondition.isWellFormed(Map.of("trend", "BEAR"))).isTrue();
+    assertThat(LessonCondition.isWellFormed(Map.of("trend", "BEAR", "mood", "x"))).as("모르는 키").isFalse();
   }
 
   @Test

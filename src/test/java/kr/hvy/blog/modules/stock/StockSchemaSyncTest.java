@@ -96,7 +96,7 @@ class StockSchemaSyncTest {
             .contains("DROP VIEW IF EXISTS " + view.group(1) + ";");
       }
     }
-    assertThat(objects).isEqualTo(6); // MV 3 + 뷰 3 (종목 일별 지표는 테이블)
+    assertThat(objects).isEqualTo(7); // MV 4 (수정계수·지수 지표·섹터·시장 breadth) + 뷰 3 (종목 일별 지표는 테이블)
   }
 
   /**

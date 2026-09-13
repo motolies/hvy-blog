@@ -30,7 +30,8 @@ public class DerivedMetricRefreshService implements CollectJob {
       DerivedViewRefresher.MV_ADJUST_FACTOR,
       DerivedViewRefresher.TB_DAILY_METRIC,
       "mv_stock_index_metric",
-      "mv_stock_sector_daily");
+      "mv_stock_sector_daily",
+      "mv_stock_market_breadth_daily");
   /** 증분 갱신 경고 임계. MV 고정 비용 ≈5분에 지표 증분을 더한 값이 이를 넘으면 무언가 느려진 것이다. */
   static final long WARN_INCREMENTAL_MS = 10 * 60_000L;
   /** 전체 재계산 경고 임계. 실측 22분 기준 여유를 두었고 WEEKLY 락(2시간) 안이어야 한다. */

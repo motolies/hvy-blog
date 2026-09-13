@@ -11,7 +11,8 @@ public record LessonProposalResponse(List<Proposal> proposals, List<String> null
   public record Proposal(String scope, Condition condition, String observation, Evidence evidence, String rule) {
   }
 
-  public record Condition(String regime, String signal, String op, Double pct, String sector) {
+  /** trend 는 lesson-v2 에서 추가된 규칙 기반 중기 추세 조건 (BULL|SIDEWAYS|BEAR|null) */
+  public record Condition(String regime, String trend, String signal, String op, Double pct, String sector) {
   }
 
   public record Evidence(Integer n, String from, String to, Double excess, Double t) {

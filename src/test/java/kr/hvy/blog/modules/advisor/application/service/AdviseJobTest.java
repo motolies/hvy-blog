@@ -68,6 +68,8 @@ class AdviseJobTest {
   /** 후보 T00~T02 를 고르고 T00 은 입력 특징(r20=0.012345)을 허용오차 안에서 인용 */
   static final String REPLY = """
       {"regime":{"code":"RISK_ON","kospiDir":"UP","kosdaqDir":"NEUTRAL","pUp":"0.70","rationale":"근거"},
+       "trendOutlook":{"kospi":{"persist":"BEYOND_20D","confidence":"0.70","invalidation":"BELOW_MA20"},
+                       "kosdaq":{"persist":"WITHIN_5D","confidence":"0.60","invalidation":"NONE"}},
        "sectors":[{"code":"G2510","reason":"반도체"}],
        "picks":[{"ticker":"T00","direction":"LONG","conviction":"0.80","thesis":"t","risk":"r","citedFeatures":[{"name":"r20","value":0.0123}]},
                 {"ticker":"T01","direction":"LONG","conviction":"0.65","thesis":"t","risk":"r","citedFeatures":[]},
@@ -134,6 +136,17 @@ class AdviseJobTest {
     assertThat(live.model()).isEqualTo("judge-x");
     assertThat(live.weightSetId()).isEqualTo(1L);
     assertThat(live.leadingSectors()).hasSize(1);
+    assertThat(live.promptVersion()).isEqualTo("advice-v2");
+    assertThat(live.trendKospi()).as("규칙 추세는 시장 특징에서").isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
+    assertThat(live.trendKosdaq()).as("KOSDAQ 추세 없음(픽스처)").isNull();
+    assertThat(live.outlooks()).hasSize(2);
+    assertThat(live.outlookOf("0001").persist()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.TrendHorizon.BEYOND_20D);
+    assertThat(live.outlookOf("0001").invalidation()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.InvalidationType.BELOW_MA20);
+    assertThat(live.entryDate()).isEqualTo(LocalDate.of(2026, 9, 14));
+    assertThat(live.exitDate()).isEqualTo(LocalDate.of(2026, 9, 18));
+    assertThat(live.dataAsOf()).containsEntry("global", "2026-09-10");
+    AdviceHeader quant = headers.getAllValues().get(0);
+    assertThat(quant.trendKospi()).as("정량 섀도도 추세 상태를 남긴다(KPI 절단용)").isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
     @SuppressWarnings("unchecked")
     ArgumentCaptor<List<PickRow>> picks = ArgumentCaptor.forClass(List.class);
     verify(adviceWriter, org.mockito.Mockito.times(2)).insertPicks(anyLong(), picks.capture());

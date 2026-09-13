@@ -69,6 +69,7 @@ public final class AdvisorSyntheticData {
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_adjust_factor");
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_index_metric");
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_sector_daily");
+    jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_market_breadth_daily");
   }
 
   public static void insertPrice(JdbcTemplate jdbc, String ticker, LocalDate date, double close) {

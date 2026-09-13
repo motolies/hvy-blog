@@ -6,6 +6,7 @@
 -- 이 파일은 schema-postgres.sql 에 임베드하지 않는다 (DROP TABLE ... CASCADE 가 파생 객체를 함께 지운다).
 -- =============================================
 DROP VIEW IF EXISTS vw_stock_universe_daily;
+DROP MATERIALIZED VIEW IF EXISTS mv_stock_market_breadth_daily;
 DROP MATERIALIZED VIEW IF EXISTS mv_stock_sector_daily;
 DROP MATERIALIZED VIEW IF EXISTS mv_stock_daily_metric;   -- 2026-09-08 테이블(tb_stock_daily_metric)로 전환된 옛 MV, 남아 있으면 제거
 DROP VIEW IF EXISTS vw_stock_daily_price_adj;

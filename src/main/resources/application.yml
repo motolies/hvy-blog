@@ -253,7 +253,7 @@ advisor:
     version: advice-v4            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스 (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
   news:                           # 뉴스 입력(advice-v4). tb_stock_news(scheduler.stock-news) 가 쌓여 있어야 하고 KisNewsTitleManualTest 실측 뒤 켠다
-    enabled: false
+    enabled: ${NEWS_ENABLED:false}
     window-hours: 36              # 판단 시각부터 거슬러 올라가는 창 (전일 마감 후 기사 포함)
     market-limit: 12              # 시장 헤드라인 상한
     per-ticker-limit: 3           # 후보 종목당 상한

@@ -12,10 +12,15 @@ public record KisPriceResponse(
     @JsonProperty("output") Output output
 ) implements KisEnvelope {
 
-  /** output: 현재가 스냅샷 */
+  /** output: 현재가 스냅샷. 전일 대비·누적 거래량은 advisor 장중 점검이 쓴다(2026-09-13) */
   public record Output(
       @JsonProperty("stck_shrn_iscd") String ticker,
       @JsonProperty("stck_prpr") String currentPrice,
+      @JsonProperty("prdy_vrss") String prevDiff,
+      @JsonProperty("prdy_vrss_sign") String prevDiffSign,
+      @JsonProperty("prdy_ctrt") String changeRate,
+      @JsonProperty("acml_vol") String accumulatedVolume,
+      @JsonProperty("acml_tr_pbmn") String accumulatedTradingValue,
       @JsonProperty("hts_avls") String marketCapHundredMillion,
       @JsonProperty("lstn_stcn") String listedShares,
       @JsonProperty("per") String per,

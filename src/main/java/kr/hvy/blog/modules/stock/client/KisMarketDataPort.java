@@ -13,6 +13,7 @@ import kr.hvy.blog.modules.stock.client.dto.KisOverseasDailyPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisOverseasIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisHolidayResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisIndexPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
 import kr.hvy.blog.modules.stock.client.dto.KsdInfoPage;
@@ -58,9 +59,14 @@ public interface KisMarketDataPort {
       KisCallContext context);
 
   /**
-   * 현재가 스냅샷 (시총·PER·PBR·52주·외인 소진율).
+   * 현재가 스냅샷 (시총·PER·PBR·52주·외인 소진율·전일 대비율).
    */
   KisPriceResponse.Output fetchPrice(String ticker, KisCallContext context);
+
+  /**
+   * 업종·시장 지수 현재가 (FHPUP02100000, 0001 KOSPI·1001 KOSDAQ). advisor 장중 점검 전용 (2026-09-13).
+   */
+  KisIndexPriceResponse.Output fetchIndexPrice(String indexCode, KisCallContext context);
 
   /**
    * 예탁원정보 일정 [from, to]. ticker 가 null 이면 전 종목. 페이지 상한에 걸리면 {@code truncated} 로 알려 호출부가 기간을 나눈다.

@@ -15,6 +15,7 @@ import kr.hvy.blog.modules.stock.client.dto.KisOverseasDailyPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisOverseasIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisHolidayResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisIndexPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
 import kr.hvy.blog.modules.stock.domain.code.MarketType;
@@ -48,6 +49,9 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
   public static final String INVESTOR_DAILY_TR_ID = "FHPTJ04160001";
   public static final String PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price";
   public static final String PRICE_TR_ID = "FHKST01010100";
+  /** 국내업종 현재지수 (advisor 장중 점검). TR ID 는 KIS 문서 기준이며 KisIndexPriceManualTest 로 실측한다 (2026-09-13) */
+  public static final String INDEX_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-index-price";
+  public static final String INDEX_PRICE_TR_ID = "FHPUP02100000";
   public static final String STOCK_INFO_PATH = "/uapi/domestic-stock/v1/quotations/search-stock-info";
   public static final String STOCK_INFO_TR_ID = "CTPF1002R";
   public static final String OVERSEAS_INDEX_PATH = "/uapi/overseas-price/v1/quotations/inquire-daily-chartprice";
@@ -159,6 +163,18 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
     params.put("FID_COND_MRKT_DIV_CODE", MARKET_STOCK);
     params.put("FID_INPUT_ISCD", ticker);
     return apiClient.get(PRICE_PATH, PRICE_TR_ID, params, KisPriceResponse.class, context.withTarget(ticker))
+        .body().output();
+  }
+
+  /**
+   * 업종·시장 지수 현재가 (FID_COND_MRKT_DIV_CODE=U). 장중 점검이 호출당 1건씩 쓰며 리미터 간격을 그대로 따른다.
+   */
+  @Override
+  public KisIndexPriceResponse.Output fetchIndexPrice(String indexCode, KisCallContext context) {
+    Map<String, String> params = new LinkedHashMap<>();
+    params.put("FID_COND_MRKT_DIV_CODE", MARKET_INDEX);
+    params.put("FID_INPUT_ISCD", indexCode);
+    return apiClient.get(INDEX_PRICE_PATH, INDEX_PRICE_TR_ID, params, KisIndexPriceResponse.class, context.withTarget(indexCode))
         .body().output();
   }
 

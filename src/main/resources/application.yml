@@ -300,11 +300,11 @@ advisor:
     nomem-weeks: 8                # 메모리 활성 후 메모리 없는 LLM 호출 병행 기간
     nonews-weeks: 8               # 뉴스가 실린 첫 판단부터 뉴스 없는 LLM 호출(LLM_NONEWS) 병행 기간 — 뉴스 가치 = LIVE − NONEWS
   model:
-    judge: ${ADVISOR_JUDGE_MODEL:gpt-5.6-terra}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
-    judge-max-completion-tokens: 8000
+    judge: ${ADVISOR_JUDGE_MODEL:gpt-5.6-sol}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
+    judge-max-completion-tokens: ${ADVISOR_JUDGE_MAX_TOKEN:20000}
     # judge-temperature: 0.0                  # 추론 모델은 temperature 를 받지 않으므로 기본 미설정
-    assist: ${ADVISOR_ASSIST_MODEL:gpt-5.6-luna}          # 채점 요약·교훈용 저가 모델 ID
-    assist-max-completion-tokens: 2000
+    assist: ${ADVISOR_ASSIST_MODEL:gpt-5.6-terra}          # 채점 요약·교훈용 저가 모델 ID
+    assist-max-completion-tokens: ${ADVISOR_ASSIST_MAX_TOKEN:10000}
   cost:
     input-per-1m-usd: 0           # 0 이면 비용 미계산. 모델 단가로 채우면 run.cost_usd 에 기록
     output-per-1m-usd: 0

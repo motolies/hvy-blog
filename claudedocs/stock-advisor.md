@@ -30,6 +30,7 @@
 | `advisor.advise.deadline` | 19:55 | 이후에도 DAILY 미완료면 SKIPPED + #hvy-error |
 | `advisor.lesson.min-picks` | 300 | 실적 블록·보정 표·교훈 게이트(누적 LIVE 픽) |
 | `advisor.ic.min-n-eff` | 24 | 가중치 세트 갱신 게이트(≈120 영업일). 사전 추정으로 충족 |
+| `advisor.ic.incremental-max-days` | 45 | 증분(ADVISE·WEEKLY_REVIEW·SCORE)이 감당할 최대 공백(캘린더일). 초과분은 계산하지 않고 warnings 에 `IC 공백 …` + 메타 `icGapFrom` 을 남긴다 → `POST /jobs/IC_BACKFILL?baseDate=<icGapFrom>` 로 보충. IC 행이 없는 첫 ADVISE 가 2020 년부터 6년치를 SQL 한 번에 돌던 2026-09-13 결함 방지 |
 | `advisor.shadow.reproducibility-runs` | 3 | 주간 재현성 재실행 횟수(0 이면 끔) |
 | `scheduler.advisor-{advise,intraday,weekly-review}.enabled` | default false / prod true | 기동 시 평가 |
 
@@ -41,6 +42,8 @@
 4. 실측 2건(키 필요): `AdvisorOpenAiManualTest`(strict 스키마 수용·토큰), `KisIndexPriceManualTest`(지수 현재가 TR ID `FHPUP02100000`·필드).
 5. 기동 로그 `AI 판단 잡 등록: [ADVISE, SCORE, INTRADAY, WEEKLY_REVIEW, IC_BACKFILL]`, `advisor 설정 확인` 확인.
 6. `POST /api/advisor/admin/jobs/IC_BACKFILL` → run 메타 `weights` 검토. `GET /weights` 에서 `flagged`(IC 음수) 시그널 확인 — 부호가 틀린 시그널은 하한 배수 0.5 만 받는다.
+   월 청크(`IC:2020-01` …)마다 저장·기록되므로 `GET /runs/{id}` 의 `steps` 로 진행이 보인다. `baseDate` 를 주면 그 날부터만 계산한다(공백 보충용).
+   **순서를 건너뛰고 ADVISE 를 먼저 부르면** 증분이 최근 45일(`advisor.ic.incremental-max-days`)만 계산하고 warnings 에 `IC 공백 2020-01-01~…` 을 남긴다 — 판단은 진행되지만 가중치 학습 창이 비어 있으니 IC_BACKFILL 을 이어서 돌린다.
 7. `POST /api/advisor/admin/jobs/ADVISE?baseDate=<직전 영업일>` 수동 1회 → Slack 수신·`GET /advices/{id}` 확인.
 8. prod `scheduler.advisor-*.enabled: true` 로 재기동.
 
@@ -81,6 +84,12 @@ SELECT stage, status, COUNT(*) FROM tb_advisor_candidate_score WHERE horizon_day
 | 잡 예외, 스케줄 트리거 거부(설정 누락·이미 실행 중), 마감 초과 DAILY 미완료 | #hvy-error | 있음 |
 
 대응: 트리거 거부 → 원인 해소 후 `POST /jobs/{jobType}`; 마감 초과 → 수집 복구 후 `POST /jobs/ADVISE?baseDate=YYYY-MM-DD`(같은 날 LIVE 가 이미 있으면 SKIPPED → 필요 시 `DELETE /advices/{id}` 후 재실행).
+
+**진행 확인·중단(2026-09-13)**: run 은 단계·IC 청크 경계마다 메타를 저장하므로 `GET /runs/{id}` 의 `metadata.steps`(`IC:2026-08` …)가 실시간으로 늘어난다. 오래 도는 run 은 `POST /api/advisor/admin/runs/{id}/cancel` — run 은 즉시 CANCELED 가 되고 잡은 **다음 단계·청크 경계**에서 멈춘다(알림 없음, 같은 잡 재트리거는 advisorExecutor 가 직렬화). 협조적 취소는 실행 중인 SQL 한 건은 끊지 못하므로 그 경우만 PG 에서 직접 끊는다:
+```sql
+SELECT pid, now() - query_start AS elapsed, left(query, 120) FROM pg_stat_activity WHERE state <> 'idle' AND query ILIKE '%vw_stock_market_calendar%';
+SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 잡은 다음 단계로 진행한다
+```
 
 ## 7. 채점·KPI 규약
 

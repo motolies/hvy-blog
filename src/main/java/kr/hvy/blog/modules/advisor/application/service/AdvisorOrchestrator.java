@@ -107,6 +107,7 @@ public class AdvisorOrchestrator {
       throw e;
     }
     AdvisorExecution execution = new AdvisorExecution(run, effectiveDate, properties);
+    execution.putMetadata("requested", baseDate != null); // 잡이 "요청된 날짜인지" 를 알 수 있게 (IC_BACKFILL 의 시작일 결정)
 
     boolean async = triggerType == AdvisorTriggerType.API && jobType.isLongRunning();
     if (!async) {
@@ -131,13 +132,21 @@ public class AdvisorOrchestrator {
 
   /**
    * 잡 본문 + 종료 처리. 어떤 경로로든 run 은 종료 상태가 된다.
+   * 실행 직전에 단계별 진행 저장(flush)과 취소 프로브를 붙인다. 취소는 run 이 이미 CANCELED 이므로 finish 없이 메타만 남기고 조용히 닫는다.
    */
   void execute(AdvisorJob job, AdvisorExecution execution) {
     Long runId = execution.runId();
     AdvisorJobType jobType = execution.run().getJobType();
+    execution.bind(() -> persist(execution), () -> runService.isCancelRequested(runId));
     log.info("### AI 판단 시작: runId={}, job={}, base={} ###", runId, jobType, execution.baseDate());
     try {
       job.execute(execution);
+      if (execution.isCancelRequested()) {
+        // 취소가 단계 경계에서 감지되지 못한 채 본문이 정상 반환한 경우 — run 은 이미 CANCELED 라 finish 는 no-op
+        persist(execution);
+        log.info("### AI 판단 취소 종료(본문 반환 후 감지): runId={}, job={} ###", runId, jobType);
+        return;
+      }
       AdvisorStatus status = execution.decideStatus();
       persist(execution);
       runService.finish(runId, status, execution.isSkipped() ? execution.skipReason() : execution.summary());
@@ -145,6 +154,9 @@ public class AdvisorOrchestrator {
           runId, jobType, status, execution.llmCalls(), execution.promptTokens(), execution.completionTokens(),
           execution.warnings().size());
       notifier.afterRun(runService.get(runId), execution, status);
+    } catch (AdvisorCanceledException e) {
+      persist(execution);
+      log.info("### AI 판단 취소 종료: runId={}, job={}, step={} ###", runId, jobType, e.getStep());
     } catch (Exception e) {
       log.error("### AI 판단 실패: runId={}, job={} ###", runId, jobType, e);
       persist(execution);

@@ -256,6 +256,7 @@ advisor:
     multiplier-min: 0.5
     multiplier-max: 2.0
     backfill-from: "2020-01-01"   # IC 사전 추정 시작일 (유니버스 뷰가 현재 마스터 기준이라 생존편향 — 부호·순위만 신뢰)
+    incremental-max-days: 45      # 증분(ADVISE·WEEKLY_REVIEW)이 감당할 최대 공백(캘린더일). 초과분은 경고만 남기고 IC_BACKFILL?baseDate= 로 채운다
   lesson:
     active-limit: 8
     min-picks: 300                # 실적 블록·보정 표·교훈 게이트(누적 픽 수)
@@ -267,7 +268,7 @@ advisor:
     quant-top-n: 7                # 정량 top-N 섀도(LLM 없음)
     nomem-weeks: 8                # 메모리 활성 후 메모리 없는 LLM 호출 병행 기간
   model:
-    judge: ${ADVISOR_JUDGE_MODEL:pt-5.6-terra}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
+    judge: ${ADVISOR_JUDGE_MODEL:gpt-5.6-terra}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
     judge-max-completion-tokens: 8000
     # judge-temperature: 0.0                  # 추론 모델은 temperature 를 받지 않으므로 기본 미설정
     assist: ${ADVISOR_ASSIST_MODEL:gpt-5.6-luna}          # 채점 요약·교훈용 저가 모델 ID

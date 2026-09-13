@@ -1744,7 +1744,7 @@ COMMENT ON TABLE  tb_advisor_run                   IS 'AI 시장 판단 잡 실�
 COMMENT ON COLUMN tb_advisor_run.run_id            IS '실행 식별자';
 COMMENT ON COLUMN tb_advisor_run.job_type          IS '잡 유형: ADVISE | SCORE | INTRADAY | WEEKLY_REVIEW | IC_BACKFILL (AdvisorJobType)';
 COMMENT ON COLUMN tb_advisor_run.trigger_type      IS '트리거 출처: SCHEDULER | API';
-COMMENT ON COLUMN tb_advisor_run.status            IS '상태: RUNNING | SUCCESS | PARTIAL | FAILED | SKIPPED';
+COMMENT ON COLUMN tb_advisor_run.status            IS '상태: RUNNING | SUCCESS | PARTIAL | FAILED | SKIPPED | CANCELED(관리자 취소, 2026-09-13)';
 COMMENT ON COLUMN tb_advisor_run.base_date         IS '판단 기준 거래일 (ADVISE·INTRADAY) 또는 채점 기준일';
 COMMENT ON COLUMN tb_advisor_run.model             IS '판단에 쓴 모델 ID';
 COMMENT ON COLUMN tb_advisor_run.prompt_version    IS '프롬프트 리소스 버전 (advice-v1 등)';

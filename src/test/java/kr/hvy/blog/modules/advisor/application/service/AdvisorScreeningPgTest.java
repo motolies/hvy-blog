@@ -151,7 +151,7 @@ class AdvisorScreeningPgTest {
     assertThat(icService.latestScorableDate(5)).contains(to);
 
     assertThat(icService.computeAndStore(DATES.getFirst(), to)).isEqualTo(rows.size());
-    assertThat(icService.computeIncremental()).as("이미 최신까지 계산됨").isEmpty();
+    assertThat(icService.computeIncremental(runAll())).as("이미 최신까지 계산됨").isEmpty();
 
     WeightSet proposed = icService.proposeWeightSet(to, WeightSetSource.BACKFILL, null).orElseThrow();
     Map<String, SignalWeightRow> byCode = proposed.byCode();
@@ -161,6 +161,39 @@ class AdvisorScreeningPgTest {
     double sum = proposed.weights().stream().filter(SignalWeightRow::enabled).mapToDouble(SignalWeightRow::weight).sum();
     assertThat(sum).as("가중치는 소수 6자리로 반올림되므로 합 오차 ≤ 1e-5").isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-5));
     assertThat(proposed.source()).isEqualTo(WeightSetSource.BACKFILL);
+  }
+
+  @Test
+  @DisplayName("IC 증분 상한: 행이 없으면 backfill-from(2020) 이 아니라 최근 incremental-max-days 만 월 청크로 계산하고 공백을 돌려준다")
+  void incrementalIsCappedAndChunked() {
+    properties.getIc().setIncrementalMaxDays(10);
+    LocalDate to = DATES.get(24); // 계산 가능한 마지막 기준일 (d+5 = DATES[29])
+    List<String> chunkNames = new ArrayList<>();
+    SignalIcService.IncrementalResult result = icService.computeIncremental((name, body) -> {
+      chunkNames.add(name);
+      body.run();
+      return true;
+    }).orElseThrow();
+
+    assertThat(result.to()).isEqualTo(to);
+    assertThat(result.from()).as("end − 10일").isEqualTo(to.minusDays(10));
+    assertThat(result.truncated()).isTrue();
+    assertThat(result.gapFrom()).as("공백은 원래 시작일(backfill-from)부터").isEqualTo(LocalDate.parse(properties.getIc().getBackfillFrom()));
+    assertThat(result.chunks()).isEqualTo(1);
+    assertThat(chunkNames).containsExactly("IC:" + to.minusDays(10).getYear() + "-" + String.format("%02d", to.minusDays(10).getMonthValue()));
+    LocalDate minStored = jdbc.queryForObject("SELECT MIN(trade_date) FROM tb_advisor_signal_ic_daily", LocalDate.class);
+    assertThat(minStored).as("상한 밖(공백)은 저장되지 않는다").isAfterOrEqualTo(to.minusDays(10));
+    assertThat(result.rows()).isPositive();
+
+    assertThat(icService.computeIncremental(runAll())).as("두 번째 호출은 최신까지 계산된 상태라 empty").isEmpty();
+  }
+
+  /** 청크를 그냥 실행하는 runner (단계 기록 없음) */
+  private static SignalIcService.ChunkRunner runAll() {
+    return (name, body) -> {
+      body.run();
+      return true;
+    };
   }
 
   @Test

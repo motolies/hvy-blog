@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.advisor.application.service;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -113,18 +114,105 @@ public class SignalIcService {
   }
 
   /**
-   * IC 가 계산된 마지막 기준일 다음 날부터 계산 가능한 마지막 기준일(캘린더 끝 − h)까지 증분 계산한다.
-   *
-   * @return 계산한 기준일 범위 (없으면 empty)
+   * 청크 1개를 "단계" 로 실행하는 계약. {@code AdvisorSteps::run} 이 그대로 맞으므로 잡 쪽 규칙(단계 기록·메타 flush·취소 감지)을 서비스가 몰라도 된다.
+   * 반환값은 성공 여부(격리된 실패는 false).
    */
-  public Optional<LocalDate[]> computeIncremental() {
+  @FunctionalInterface
+  public interface ChunkRunner {
+
+    boolean run(String name, Runnable body);
+  }
+
+  /**
+   * 증분 계산 결과. gapFrom 이 있으면 [gapFrom, from) 은 상한(ic.incremental-max-days) 때문에 계산하지 않은 공백이다.
+   */
+  public record IncrementalResult(LocalDate from, LocalDate to, LocalDate gapFrom, int rows, int chunks) {
+
+    public boolean truncated() {
+      return gapFrom != null;
+    }
+
+    /**
+     * 잡 메타·경고에 남긴다. 공백이 있으면 IC_BACKFILL 보충 명령을 경고로 적는다(run 상태는 바꾸지 않는다).
+     */
+    public void record(AdvisorExecution execution) {
+      execution.putMetadata("icRange", from + "~" + to);
+      execution.putMetadata("icRows", rows);
+      execution.putMetadata("icChunks", chunks);
+      if (truncated()) {
+        execution.putMetadata("icGapFrom", gapFrom.toString());
+        execution.warn("IC 공백 " + gapFrom + "~" + from.minusDays(1) + " 미계산(증분 상한 " + execution.properties().getIc().getIncrementalMaxDays()
+            + "일) — POST /api/advisor/admin/jobs/IC_BACKFILL?baseDate=" + gapFrom + " 로 채우세요");
+      }
+    }
+  }
+
+  /**
+   * [from, to] 를 월 단위 청크로 나눈다: from 부터 "다음 달 같은 날 전날" 까지가 한 청크(IcBackfillJob 의 기존 규칙, 월말은 java.time 이 절단).
+   * from > to 면 빈 목록.
+   */
+  static List<LocalDate[]> monthlyChunks(LocalDate from, LocalDate to) {
+    List<LocalDate[]> chunks = new ArrayList<>();
+    LocalDate cursor = from;
+    while (!cursor.isAfter(to)) {
+      LocalDate chunkEnd = cursor.plusMonths(1).minusDays(1);
+      if (chunkEnd.isAfter(to)) {
+        chunkEnd = to;
+      }
+      chunks.add(new LocalDate[] {cursor, chunkEnd});
+      cursor = chunkEnd.plusDays(1);
+    }
+    return chunks;
+  }
+
+  /** 청크 단계 이름 (run 메타 steps 에 "IC:2026-08" 로 보인다) */
+  static String chunkLabel(LocalDate from) {
+    return "IC:" + from.getYear() + "-" + String.format("%02d", from.getMonthValue());
+  }
+
+  /**
+   * [from, to] 를 월 청크로 계산·저장한다. 청크마다 저장되므로 중간에 끊겨도 앞 청크는 남고, 진행이 run 메타에 보인다.
+   * 청크 실패의 격리 여부는 runner(AdvisorSteps::run 이면 격리) 가 정한다.
+   *
+   * @return {계산 행 수, 청크 수}
+   */
+  public int[] computeChunked(LocalDate from, LocalDate to, ChunkRunner runner) {
+    int rows = 0;
+    int chunks = 0;
+    for (LocalDate[] chunk : monthlyChunks(from, to)) {
+      final int[] chunkRows = {0};
+      runner.run(chunkLabel(chunk[0]), () -> chunkRows[0] = computeAndStore(chunk[0], chunk[1]));
+      rows += chunkRows[0];
+      chunks++;
+    }
+    return new int[] {rows, chunks};
+  }
+
+  /**
+   * IC 가 계산된 마지막 기준일 다음 날부터 계산 가능한 마지막 기준일(캘린더 끝 − h)까지 월 청크로 증분 계산한다.
+   * 공백이 ic.incremental-max-days 보다 길면(IC 행이 없는 첫 실행 포함) 최근 그 일수만 계산하고 나머지는 결과의 gapFrom 으로 돌려준다 —
+   * 2020 년부터 6년치를 SQL 한 번에 돌린 2026-09-13 ADVISE 결함의 재발 방지. 공백은 IC_BACKFILL?baseDate= 로 따로 채운다.
+   *
+   * @return 계산한 범위·행·청크·공백 (계산할 날이 없으면 empty)
+   */
+  public Optional<IncrementalResult> computeIncremental(ChunkRunner runner) {
     LocalDate start = icWriter.maxTradeDate().map(d -> d.plusDays(1)).orElse(LocalDate.parse(properties.getIc().getBackfillFrom()));
-    Optional<LocalDate> end = latestScorableDate(properties.getHorizonDays());
-    if (end.isEmpty() || end.get().isBefore(start)) {
+    Optional<LocalDate> endOpt = latestScorableDate(properties.getHorizonDays());
+    if (endOpt.isEmpty() || endOpt.get().isBefore(start)) {
       return Optional.empty();
     }
-    computeAndStore(start, end.get());
-    return Optional.of(new LocalDate[] {start, end.get()});
+    LocalDate end = endOpt.get();
+    int maxDays = properties.getIc().getIncrementalMaxDays();
+    LocalDate capStart = end.minusDays(maxDays);
+    LocalDate gapFrom = null;
+    if (start.isBefore(capStart)) {
+      gapFrom = start;
+      start = capStart;
+      log.warn("IC 증분 공백이 상한 {}일을 넘어 {}~{} 는 계산하지 않습니다 — POST /api/advisor/admin/jobs/IC_BACKFILL?baseDate={} 로 채우세요",
+          maxDays, gapFrom, capStart.minusDays(1), gapFrom);
+    }
+    int[] result = computeChunked(start, end, runner);
+    return Optional.of(new IncrementalResult(start, end, gapFrom, result[0], result[1]));
   }
 
   /**

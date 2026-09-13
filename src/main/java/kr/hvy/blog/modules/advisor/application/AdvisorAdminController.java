@@ -100,6 +100,17 @@ public class AdvisorAdminController {
     return AdvisorRunResponse.from(runService.get(runId));
   }
 
+  /**
+   * 협조적 취소 요청. 잡이 다음 단계·IC 청크 경계에서 감지해 스스로 멈춘다(run 은 즉시 CANCELED, 알림 없음).
+   * 실행 중인 SQL 한 건은 끊지 못하므로 그 경우는 pg_stat_activity 에서 찾아 pg_cancel_backend 로 끊는다(운영 문서 §6).
+   */
+  @PostMapping("/runs/{runId}/cancel")
+  public AdvisorRunResponse cancel(@PathVariable Long runId) {
+    boolean applied = runService.requestCancel(runId);
+    log.info("advisor run 취소 요청: runId={}, applied={}", runId, applied);
+    return AdvisorRunResponse.from(runService.get(runId));
+  }
+
   // ========== 판단 ==========
 
   @GetMapping("/advices")

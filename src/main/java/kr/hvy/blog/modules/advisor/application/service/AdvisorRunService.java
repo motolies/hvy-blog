@@ -70,7 +70,29 @@ public class AdvisorRunService {
   }
 
   /**
-   * 부가 정보를 갱신한다.
+   * 협조적 취소를 요청한다. RUNNING 이면 CANCELED 로 닫고 true. 잡은 단계·IC 청크 경계마다 {@link #isCancelRequested} 를 폴링해 스스로 빠져나온다
+   * (실행 중인 SQL 은 끊지 못한다 — 그건 pg_cancel_backend). CollectRunService.requestCancel 과 같은 구조.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public boolean requestCancel(Long runId) {
+    AdvisorRun run = repository.findById(runId).orElseThrow(() -> notFound(runId));
+    if (!run.isRunning()) {
+      return false;
+    }
+    run.finish(AdvisorStatus.CANCELED, "관리자 취소 요청");
+    return true;
+  }
+
+  /**
+   * 취소가 요청되었는지 (새 트랜잭션으로 최신 값을 읽는다).
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+  public boolean isCancelRequested(Long runId) {
+    return repository.findById(runId).map(run -> run.getStatus() == AdvisorStatus.CANCELED).orElse(false);
+  }
+
+  /**
+   * 부가 정보를 갱신한다 (단계 경계마다 + 종료 시).
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void updateMetadata(Long runId, Map<String, Object> metadata) {

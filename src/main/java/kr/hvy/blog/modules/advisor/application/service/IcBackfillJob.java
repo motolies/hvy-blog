@@ -17,7 +17,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * IC 사전 추정 (관리자 1회, IC_BACKFILL). advisor.ic.backfill-from 부터 계산 가능한 마지막 기준일까지 월 단위 청크로 IC 를 저장하고,
- * 창 통계로 BACKFILL 가중치 세트를 만들어 활성화한다.
+ * 창 통계로 BACKFILL 가중치 세트를 만들어 활성화한다. 요청에 baseDate 가 있으면 그 날부터 계산한다 — 증분 상한 때문에 남은 공백
+ * ({@code POST /jobs/IC_BACKFILL?baseDate=<icGapFrom>}) 을 채우는 경로(2026-09-13).
  * <p>
  * 유니버스 뷰가 현재 마스터 기준이라 과거 IC 는 생존편향이 있다 — 절대값이 아니라 시그널 간 상대 순위·부호 확인 용도이며 배수는 clip 으로 제한된다.
  * 부호가 음(flagged)인 시그널은 하한 배수만 받고 관리자 API(/weights) 에서 검토한다.
@@ -39,7 +40,8 @@ public class IcBackfillJob implements AdvisorJob {
 
   @Override
   public void execute(AdvisorExecution execution) {
-    LocalDate from = LocalDate.parse(properties.getIc().getBackfillFrom());
+    boolean requested = Boolean.TRUE.equals(execution.metadata("requested"));
+    LocalDate from = requested ? execution.baseDate() : LocalDate.parse(properties.getIc().getBackfillFrom());
     LocalDate end = icService.latestScorableDate(properties.getHorizonDays())
         .orElseThrow(() -> new IllegalStateException("영업일 캘린더(KOSPI 일봉)가 비어 있습니다"));
     if (end.isBefore(from)) {
@@ -47,26 +49,12 @@ public class IcBackfillJob implements AdvisorJob {
       return;
     }
     AdvisorSteps steps = new AdvisorSteps(execution);
-    int total = 0;
-    LocalDate cursor = from;
-    int chunks = 0;
-    while (!cursor.isAfter(end)) {
-      LocalDate chunkEnd = cursor.plusMonths(1).minusDays(1);
-      if (chunkEnd.isAfter(end)) {
-        chunkEnd = end;
-      }
-      LocalDate f = cursor;
-      LocalDate t = chunkEnd;
-      final int[] rows = {0};
-      steps.run("IC:" + f.getYear() + "-" + String.format("%02d", f.getMonthValue()), () -> rows[0] = icService.computeAndStore(f, t));
-      total += rows[0];
-      chunks++;
-      cursor = chunkEnd.plusDays(1);
-    }
+    int[] result = icService.computeChunked(from, end, steps::run);
+    int total = result[0];
     execution.putMetadata("icFrom", from.toString());
     execution.putMetadata("icTo", end.toString());
     execution.putMetadata("icRows", total);
-    execution.putMetadata("chunks", chunks);
+    execution.putMetadata("chunks", result[1]);
 
     Optional<WeightSet> proposed = icService.proposeWeightSet(end, WeightSetSource.BACKFILL, execution.runId());
     if (proposed.isEmpty()) {

@@ -146,6 +146,12 @@ public class AdvisorProperties {
 
     /** 사전 추정(IC_BACKFILL) 시작일 */
     private String backfillFrom = "2020-01-01";
+
+    /**
+     * 증분 계산(ADVISE·WEEKLY_REVIEW)이 감당할 최대 공백(캘린더일). 마지막 IC 행부터의 공백이 이보다 길면 최근 이 일수만 계산하고
+     * 나머지는 경고로 남긴다(IC_BACKFILL?baseDate= 로 보충). IC 행이 없는 첫 ADVISE 가 2020 년부터 6년치를 SQL 한 번에 돌던 2026-09-13 결함 방지.
+     */
+    private int incrementalMaxDays = 45;
   }
 
   @Data

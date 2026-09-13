@@ -98,7 +98,7 @@ public class WeeklyReviewJob implements AdvisorJob {
 
     // ① 채점·IC
     steps.run("SCORE", () -> scoreJob.scoreDue(execution));
-    steps.run("IC", () -> icService.computeIncremental().ifPresent(r -> execution.putMetadata("icRange", r[0] + "~" + r[1])));
+    steps.run("IC", () -> icService.computeIncremental(steps::run).ifPresent(r -> r.record(execution)));
 
     // ② 가중치
     List<String> weightLines = new ArrayList<>();

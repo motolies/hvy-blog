@@ -134,7 +134,8 @@ public class AdviseJob implements AdvisorJob {
     } else {
       steps.skip("SCORE", "채점 훅 없음");
     }
-    steps.run("IC", () -> icService.computeIncremental().ifPresent(r -> execution.putMetadata("icRange", r[0] + "~" + r[1])));
+    // IC 청크는 steps::run 으로 돌아 청크마다 단계 기록·flush·취소 감지를 받는다. 바깥 IC 단계는 청크 밖 조회(마지막 IC 일·캘린더) 실패를 격리한다
+    steps.run("IC", () -> icService.computeIncremental(steps::run).ifPresent(r -> r.record(execution)));
 
     // ② 시장 특징·스크리닝 (필수)
     final MarketFeatures[] market = new MarketFeatures[1];

@@ -89,7 +89,7 @@ class AdviseJobTest {
         new MarketJudgeClient(ChatClient.create(stub), "judge-x"), adviceWriter, promptInputs, lessons, notifier, hookProvider);
     when(hookProvider.getIfAvailable()).thenReturn(null);
     when(gate.decide(any(), any())).thenReturn(new AdvisorGateService.Decision(true, false, true, false, DataQuality.OK, "DAILY 완료"));
-    when(icService.computeIncremental()).thenReturn(Optional.empty());
+    when(icService.computeIncremental(any())).thenReturn(Optional.empty());
     when(marketFeatures.features(base)).thenReturn(AdvicePromptBuilderTest.market());
     when(screening.screen(base)).thenReturn(AdvicePromptBuilderTest.screening(8));
     when(weightSets.find(1L)).thenReturn(Optional.of(WeightSet.builder().weightSetId(1L).source(WeightSetSource.SEED).active(true)
@@ -164,12 +164,26 @@ class AdviseJobTest {
     when(hookProvider.getIfAvailable()).thenReturn(e -> {
       throw new IllegalStateException("scoring boom");
     });
-    when(icService.computeIncremental()).thenThrow(new IllegalStateException("ic boom"));
+    when(icService.computeIncremental(any())).thenThrow(new IllegalStateException("ic boom"));
     AdvisorExecution execution = execution();
     job.execute(execution);
     assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.PARTIAL);
     assertThat(execution.failures()).extracting(AdvisorExecution.Failure::target).contains("STEP:SCORE", "STEP:IC");
     verify(notifier).publish(any(SlackMessage.class));
+  }
+
+  @Test
+  @DisplayName("IC 증분이 상한에 잘리면 경고와 icGapFrom 메타를 남기되 run 상태는 SUCCESS 그대로")
+  void icGapIsWarnedNotFailed() {
+    when(icService.computeIncremental(any())).thenReturn(Optional.of(
+        new SignalIcService.IncrementalResult(LocalDate.of(2026, 7, 28), LocalDate.of(2026, 9, 4), LocalDate.of(2020, 1, 1), 480, 2)));
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SUCCESS);
+    assertThat(execution.metadata("icRange")).isEqualTo("2026-07-28~2026-09-04");
+    assertThat(execution.metadata("icGapFrom")).isEqualTo("2020-01-01");
+    assertThat(execution.metadata("icChunks")).isEqualTo(2);
+    assertThat(execution.warnings()).anySatisfy(w -> assertThat(w).contains("IC 공백 2020-01-01~2026-07-27").contains("IC_BACKFILL?baseDate=2020-01-01"));
   }
 
   private AdvisorExecution execution() {

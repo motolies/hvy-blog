@@ -71,7 +71,7 @@ class WeeklyReviewJobTest {
     job = new WeeklyReviewJob(properties, scoreJob, icService, weightSets, lessonService, kpi, adviceWriter, promptInputs, new PromptResources(),
         new MarketJudgeClient(ChatClient.create(judgeStub), "judge"), new MarketJudgeClient(ChatClient.create(assistStub), "assist"), notifier, jdbc);
     when(scoreJob.scoreDue(any())).thenReturn(AdviseJob.Scoreboard.empty());
-    when(icService.computeIncremental()).thenReturn(Optional.empty());
+    when(icService.computeIncremental(any())).thenReturn(Optional.empty());
     when(icService.latestScorableDate(anyInt())).thenReturn(Optional.of(today.minusDays(7)));
     WeightSet active = WeightSet.builder().weightSetId(1L).source(WeightSetSource.SEED).active(true).weights(List.of(
         SignalWeightRow.builder().signalCode("MOM_20D").baseWeight(0.12).multiplier(1).weight(0.12).enabled(true).build(),

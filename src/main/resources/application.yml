@@ -240,7 +240,7 @@ scheduler:
   claude:
     lock-name: CLAUDE-REFRESH-TEST
     enabled: false
-  # 주식(KIS) 수집 — 백필 완료 전까지 enabled: false 로 둔다 (cron 은 zone=Asia/Seoul 로 해석)
+  # 주식(KIS) 수집 — default 문서는 로컬·개발 보호를 위해 false 로 둔다(prod 문서에서 true, 2026-09-13). cron 은 zone=Asia/Seoul 로 해석
   stock-master:
     lock-name: STOCK-MASTER-TEST
     cron-expression: "0 30 5 * * MON-FRI"
@@ -301,23 +301,25 @@ scheduler:
   claude:
     lock-name: CLAUDE-REFRESH-PROD
     enabled: true
-  # 주식(KIS) 수집 — 백필 완료 전까지 enabled: false 로 둔다 (cron 은 zone=Asia/Seoul 로 해석)
+  # 주식(KIS) 수집 — 2026-09-13 백필 완료로 prod 활성화 (cron 은 zone=Asia/Seoul 로 해석).
+  # 값은 @ConditionalOnProperty 로 기동 시 평가되므로 바꾼 뒤 재기동해야 한다. 특정 잡만 끄려면 그 키만 false.
+  # 트리거 거부(키 누락·이미 실행 중)와 단계 결손은 CollectNotifier 가 #hvy-error 로 알린다.
   stock-master:
     lock-name: STOCK-MASTER-PROD
     cron-expression: "0 30 5 * * MON-FRI"
-    enabled: false
+    enabled: true
   stock-daily:
     lock-name: STOCK-DAILY-PROD
     cron-expression: "0 30 18 * * MON-FRI"
-    enabled: false
+    enabled: true
   stock-overseas:
     lock-name: STOCK-OVERSEAS-PROD
     cron-expression: "0 30 6 * * TUE-SAT"
-    enabled: false
+    enabled: true
   stock-weekly:
     lock-name: STOCK-WEEKLY-PROD
     cron-expression: "0 0 3 * * SUN"
-    enabled: false
+    enabled: true
 
 cookie:
   same-site: NONE

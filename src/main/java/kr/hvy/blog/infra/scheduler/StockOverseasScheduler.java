@@ -16,8 +16,9 @@ import org.springframework.stereotype.Component;
 /**
  * 전일 미국장 마감분(지수·환율·ETF) 증분 (화~토 06:30 KST).
  * <p>
- * run 생성·중복 차단·카운터·Slack 은 오케스트레이터가 처리한다. 같은 잡이 이미 RUNNING 이면
- * CollectAlreadyRunningException 이 나고 proceedScheduler 가 로그로 삼킨다. 백필 완료 전까지 yml enabled:false.
+ * run 생성·중복 차단·카운터·Slack 은 오케스트레이터가 처리한다. 트리거가 거부되면(키 누락·이미 실행 중·DB 오류)
+ * 오케스트레이터가 run 없이 #hvy-error 로 알린 뒤 다시 던지고 proceedScheduler 가 로그로 삼킨다.
+ * yml scheduler.stock-overseas.enabled 로 on/off (기동 시 평가, 2026-09-13 prod 활성화).
  */
 @Slf4j
 @Component

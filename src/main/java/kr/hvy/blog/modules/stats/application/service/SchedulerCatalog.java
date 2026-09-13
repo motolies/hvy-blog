@@ -52,7 +52,7 @@ public class SchedulerCatalog {
       new Definition("scheduler.claude.lock-name", "Claude 토큰 갱신",
           null, List.of("0 5 6 * * ?", "0 5 11 * * ?", "0 5 16 * * ?"),
           "scheduler.claude.enabled", "Asia/Seoul"),
-      // 주식(KIS) 수집 4종 — cron 은 yml, 타임존은 KST. 백필 완료 전까지 enabled:false
+      // 주식(KIS) 수집 4종 — cron 은 yml, 타임존은 KST. 2026-09-13 prod 활성화(enabled 는 기동 시 평가)
       new Definition("scheduler.stock-master.lock-name", "주식 마스터·휴장일 갱신",
           "scheduler.stock-master.cron-expression", List.of("0 30 5 * * MON-FRI"), "scheduler.stock-master.enabled", "Asia/Seoul"),
       new Definition("scheduler.stock-daily.lock-name", "주식 일일 증분 수집",

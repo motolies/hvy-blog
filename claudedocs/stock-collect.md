@@ -1,6 +1,6 @@
 # 주식(KIS) 퀀트 데이터 수집 모듈 운영 가이드
 
-작성일 2026-09-04. 브랜치 `feature/stock-collect` (Phase 0~4 구현 완료, 실전 키 검증 전).
+작성일 2026-09-04, 최종 갱신 2026-09-13 (스케줄러 4개 prod 활성화 + 무인 운영 알림 2건 추가, 미구현 점검 §12).
 승인 계획: `~/.claude/plans/moto-planner-agent-api-memoized-turtle.md`.
 
 ## 1. 한눈에 보기
@@ -22,7 +22,7 @@
    `schema-postgres.sql`(전체 재구축용) 은 위 세 파일의 **원문**을 `-- >>> BEGIN db/stock-*.sql` / `-- <<< END …` 마커로 감싸 그대로 포함하고, DROP 블록에 stock 테이블 22개가 있다. 수정은 `db/stock-*.sql` 원본에만 하고 복사본을 갱신한다. `StockSchemaSyncTest` 가 불일치를 잡는다.
    **기존 테이블의 새 컬럼**은 `CREATE TABLE IF NOT EXISTS` 로 반영되지 않으므로 `src/main/resources/db/migrate/<날짜>_<번호>_<내용>.sql`(`ALTER TABLE … ADD COLUMN IF NOT EXISTS`, 재실행 안전)을 먼저 적용한다. 현재: `20260908_01_financial_ratio_columns.sql`(재무 9컬럼), `20260912_01_etf_nav_rate_width.sql`(ETF NAV 비율 3컬럼 NUMERIC(12,4), 정밀도만 늘려 재작성 없음).
 2. 환경변수 `KIS_APP_KEY`, `KIS_APP_SECRET` 를 주입한다(Dockerfile·yml 기본값 없음). 없으면 앱은 기동되지만 모든 수집 잡이 400으로 거부된다.
-3. `scheduler.stock-*.enabled` 는 default/prod 모두 `false` 로 배포한다. 백필 완료 후 `true` 로 바꾼다.
+3. `scheduler.stock-*.enabled` 는 **prod 문서 4개 모두 `true`**(2026-09-13, 백필 완료), default 문서는 로컬·개발 보호로 `false`. `@ConditionalOnProperty` 라 기동 시 평가되므로 값을 바꾸면 재기동해야 한다. 특정 잡만 끄려면 그 키만 `false`.
 4. 기동 후 확인: `GET /api/stock/admin/collect/token` → `POST /api/stock/admin/collect/token/refresh` (1분 1회 게이트, 재발급 실패 시 기존 토큰 유지).
 5. 테이블이 없으면 JPA 엔티티 4개(`tb_stock_master`, `tb_stock_collect_run`, `tb_stock_collect_checkpoint`, `tb_stock_kis_token`)는 `ddl-auto=validate` 로 기동이 실패하고, JdbcTemplate 테이블은 런타임 오류가 난다.
 
@@ -38,7 +38,7 @@
 | GET/POST | `/token`, `/token/refresh` | 토큰 상태·강제 재발급 |
 
 요청 본문 `BackfillRequest`(모두 선택): `startDate`, `endDate`, `tickerFrom`, `tickerTo`, `tickers[]`, `indexCodes[]`, `resetCheckpoint`, `force`.
-응답 코드: 같은 잡이 RUNNING 이면 **409**(`runningRunId` 포함), 형식·전제조건 오류는 **400**. 둘 다 Slack 을 울리지 않는다.
+응답 코드: 같은 잡이 RUNNING 이면 **409**(`runningRunId` 포함), 형식·전제조건 오류는 **400**. 둘 다 Slack 을 울리지 않는다(API 트리거 한정 — 스케줄러 트리거가 같은 이유로 거부되면 run 없이 `[주식 수집 미실행]` 을 `#hvy-error` 로 보낸다, §8).
 
 잡 유형(`CollectJobType`): `BACKFILL_ALL`(아래 §4 단계 순차), `MASTER`, `HOLIDAY`, `INDEX_BACKFILL`, `PRICE_BACKFILL`, `STOCK_INFO`, `VALUATION`, `MARKET_STAT`, `CORP_ACTION`, `ADJUST_FACTOR`, `INVESTOR_BACKFILL`, `ETF_NAV_BACKFILL`, `MARKET_INVESTOR_BACKFILL`, `FINANCIAL_BACKFILL`, `OVERSEAS_BACKFILL`, `DERIVED_REFRESH`, `VALIDATE`, `DAILY`, `WEEKLY`, `OVERSEAS_DAILY`, `RELOAD`.
 
@@ -78,7 +78,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 - 백필 실행기는 단일 스레드(큐 10). 다른 백필 잡을 넣으면 순서대로 돈다. 같은 잡은 409.
 - 종목 동시성 `kis.backfill.concurrency`(3), 전역 한도 `kis.rate-limit`(호출 간 최소 간격 67ms ≈ 15건/초로 균등 분산. EGW00201 은 10초 안 3회 이상 몰릴 때만 간격 ×1.5(상한 500ms), 연속 성공 200회마다 ÷1.5 원복. 단발은 `KisApiClient` 재시도 5회·1초 대기가 흡수. 2026-09-12 교체, §9).
 
-## 5. 스케줄 (KST, `@Profile("!default")`, yml `enabled` 로 개별 on/off)
+## 5. 스케줄 (KST, `@Profile("!default")`, prod 전부 활성 2026-09-13, yml `enabled` 로 개별 on/off — 기동 시 평가)
 
 | 스케줄러 | cron | 잡 | lockAtMostFor |
 |---|---|---|---|
@@ -87,7 +87,15 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | `StockOverseasScheduler` | 화~토 06:30 | OVERSEAS_DAILY | 15m |
 | `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → STOCK_INFO(기업행사에만 있는 종목을 조회해 상폐일 있는 것만 비활성 마스터 행으로, 메타 `stockInfoCandidates`/`stockInfoApplied`) → ADJUST_FACTOR → FINANCIAL(정정 감지) → DERIVED_FULL(지표 테이블 전체 재계산 ≈22분 + MV ≈5분) | 2h |
 
-- DAILY 는 휴장일이면 run 만 남기고 끝난다(`force:true` 로 무시). PRICE 단계 실패 시 DERIVED 만 건너뛴다. 단계별 상태·소요는 run `metadata_json.steps[]`.
+- DAILY 는 휴장일이면 run 만 남기고 끝난다(`force:true` 로 무시, failures 0 이라 Slack 없음). PRICE 단계 실패 시 DERIVED 만 건너뛴다. 단계별 상태·소요·`processed`·`failures` 는 run `metadata_json.steps[]`. 단계가 예외로 죽거나 단계 안 실패율 ≥5% 면 종목 비율과 무관하게 `#hvy-error`(§8, 2026-09-13).
+- 스케줄러가 켜진 뒤 첫 주 관찰 기준: 영업일 5일 연속 DAILY SUCCESS/PARTIAL(<1%) + `steps[]` 전부 OK(STATS SKIPPED 는 설정), 소요 DAILY <30분(락 40m)·WEEKLY <90분(락 2h), Slack ERROR 0 (온 ERROR 는 run 행 또는 `[주식 수집 미실행]` 에 반드시 대응해야 하고 고아 알림은 오탐), 휴장일 run 은 SUCCESS + `skipped`.
+  ```sql
+  -- 최근 7일 DAILY/WEEKLY 단계별 상태·소요·처리/실패
+  SELECT r.run_id, r.job_type, r.status, round(r.duration_ms/60000.0,1) AS min, s.ord, s.step->>'step' AS step, s.step->>'status' AS st,
+         round((s.step->>'ms')::numeric/1000) AS sec, s.step->>'processed' AS processed, s.step->>'failures' AS failures
+  FROM tb_stock_collect_run r LEFT JOIN LATERAL jsonb_array_elements(r.metadata_json->'steps') WITH ORDINALITY AS s(step, ord) ON TRUE
+  WHERE r.started_at > now() - interval '7 days' AND r.job_type IN ('DAILY','WEEKLY') ORDER BY r.run_id, s.ord;
+  ```
 - `/admin` 스케줄러 카탈로그(`SchedulerCatalog`)에 4개가 등록되어 있다.
 - 로그 정리(`LogCleanerScheduler`): `tb_stock_kis_api_failure` 90일, 종료된 `tb_stock_collect_run` 1년.
 
@@ -135,8 +143,19 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 
 ## 8. Slack 임계 (`CollectNotifier`)
 
-- 종목 단위 실패율 < 1%: run `PARTIAL` 만 기록 / 1~5%: `#hvy-notify` / ≥ 5% 또는 잡 자체 실패: `#hvy-error` + 멘션. 메시지에는 대표 오류 3건과 EGW00201 횟수만.
-- 정합성(`CollectValidationService`): 활성 종목 대비 당일 일봉 행 수 차이 > 2% → `#hvy-error`, 결측·이상치(|등락률|>30% 이고 ±3일 기업행사 없음)·OHLC 위반·52주 편차(>1%, 계수 없는 종목) → `#hvy-notify`.
+| 신호 | 채널 | 비고 |
+|---|---|---|
+| 잡 자체 예외(run FAILED) | `#hvy-error` + 멘션 | `afterFailure` |
+| **파이프라인 단계 결손** — 단계가 예외로 죽음(`steps[].status=FAILED`) 또는 단계 안 실패율 ≥ 5%(시장별 투자자 2개 중 1개, MV 4개 중 1개) | `#hvy-error` + 멘션 | 2026-09-13. DAILY 는 종목 ≈2,700 이라 run 전체 비율로는 0.04% 로 무음이었음. 메시지에 `단계 실패: ETF_NAV[예외 …], MARKET_INVESTOR[1/2 실패]` |
+| 종목 단위 실패율 ≥ 5% | `#hvy-error` + 멘션 | |
+| 종목 단위 실패율 1~5% | `#hvy-notify` | |
+| 종목 단위 실패율 < 1% | 로그만, run `PARTIAL` | |
+| run 카운터 flush 실패 | 최소 `#hvy-notify` | 인프라 신호(floor) |
+| **스케줄 트리거 거부**(KIS 키 누락·이미 실행 중·DB 오류로 run 이 생성되지 않음) | `#hvy-error` + 멘션 | 2026-09-13. `[주식 수집 미실행]`. API 트리거는 400/409 응답만, BACKFILL_ALL 하위 run 은 상위 비율 알림으로 대신함 |
+
+우선순위 ERROR > NOTIFY > 로그, 한 run 에 한 통. 메시지에는 종목을 나열하지 않고 결손 단계·대표 오류 3건·EGW00201 횟수만.
+
+- 정합성(`CollectValidationService`): 활성 종목 대비 당일 일봉 행 수 차이 > 2% → `#hvy-error`, 결측·이상치(|등락률|>30% 이고 ±3일 기업행사 없음)·OHLC 위반·52주 편차(>1%, 계수 없는 종목) → `#hvy-notify`. PRICE 단계가 죽으면 행 수 경고(증상)와 단계 결손(원인)이 같은 run 에 2통 오는 것은 의도 — VALIDATE 를 건너뛰면 절반 처리 후 죽은 경우의 결측 목록을 잃는다.
 
 ## 9. 복구·재적재
 
@@ -168,6 +187,8 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
   ```
 - 재무 확장 9컬럼(2026-09-08)은 첫 재조회에서 기존 최신 행에 **채워지고 리비전을 올리지 않는다**(핵심 10개가 같고 확장이 전부 NULL 일 때). 채우려면 `POST /FINANCIAL_BACKFILL -d '{"resetCheckpoint":true}'` 또는 다음 WEEKLY.
 - 2026-09-08 효력일 상한 도입 이전에 적재된 **미래 유상증자 계수 행**은 효력일에 잘못된 계수(최근 종가 기준)로 켜질 수 있어 1회 수기 삭제한다(다른 유형의 미래 행은 MV 술어로 무해): `DELETE FROM tb_stock_adjust_event WHERE action_type='RIGHTS_ISSUE' AND effective_date > (now() AT TIME ZONE 'Asia/Seoul')::date`.
+- **`[주식 수집 미실행]` 알림 대응(2026-09-13)**: 원인이 "이미 실행 중" 이면 `GET /runs?jobType=…&limit=1` 로 RUNNING 이 끝나길 기다렸다가 `POST /{jobType}` 로 보충, "KIS_APP_KEY" 면 환경변수 확인 후 재기동. DAILY 는 다음 날 100건 윈도우로 가격·수급이 자동 복구되지만 **VALUATION 은 당일만 제공되므로 그날 안에 `POST /DAILY {"force":true}`** 로 보충한다.
+- **단계 결손 알림 대응(2026-09-13)**: run `metadata_json.steps[]` 의 FAILED(또는 failures 가 processed 에 비해 큰) 단계만 단독 잡으로 재실행한다 — INDEX→`INDEX_BACKFILL`, PRICE→다음 DAILY 자동(2일 이상은 `reload`), VALUATION→`VALUATION`(당일 한정), INVESTOR→`INVESTOR_BACKFILL`, MARKET_INVESTOR→`MARKET_INVESTOR_BACKFILL`, ETF_NAV→`ETF_NAV_BACKFILL`, STATS→`MARKET_STAT`, CA_HINT→다음 DAILY, VALIDATE→`VALIDATE`, DERIVED→`DERIVED_REFRESH`(본문 없음=증분), WEEKLY 의 DERIVED_FULL→`DERIVED_REFRESH {"force":true}`. 같은 단계가 매일 실패하면 원인은 코드·경로(예: 시장별 투자자 경로 추정값 §10)이므로 억제 장치 없이 매일 온다.
 
 ## 10. 실측이 필요한 항목 (실전 키 필요, 코드가 가정한 값)
 
@@ -216,3 +237,4 @@ H2 로는 `ON CONFLICT`·부분 유니크·MV 가 검증되지 않으므로 PG �
 - 테마 매핑(계획 P2)은 2026-09-08 구현. 테마명 마스터 테이블을 두지 않고 `tb_stock_sector_map.sector_name` 에 보관한다(`tb_stock_index_master` 에 넣으면 INDEX_BACKFILL 대상으로 새어 나감). 줄 끝 10자 종목코드의 체계(6자/A 접두/기타)는 `KisThemeFileManualTest` 로 실측 후 `ThemeCodeRecord.ticker()` 규칙 확정.
 - 실시간 웹소켓·Python 분석 환경은 범위 밖(계획대로). `KisMarketDataPort` 가 확장 경계.
 - 연속조회 페이지네이터는 상한 도달을 `PageResult.truncated` 로 돌려주고 스스로 WARN 하지 않는다(2026-09-12). 의도된 창(휴장일·투자자)과 잘림(예탁원)을 호출부만 구분할 수 있기 때문. 예탁원은 잘리면 기간 분할, `KsdInfoPage.repeated` 는 연속조회 미지원 신호.
+- **미구현 점검(2026-09-13, 스케줄러 활성화 전 전수 대조)**: 잡 구현체 21개 = `CollectJobType` 21개, TODO·스텁·빈 구현 0건, `KisProperties` 미사용 필드 0건. 진짜 미구현은 **국내 섹터↔미국 참조 사슬 1건** — `stock-seed.sql` 의 `tb_stock_global_sector_map` 은 `tb_stock_sector_map` 에 `source='CUSTOM'` 행(SEMICON·AI_DC 등 커스텀 섹터 소속)이 있어야 의미가 있는데 그 행을 만드는 코드·API·`SectorMapRow` 상수가 없고 글로벌 맵을 읽는 코드도 없다(소속 원천을 THEME→CUSTOM 매핑표로 둘지 수기 API 로 둘지 결정 필요). 계획이 범위 밖으로 둔 것: 분봉, 실시간 웹소켓, VIX·WTI·미국 10년물. 기능 영향 없는 위생: `CorporateActionMapper.mapOne` 의 switch 문(식으로 바꾸면 완전성 검사), `CorporateActionSource.MANUAL` 데드 상수(`AdjustFactorService` 는 KSD 만 조회), 소비자 없는 `vw_stock_market_calendar`·`vw_stock_universe_daily`. 통계·재무·ETF NAV·시장별 투자자·해외·THEME·마스터 이력은 외부 분석용 원천으로 저장만 하며 파생 지표 원천은 6개(일봉·계수·투자자·밸류·지수·KRX 섹터)다.

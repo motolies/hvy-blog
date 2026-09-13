@@ -60,7 +60,15 @@ public class SchedulerCatalog {
       new Definition("scheduler.stock-overseas.lock-name", "해외 지표 증분 수집",
           "scheduler.stock-overseas.cron-expression", List.of("0 30 6 * * TUE-SAT"), "scheduler.stock-overseas.enabled", "Asia/Seoul"),
       new Definition("scheduler.stock-weekly.lock-name", "주식 주간 수집(기업행사·계수·재무)",
-          "scheduler.stock-weekly.cron-expression", List.of("0 0 3 * * SUN"), "scheduler.stock-weekly.enabled", "Asia/Seoul"));
+          "scheduler.stock-weekly.cron-expression", List.of("0 0 3 * * SUN"), "scheduler.stock-weekly.enabled", "Asia/Seoul"),
+      // AI 시장 판단(advisor) 3종 (2026-09-13). ADVISE 는 실제 cron 이 19:30~19:55 5분 간격 6회라 expectedInterval 이 5분으로 잡혀 STALE 오판이
+      // 나므로 cronKey 를 null 로 두고 대표 주기(하루 1회)만 표시한다 — 실행 cron 은 스케줄러 클래스가 yml 에서 직접 읽는다
+      new Definition("scheduler.advisor-advise.lock-name", "AI 일일 시장 판단",
+          null, List.of("0 30 19 * * MON-FRI"), "scheduler.advisor-advise.enabled", "Asia/Seoul"),
+      new Definition("scheduler.advisor-intraday.lock-name", "AI 장중 점검",
+          "scheduler.advisor-intraday.cron-expression", List.of("0 0 12 * * MON-FRI"), "scheduler.advisor-intraday.enabled", "Asia/Seoul"),
+      new Definition("scheduler.advisor-weekly-review.lock-name", "AI 주간 검토(가중치·교훈·보고)",
+          "scheduler.advisor-weekly-review.cron-expression", List.of("0 0 8 * * SUN"), "scheduler.advisor-weekly-review.enabled", "Asia/Seoul"));
 
   /** shedlock 의 lock_at 이 예상 주기의 이 배수를 넘도록 갱신되지 않으면 지연으로 본다. */
   private static final int STALE_MULTIPLIER = 3;

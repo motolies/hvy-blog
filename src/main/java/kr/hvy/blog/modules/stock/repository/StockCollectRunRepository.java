@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.stock.repository;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
@@ -19,6 +20,12 @@ public interface StockCollectRunRepository extends JpaRepository<StockCollectRun
   List<StockCollectRun> findAllByJobTypeOrderByStartedAtDesc(CollectJobType jobType, Pageable pageable);
 
   Optional<StockCollectRun> findFirstByJobTypeAndStatus(CollectJobType jobType, CollectStatus status);
+
+  /**
+   * 특정 대상일의 가장 최근 종료 run (advisor 게이트가 DAILY 완료·단계 결과를 확인하는 데 쓴다, 2026-09-13).
+   */
+  Optional<StockCollectRun> findFirstByJobTypeAndTargetDateAndStatusInOrderByStartedAtDesc(CollectJobType jobType, LocalDate targetDate,
+      List<CollectStatus> statuses);
 
   /**
    * 카운터를 원자적으로 누적한다. 엔티티를 읽어 더하는 방식은 동시 갱신 시 값을 잃는다.

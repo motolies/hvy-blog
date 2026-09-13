@@ -37,6 +37,7 @@ public class MarketFeatureService {
   private final AdvisorProperties properties;
   private final MarketTrendService trendService;
   private final TradingCalendar tradingCalendar;
+  private final GlobalLinkService globalLinks;
 
   public MarketFeatures features(LocalDate asOf) {
     Map<String, Object> p = Map.of("d", asOf);
@@ -60,15 +61,17 @@ public class MarketFeatureService {
         (rs, i) -> new FlowFeature(rs.getString("market_type"), l(rs.getObject("frgn1")), l(rs.getObject("inst1")), l(rs.getObject("indi1")),
             l(rs.getObject("frgn5")), l(rs.getObject("inst5")), l(rs.getObject("indi5"))));
 
+    // 미국은 현지일 < 기준일만 — 기준일 당일 세션은 19:30 판단 시점에 아직 열리지 않았다. (<= 로 두면 사후 재실행(baseDate=)에서 밤사이 결과가 새어 든다)
     List<GlobalFeature> global = jdbc.query("SELECT symbol, trade_date, close_price, "
             + "close_price / NULLIF(LAG(close_price, 1) OVER w, 0) - 1 AS r1, close_price / NULLIF(LAG(close_price, 5) OVER w, 0) - 1 AS r5, "
+            + "close_price / NULLIF(LAG(close_price, 20) OVER w, 0) - 1 AS r20, close_price / NULLIF(LAG(close_price, 60) OVER w, 0) - 1 AS r60, "
             + "ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn "
-            + "FROM tb_stock_global_market_daily WHERE symbol IN (:symbols) AND trade_date <= :d AND trade_date > CAST(:d AS date) - INTERVAL '30 days' "
+            + "FROM tb_stock_global_market_daily WHERE symbol IN (:symbols) AND trade_date < :d AND trade_date > CAST(:d AS date) - INTERVAL '120 days' "
             + "WINDOW w AS (PARTITION BY symbol ORDER BY trade_date)",
         Map.of("d", asOf, "symbols", GLOBAL_SYMBOLS),
         (rs, i) -> rs.getInt("rn") == 1
             ? new GlobalFeature(rs.getString("symbol"), rs.getObject("trade_date", LocalDate.class), rs.getDouble("close_price"),
-                d(rs.getObject("r1")), d(rs.getObject("r5")))
+                d(rs.getObject("r1")), d(rs.getObject("r5")), d(rs.getObject("r20")), d(rs.getObject("r60")))
             : null)
         .stream().filter(g -> g != null).toList();
     // 지수 심볼 중 가장 오래된 날짜 — 하나라도 뒤처졌으면 그 블록 전체를 오래된 것으로 본다
@@ -109,7 +112,7 @@ public class MarketFeatureService {
 
     TradingCalendar.Window window = tradingCalendar.window(asOf, properties.getHorizonDays());
     return new MarketFeatures(asOf, indices, flows, global, top, bottom, sigma, globalAsOf, globalAge, flowAsOf, sectorAsOf,
-        window.entry(), window.exit(), trendService.trends(asOf));
+        window.entry(), window.exit(), trendService.trends(asOf), globalLinks.links(asOf));
   }
 
   private static Double d(Object value) {

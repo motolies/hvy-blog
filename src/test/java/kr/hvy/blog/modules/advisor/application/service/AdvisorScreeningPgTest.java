@@ -88,7 +88,8 @@ class AdvisorScreeningPgTest {
       DayOfWeek day = ((LocalDate) inv.getArgument(0)).getDayOfWeek();
       return day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY;
     });
-    marketFeatures = new MarketFeatureService(named, properties, new MarketTrendService(named, properties), new TradingCalendar(calendar));
+    marketFeatures = new MarketFeatureService(named, properties, new MarketTrendService(named, properties), new TradingCalendar(calendar),
+        new GlobalLinkService(named, properties));
     jdbc.update("TRUNCATE tb_advisor_signal_ic_daily");
     jdbc.update("DELETE FROM tb_stock_daily_metric WHERE trade_date > ?", BASE);
     jdbc.update("DELETE FROM tb_stock_daily_price WHERE trade_date > ?", BASE);
@@ -236,6 +237,7 @@ class AdvisorScreeningPgTest {
     assertThat(kospi.base().fwd5().n()).isEqualTo(25);
     assertThat(kospi.base().fwd5().mean()).isEqualTo(0.0);
     assertThat(f.dataAsOf()).containsEntry("domestic", BASE.toString()).containsEntry("flowProvisional", true);
+    assertThat(f.links()).as("해외 데이터 없음 → 쌍 4개 모두 n=0").hasSize(4).allMatch(l -> l.n() == 0 && l.beta() == null);
   }
 
   // ---------- 합성 데이터 ----------

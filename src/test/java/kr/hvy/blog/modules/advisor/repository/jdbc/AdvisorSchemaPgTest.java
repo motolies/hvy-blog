@@ -102,9 +102,9 @@ class AdvisorSchemaPgTest {
   }
 
   @Test
-  @DisplayName("advisor 스키마는 tb_advisor_ 접두 테이블 12개를 만들고 stock 22개는 그대로다")
+  @DisplayName("advisor 스키마는 tb_advisor_ 접두 테이블 13개를 만들고 stock 22개는 그대로다")
   void schemaCreatesAdvisorTables() {
-    assertThat(count("tb\\_advisor\\_%")).isEqualTo(12);
+    assertThat(count("tb\\_advisor\\_%")).isEqualTo(13);
     assertThat(count("tb\\_stock\\_%")).isEqualTo(22);
   }
 

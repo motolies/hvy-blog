@@ -69,6 +69,7 @@ public class AdvisorAdminController {
   private final AdviceWriter adviceWriter;
   private final ScoreWriter scoreWriter;
   private final IntradayCheckWriter intradayChecks;
+  private final kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter morningChecks;
   private final PromptInputWriter promptInputs;
   private final AdvisorKpiService kpi;
   private final WeightSetRepository weightSets;
@@ -126,7 +127,7 @@ public class AdvisorAdminController {
   public AdviceDetailResponse advice(@PathVariable long adviceId) {
     AdviceHeader header = adviceWriter.findById(adviceId).orElseThrow(() -> new NoSuchElementException("판단을 찾을 수 없습니다: " + adviceId));
     return new AdviceDetailResponse(header, adviceWriter.candidates(adviceId), adviceWriter.picks(adviceId), scoreWriter.candidateScores(adviceId),
-        scoreWriter.callScores(adviceId), intradayChecks.findByAdvice(adviceId));
+        scoreWriter.callScores(adviceId), intradayChecks.findByAdvice(adviceId), morningChecks.findByAdvice(adviceId).orElse(null));
   }
 
   /**

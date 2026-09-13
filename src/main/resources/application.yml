@@ -242,8 +242,13 @@ advisor:
   advise:
     deadline: "19:55"             # DAILY 완료 대기 마감(KST). 이후 미완료면 SKIPPED + #hvy-error
   prompt:
-    version: advice-v2            # 시간축·추세 국면·전망 (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
+    version: advice-v3            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관) (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
+  morning:                        # 미국 연동 입력(market.link)과 07:30 아침 점검(MORNING_CHECK) 판정
+    link-pairs: ["0001:SPX", "0001:SOX", "1001:COMP", "1001:SOX"]   # 지수별 첫 쌍이 예상 갭의 주 심볼
+    link-window-days: 60
+    sigma-multiple: 1.0           # 판정 임계 = 배수 × σ_1d. |β × 미국 1일 수익률| 이 미만이면 HOLD
+    max-us-lag-days: 4            # 미국 데이터가 기준일보다 이만큼 오래됐으면(휴장·수집 실패) SKIPPED
   trend:                          # 규칙 기반 중기 추세(강세·보합·약세). 성분 5개 합 [-5,+5]. 배포 후 10년 라벨 분포(강세≈40/보합≈35/약세≈25%)로 조정
     bull-threshold: 2
     bear-threshold: -2
@@ -330,6 +335,10 @@ scheduler:
     lock-name: ADVISOR-INTRADAY-TEST
     cron-expression: "0 0 12 * * MON-FRI"
     enabled: false
+  advisor-morning-check:          # 06:30 해외 수집 뒤, 09:00 개장 전. 밤사이 미국 마감을 β 로 환산해 직전 판단 유지/강화/주의 (규칙 기반)
+    lock-name: ADVISOR-MORNING-CHECK-TEST
+    cron-expression: "0 30 7 * * MON-FRI"
+    enabled: false
   advisor-weekly-review:
     lock-name: ADVISOR-WEEKLY-REVIEW-TEST
     cron-expression: "0 0 8 * * SUN"
@@ -406,6 +415,10 @@ scheduler:
   advisor-intraday:
     lock-name: ADVISOR-INTRADAY-PROD
     cron-expression: "0 0 12 * * MON-FRI"
+    enabled: true
+  advisor-morning-check:
+    lock-name: ADVISOR-MORNING-CHECK-PROD
+    cron-expression: "0 30 7 * * MON-FRI"
     enabled: true
   advisor-weekly-review:
     lock-name: ADVISOR-WEEKLY-REVIEW-PROD

@@ -8,6 +8,7 @@ import java.util.Map;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
+import kr.hvy.blog.modules.advisor.domain.model.GlobalLink;
 import kr.hvy.blog.modules.advisor.domain.model.LessonRow;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
 import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
@@ -100,9 +101,24 @@ public class AdvicePromptBuilder {
       row.put("close", round(g.close(), 2));
       row.put("r1", round(g.r1()));
       row.put("r5", round(g.r5()));
+      row.put("r20", round(g.r20()));
+      row.put("r60", round(g.r60()));
       global.add(row);
     }
     m.put("global", global);
+    if (market.links() != null && !market.links().isEmpty()) {
+      List<Map<String, Object>> links = new ArrayList<>();
+      for (GlobalLink l : market.links()) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("kr", l.krIndex());
+        row.put("us", l.usSymbol());
+        row.put("beta", round(l.beta(), 3));
+        row.put("corr", round(l.corr(), 3));
+        row.put("n", l.n());
+        links.add(row);
+      }
+      m.put("link", links);
+    }
     Map<String, Object> sigma = new LinkedHashMap<>();
     market.sigma5d().forEach((k, v) -> sigma.put(k, round(v)));
     m.put("sigma5d", sigma);

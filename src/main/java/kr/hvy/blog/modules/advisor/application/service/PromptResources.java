@@ -18,8 +18,11 @@ import org.springframework.stereotype.Component;
 @Component
 public class PromptResources {
 
-  /** advice-v2 (2026-09-13): dataAsOf·window·dataQuality·market.trend 입력, trendOutlook 출력. v1 파일은 비교용으로 남긴다 */
-  public static final String ADVICE_VERSION = "advice-v2";
+  /**
+   * advice-v3 (2026-09-13): market.global r20/r60 + market.link(β·상관) 입력. v2 는 dataAsOf·window·dataQuality·market.trend 입력, trendOutlook 출력.
+   * 옛 파일은 비교용으로 남긴다.
+   */
+  public static final String ADVICE_VERSION = "advice-v3";
   /** lesson-v2 (2026-09-13): condition 에 trend 키 */
   public static final String LESSON_VERSION = "lesson-v2";
   static final String BASE = "prompts/advisor/";
@@ -30,7 +33,7 @@ public class PromptResources {
   private final String lessonSha256;
 
   public PromptResources() {
-    this.adviceSystem = load(BASE + "advice-system-v2.md");
+    this.adviceSystem = load(BASE + "advice-system-v3.md");
     this.adviceSha256 = sha256(adviceSystem);
     this.lessonSystem = load(BASE + "lesson-system-v2.md");
     this.lessonSha256 = sha256(lessonSystem);

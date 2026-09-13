@@ -128,6 +128,25 @@ public class AdvisorKpiService {
         ((Number) row.get("inv_n")).intValue(), d(row.get("inv_hit_rate")));
   }
 
+  /** 아침 점검 갭 판정 요약 (h=1): n·적중률·CAUTION 비율 */
+  public record MorningSummary(int calls, Double hitRate, Double cautionRate) {
+  }
+
+  /**
+   * 아침 점검(MORNING) 콜 요약 — 예상 갭 부호·크기 판정이 D+1 시가 갭과 맞은 비율.
+   */
+  public MorningSummary morningSummary(AdviceVariant variant, LocalDate from, LocalDate to) {
+    Map<String, Object> p = params(from, to);
+    p.put("variant", variant.getCode());
+    Map<String, Object> row = jdbc.queryForMap("""
+        SELECT COUNT(*) AS n, AVG(CASE WHEN c.hit THEN 1.0 ELSE 0.0 END) AS hit_rate,
+               AVG(CASE WHEN c.predicted = 'CAUTION' THEN 1.0 ELSE 0.0 END) AS caution_rate
+        FROM tb_advisor_call_score c JOIN tb_advisor_advice a ON a.advice_id = c.advice_id
+        WHERE a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type = 'MORNING' AND c.horizon_days = 1 AND c.status = 'SCORED'
+        """, p);
+    return new MorningSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), d(row.get("caution_rate")));
+  }
+
   /**
    * 신뢰도 버킷별 보정 표 (LIVE, LONG).
    */

@@ -1,6 +1,6 @@
 # AI 시장 판단(advisor) 운영 문서
 
-- 모듈 `kr.hvy.blog.modules.advisor`, 테이블 `tb_advisor_*` 12개(`db/advisor-schema.sql`, 시드 `db/advisor-seed.sql`), REST `/api/advisor/admin/**`(ROLE_ADMIN)
+- 모듈 `kr.hvy.blog.modules.advisor`, 테이블 `tb_advisor_*` 13개(`db/advisor-schema.sql`, 시드 `db/advisor-seed.sql`; 13번째 `tb_advisor_morning_check` 는 advice-v3), REST `/api/advisor/admin/**`(ROLE_ADMIN)
 - 작성 2026-09-13. 계획 원문 `~/.claude/plans/elegant-singing-glade.md`. 수집 계층은 `claudedocs/stock-collect.md`.
 - **투자 자문이 아니다.** 개인 실험이며 모든 Slack 메시지에 면책 문구가 고정된다.
 
@@ -10,6 +10,7 @@
 |---|---|---|
 | 18:30 평일 | stock DAILY | 일봉·지표 수집 (advisor 의 입력) |
 | 19:30~19:55 5분 간격 | **ADVISE** | 게이트(DAILY 완료·PRICE/DERIVED OK) → 채점·IC 증분 → 시장 특징(지수·수급·해외·섹터·σ + **규칙 추세·관측 기준일·적용 구간**) → 정량 스크리닝(유니버스 ≈1,200 → 컷 → 후보 30, 섹터당 ≤4) → 정량 top-N 섀도 → LLM 판단(strict JSON, 후보 enum) → 가드 → 저장·입력 스냅샷 → **#hvy-advisor 발행** → (메모리 활성 시) 메모리 없는 LLM 섀도 |
+| 07:30 평일 | **MORNING_CHECK** | 06:30 해외 수집 뒤·09:00 개장 전. 밤사이 미국 마감 수익률 × 기준일 β(주 심볼)로 **예상 갭**을 계산해 직전 판단의 지수 방향을 유지/강화/주의 판정(규칙 기반, LLM 없음, 원 판단 불변). `tb_advisor_morning_check` 1행 + Slack 짧은 보고. h=1 채점에서 D+1 시가 갭과 대조(`MORNING`) |
 | 12:00 평일 | **INTRADAY** | 직전 영업일 판단을 KIS 현재가로 대조, 일치율·판정 짧은 보고(규칙 기반, 학습 미반영) |
 | 08:00 일요일 | **WEEKLY_REVIEW** | 확정 재채점 → IC 가중치 세트(n_eff 게이트) → 교훈(누적 픽 게이트) → 동결 입력 재실행 Jaccard → 주간 보고 → 스냅샷 보존 정리 |
 | 수동 | SCORE / IC_BACKFILL | 채점 보충 / IC 사전 추정(1회) |
@@ -29,6 +30,14 @@
 
 `MarketRegimeCode`(RISK_ON/NEUTRAL/RISK_OFF, 5거래일 위험 선호)와 `MarketTrendCode`(중기 추세)는 **다른 축**이다 — 강세장 안의 단기 위험 회피가 실재하므로 합치지 않는다. 시장 breadth 는 새 MV `mv_stock_market_breadth_daily`(stock 모듈, DAILY DERIVED 가 갱신)에서 온다. 교훈 condition 에 `trend` 키가 추가됐고(lesson-v2) 이 조건은 규칙이 기준일에 확정한 **오늘** 값으로 판정한다(`regime` 조건은 여전히 어제 LIVE 국면).
 
+### 1.2 미국 연동 (advice-v3, 2026-09-13)
+
+19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.
+
+- 입력 `market.link[{kr, us, beta, corr, n}]`(`GlobalLinkService`): 쌍은 yml `advisor.morning.link-pairs`(기본 KOSPI:SPX·SOX, KOSDAQ:COMP·SOX), 창 60 국내 거래일. **정렬**: 국내 d일 수익률 ↔ 현지일 ∈ [국내 직전 거래일, d−1] 인 미국 세션(월요일 ↔ 금요일). 그 구간에 미국 세션이 없으면(미국 휴장) 짝을 짓지 않는다 — 같은 미국 수익률을 두 국내일에 재사용하지 않기 위해서다. `market.global` 에 r20/r60 이 붙었고, 조회 필터가 `현지일 < 기준일` 로 바뀌어 사후 재실행(`baseDate=`)에서도 밤사이 결과가 새어 들지 않는다(v2 까지의 결함).
+- 아침 점검(`MorningCheckJob`): 대상 = 직전 영업일 LIVE. 예상 갭 = β(지수별 주 심볼, 기준일 기준) × 밤사이 미국 1일 수익률, 임계 = `sigma-multiple`(1.0) × σ_1d(직전 60일). |갭| < 임계 → **HOLD**, 어제 방향과 같은 부호 → **REINFORCE**, 반대 부호(또는 NEUTRAL 예측에 큰 갭) → **CAUTION**. 전체 판정은 지수별 중 가장 심각한 것. 기준일에 미국이 휴장이면 새 정보가 없으므로 HOLD 로 기록만, 미국 데이터가 `max-us-lag-days`(4) 보다 오래되면 SKIPPED. **원 판단·픽·채점은 그대로** — 점검은 `tb_advisor_morning_check` 별도 행이고 관리자 `GET /advices/{id}` 의 `morningCheck` 로 보인다.
+- `SignalCode.GLOBAL_LINK` 종목 시그널은 채우지 않는다(종목별 매핑 없음, 고β 는 강세장에 좋고 약세장에 나쁘므로 IC 부호가 국면에 따라 뒤집힘). VIX·미국 10년물은 `KisOverseasSymbolManualTest` 로 KIS 가 심볼을 주는지 실측한 뒤 yml `kis.overseas.symbols` 에만 추가하면 된다.
+
 ## 2. 설정 (application.yml)
 
 | 키 | 기본 | 뜻 |
@@ -44,6 +53,9 @@
 | `advisor.trend.confirm-days` | 2 | 전환 확인 연속 거래일 |
 | `advisor.trend.score-horizon-days` | 20 | 추세 전망 채점 창. **`diagnostic-horizons` 에 없으면 기동 시 WARN 이고 채점이 영원히 안 돈다** |
 | `advisor.trend.invalidation-tolerance-days` | 2 | TREND_INV 적중: 무효화 발동일과 전환일의 허용 거리 |
+| `advisor.morning.link-pairs` | `0001:SPX, 0001:SOX, 1001:COMP, 1001:SOX` | β·상관 쌍. 지수별 첫 쌍이 아침 점검 예상 갭의 주 심볼 |
+| `advisor.morning.link-window-days` / `sigma-multiple` / `max-us-lag-days` | 60 / 1.0 / 4 | β 창(국내 거래일) / 아침 판정 임계 배수(× σ_1d) / 미국 데이터 허용 지연(캘린더일, 초과면 SKIPPED) |
+| `scheduler.advisor-morning-check.enabled` | default false / prod true | 07:30 MON-FRI, 기동 시 평가 |
 | `advisor.horizon-days` | 5 | 결정 호라이즌. 채점·KPI·학습 전부 이 값 |
 | `advisor.candidate-limit` / `max-per-sector` / `pick-min` / `pick-max` | 30 / 4 / 3 / 10 | 깔때기 |
 | `advisor.advise.deadline` | 19:55 | 이후에도 DAILY 미완료면 SKIPPED + #hvy-error |
@@ -57,7 +69,7 @@
 
 1. Slack 워크스페이스에 `#hvy-advisor` 채널 생성(없으면 발행 실패가 로그로만 남는다).
 2. env: `OPENAI_API_KEY`, `ADVISOR_JUDGE_MODEL`, `ADVISOR_ASSIST_MODEL`, `ADVISOR_ENABLED=true`. 모델 ID 는 OpenAI 모델 목록에서 확정.
-3. psql: `db/advisor-schema.sql` → `db/advisor-seed.sql` (재실행 안전). **advice-v2 를 기존 설치에 올릴 때**는 같은 파일 하단의 마이그레이션 블록(`ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS trend_kospi …`, `tb_advisor_call_score.predicted/actual_dir VARCHAR(20)`, `event_date`)이 함께 실행되는지 확인한다 — `predicted` 확대를 빠뜨리면 `BEYOND_20D`(10자) 저장이 조용히 실패한다. stock 쪽은 `cat db/stock-derived-rebuild.sql db/stock-derived.sql | psql -1` 로 breadth MV 를 만든다.
+3. psql: `db/advisor-schema.sql` → `db/advisor-seed.sql` (재실행 안전; v3 의 `tb_advisor_morning_check` 는 `CREATE TABLE IF NOT EXISTS` 라 재적용으로 생긴다). **advice-v2 를 기존 설치에 올릴 때**는 같은 파일 하단의 마이그레이션 블록(`ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS trend_kospi …`, `tb_advisor_call_score.predicted/actual_dir VARCHAR(20)`, `event_date`)이 함께 실행되는지 확인한다 — `predicted` 확대를 빠뜨리면 `BEYOND_20D`(10자) 저장이 조용히 실패한다. stock 쪽은 `cat db/stock-derived-rebuild.sql db/stock-derived.sql | psql -1` 로 breadth MV 를 만든다.
    추세 임계 점검(10년 라벨 분포, 목표 강세≈40 / 보합≈35 / 약세≈25%):
    ```sql
    WITH scored AS (SELECT index_code, trade_date,
@@ -110,7 +122,7 @@ SELECT stage, status, COUNT(*) FROM tb_advisor_candidate_score WHERE horizon_day
 
 | 상황 | 채널 | 멘션 |
 |---|---|---|
-| 일일 추천 / 장중 점검 / 주간 보고 | #hvy-advisor | 없음 |
+| 일일 추천 / 아침 점검 / 장중 점검 / 주간 보고 | #hvy-advisor | 없음 |
 | run PARTIAL(가드 제거율 >30%, 섀도·발행 실패, 채점 단계 실패) | #hvy-notify | 없음 |
 | 잡 예외, 스케줄 트리거 거부(설정 누락·이미 실행 중), 마감 초과 DAILY 미완료 | #hvy-error | 있음 |
 
@@ -129,6 +141,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - 청산일 행 없음: 구간 마지막 종가로 청산 — 상폐 DELISTED, 아니면 SUSPENDED. **학습 포함**(빼면 낙관 편향). 진입가 없음 MISSING(다음 날 재시도).
 - 잠정(PROVISIONAL) → 마지막 WEEKLY 성공 이후 확정(CONFIRMED) 재채점(유상증자 계수 지연).
 - 국면: close-to-close, 밴드 = 0.5×σ_1d×√h(직전 60일; h=5 면 σ_5d — 2026-09-13 이전엔 √5 고정이라 진단 h=1·20 밴드가 틀렸다), 밴드 안 NEUTRAL, Brier 는 부호 기준. 섹터: 업종 지수 있으면 종가, 없으면 MV 동일가중, 시장 대비 초과 >0.
+- **아침 점검(advice-v3, h=1 패스만, subject_type `MORNING`)**: predicted=지수별 판정(REINFORCE/HOLD/CAUTION), actual=D+1 시가 갭 `open(D+1)/close(D)−1`, band=임계, actual_dir=|갭|<임계 NEUTRAL 아니면 부호. hit: HOLD 는 |갭|<임계, REINFORCE·CAUTION 은 예상 갭과 부호 일치. 예상 갭이 없던 지수(미국 휴장·β 결손)는 MISSING. 픽 채점은 D+1 시가 진입이라 야간 갭이 픽에는 빠지고 INDEX 콜(close→close)에는 들어간다는 비대칭을 이 행이 설명해 준다(INDEX 를 open(D+1)→close 로 바꾸는 규약 변경은 6개월 뒤 갭 기여도를 본 뒤).
 - **추세 전망(advice-v2, h=20 패스만, `tb_advisor_call_score` subject_type)**: `TREND` predicted=persist 버킷, actual_dir=실현 버킷(확정 라벨이 판단 때 동결한 라벨과 처음 달라진 거래일 오프셋 1~5 → WITHIN_5D, 6~20 → ABOUT_20D, 없음 → BEYOND_20D), hit=일치, **Brier=(confidence−1[hit])² 적중 기준(INDEX 의 부호 기준과 섞지 않는다)**, event_date=전환일. `TREND_INV` predicted=무효화 타입, actual_dir=FIRED|QUIET, hit=전환·발동이 둘 다 없거나 둘 다 있고 ±tolerance 안(조기 신호로 작동), NONE 은 MISSING. 정답은 `TrendSql` 로 결정론이라 LLM 선택과 무관하다. **첫 행은 20영업일 뒤, 4주간 적중률을 판정하지 않는다.** TREND 는 픽 진입·청산과 무관한 서술 검증용이며 교훈 evidence·보정 표·가중치에 쓰지 않는다.
 - KPI: 변형별(LIVE·QUANT_TOPN·LLM_NOMEM) LONG 픽 승률·평균 초과±se·후보군 평균·**부가가치**, AVOID 별도, 국면 적중·Brier skill, 보정 표, 주간 보고에 "20일 추세 지속 적중 · 무효화 신호 적중" 별도 줄. `data_quality=OK` 만.
 
@@ -143,7 +156,8 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 
 - 수집 항목 추가 → `FeatureSql.featureCtes()` feat CTE 컬럼 1줄 + `SignalCode` 상수 1줄 + `advisor-seed.sql` 행 1개(+ `schema-postgres.sql` 미러). 스크리닝·IC·프롬프트가 자동 반영.
 - 추세 성분 추가 → `TrendSql.labelCtes()` 의 comp CTE 에 CASE 1줄 + score 합에 항 추가 + `MarketTrendService` components 맵 + `AdvisorProperties.Trend` 손잡이. 판단·채점·기저율이 자동으로 같은 정의를 쓴다.
-- 다음 단계(계획 `~/.claude/plans/moto-planner-agent-transient-lovelace.md`): **Phase 2 미국 연동**(β·상관 입력 `market.link`, 07:30 규칙 기반 아침 점검 잡 — 19:30 판단 시점의 미국 데이터는 이미 국내 종가에 반영된 과거이므로 예측 가치는 아침에 있다), **Phase 3 뉴스**(KIS 종합 시황/공시 제목 API → `tb_stock_news`, `citedNews` id enum 가드, `LLM_NONEWS` 섀도 8주 대조 — 백테스트 불가라 섀도가 유일한 측정).
+- 연동 쌍 추가 → yml `advisor.morning.link-pairs` 에 `지수:심볼` 1개(심볼은 `kis.overseas.symbols` 에 수집돼 있어야 함). 코드 변경 없음.
+- 다음 단계(계획 `~/.claude/plans/moto-planner-agent-transient-lovelace.md`): **Phase 3 뉴스**(KIS 종합 시황/공시 제목 API → `tb_stock_news`, `citedNews` id enum 가드, `LLM_NONEWS` 섀도 8주 대조 — 백테스트 불가라 섀도가 유일한 측정). Phase 2 미국 연동은 §1.2 로 반영됐다.
 - 2차: DART, 실시간 웹소켓(장중 점검 주기 확대), 백테스트(밸류 이력·상폐 유니버스 스냅샷이 쌓인 뒤).
 
 ## 10. 미실측·잔여

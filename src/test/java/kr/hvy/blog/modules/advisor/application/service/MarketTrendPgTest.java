@@ -96,7 +96,7 @@ class MarketTrendPgTest {
     properties.getTrend().setBullThreshold(1);
     properties.getTrend().setBearThreshold(-1);
     trends = new MarketTrendService(named, properties);
-    scoring = new AdviceScoringService(named, mock(ScoreWriter.class), properties);
+    scoring = new AdviceScoringService(named, mock(ScoreWriter.class), properties, mock(kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter.class));
   }
 
   @Test

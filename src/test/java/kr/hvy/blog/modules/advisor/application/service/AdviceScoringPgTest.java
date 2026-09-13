@@ -68,6 +68,7 @@ class AdviceScoringPgTest {
   private AdvisorKpiService kpi;
   private ScoreJob scoreJob;
   private AdvisorProperties properties;
+  private kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter morningChecks;
   private long runId;
 
   @BeforeAll
@@ -84,7 +85,8 @@ class AdviceScoringPgTest {
     properties.getLesson().setMinPicks(1);
     adviceWriter = new AdviceWriter(jdbc);
     scoreWriter = new ScoreWriter(new BatchUpsertSupport(jdbc), jdbc);
-    scoring = new AdviceScoringService(named, scoreWriter, properties);
+    morningChecks = new kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter(jdbc);
+    scoring = new AdviceScoringService(named, scoreWriter, properties, morningChecks);
     kpi = new AdvisorKpiService(named, properties);
     StockCollectRunRepository collectRuns = mock(StockCollectRunRepository.class);
     when(collectRuns.findAllByJobTypeOrderByStartedAtDesc(any(), any())).thenReturn(List.of());
@@ -262,6 +264,44 @@ class AdviceScoringPgTest {
 
     // INDEX 진단 채점의 σ 가 √h 로 커진다 (변동성 0 인 합성 데이터라 밴드는 0 이지만 :h 파라미터 SQL 이 실행되는지 확인)
     assertThat(scoring.indexScores(advice, 20, ScoreStage.PROVISIONAL)).hasSize(2).allMatch(r -> r.band() != null && r.band() == 0.0);
+  }
+
+  @Test
+  @DisplayName("아침 점검 채점(h=1): 예상 갭 부호가 D+1 시가 갭(합성 0)과 어긋나면 빗나감, HOLD 는 |갭|<임계 적중, 예상 갭 없음은 MISSING, 점검 없는 판단은 빈 목록")
+  void morningScoring() {
+    long adviceId = insertAdvice(D.get(10), AdviceVariant.LIVE, List.of(1), Map.of(1, PickDirection.LONG));
+    AdviceHeader advice = adviceWriter.findById(adviceId).orElseThrow();
+    assertThat(scoring.morningScores(advice, 1, ScoreStage.PROVISIONAL)).as("점검 행 없음").isEmpty();
+
+    Map<String, Object> detail = Map.of("index", Map.of(
+        "0001", Map.of("symbol", "SPX", "beta", 0.6, "usR1", 0.02, "gapEst", 0.012, "threshold", 0.01, "predicted", "UP", "verdict", "REINFORCE"),
+        "1001", new java.util.HashMap<>(Map.of("symbol", "COMP", "threshold", 0.01, "verdict", "HOLD"))));
+    long checkId = morningChecks.insert(kr.hvy.blog.modules.advisor.domain.model.MorningCheckRow.builder().adviceId(adviceId).runId(runId)
+        .baseDate(D.get(10)).usDate(D.get(10)).gapKospi(0.012).verdict(kr.hvy.blog.modules.advisor.domain.code.MorningVerdict.REINFORCE).detailJson(detail).build());
+    assertThat(checkId).isPositive();
+    assertThat(morningChecks.findByAdvice(adviceId)).isPresent();
+    assertThat(morningChecks.findByAdvice(adviceId).get().detailJson()).containsKey("index");
+
+    assertThat(scoring.morningScores(advice, 5, ScoreStage.PROVISIONAL)).as("h=1 패스에서만").isEmpty();
+    List<CallScoreRow> rows = scoring.morningScores(advice, 1, ScoreStage.PROVISIONAL);
+    assertThat(rows).hasSize(2).allMatch(r -> r.subjectType() == CallSubject.MORNING);
+    CallScoreRow kospi = rows.stream().filter(r -> r.subjectCode().equals("0001")).findFirst().orElseThrow();
+    assertThat(kospi.status()).isEqualTo(ScoreStatus.SCORED);
+    assertThat(kospi.predicted()).isEqualTo("REINFORCE");
+    assertThat(kospi.actualRet()).as("합성 지수는 시가=종가라 갭 0").isEqualTo(0.0);
+    assertThat(kospi.actualDir()).isEqualTo("NEUTRAL");
+    assertThat(kospi.hit()).as("+갭 예상인데 갭 0 → 부호 불일치").isFalse();
+    assertThat(kospi.band()).isEqualTo(0.01);
+    CallScoreRow kosdaq = rows.stream().filter(r -> r.subjectCode().equals("1001")).findFirst().orElseThrow();
+    assertThat(kosdaq.status()).as("예상 갭 없음").isEqualTo(ScoreStatus.MISSING);
+
+    // HOLD 는 |실제 갭| < 임계가 적중
+    jdbc.update("UPDATE tb_advisor_morning_check SET detail_json = jsonb_set(detail_json, '{index,0001,verdict}', '\"HOLD\"') WHERE check_id = ?", checkId);
+    CallScoreRow hold = scoring.morningScores(advice, 1, ScoreStage.PROVISIONAL).stream().filter(r -> r.subjectCode().equals("0001")).findFirst().orElseThrow();
+    assertThat(hold.hit()).isTrue();
+
+    scoreWriter.upsertCallScores(rows);
+    assertThat(kpi.morningSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast()).calls()).isEqualTo(1);
   }
 
   @Test

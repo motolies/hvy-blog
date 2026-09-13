@@ -15,6 +15,8 @@ public enum AdvisorJobType implements EnumCode<String> {
   ADVISE("ADVISE", "일일 시장 판단·추천", true),
   SCORE("SCORE", "채점·IC 계산 (보충 실행)", true),
   INTRADAY("INTRADAY", "장중 점검", false),
+  /** 07:30 아침 점검: 밤사이 미국 마감을 β 로 환산한 예상 갭으로 직전 판단을 유지/강화/주의 판정 (규칙 기반, 원 판단 불변) */
+  MORNING_CHECK("MORNING_CHECK", "아침 해외 반영 점검", false),
   WEEKLY_REVIEW("WEEKLY_REVIEW", "주간 검토 (가중치·보정·교훈·보고)", true),
   IC_BACKFILL("IC_BACKFILL", "시그널 IC 사전 추정", true);
 

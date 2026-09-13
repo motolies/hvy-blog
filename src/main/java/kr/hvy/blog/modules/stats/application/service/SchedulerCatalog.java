@@ -67,6 +67,8 @@ public class SchedulerCatalog {
           null, List.of("0 30 19 * * MON-FRI"), "scheduler.advisor-advise.enabled", "Asia/Seoul"),
       new Definition("scheduler.advisor-intraday.lock-name", "AI 장중 점검",
           "scheduler.advisor-intraday.cron-expression", List.of("0 0 12 * * MON-FRI"), "scheduler.advisor-intraday.enabled", "Asia/Seoul"),
+      new Definition("scheduler.advisor-morning-check.lock-name", "AI 아침 해외 반영 점검",
+          "scheduler.advisor-morning-check.cron-expression", List.of("0 30 7 * * MON-FRI"), "scheduler.advisor-morning-check.enabled", "Asia/Seoul"),
       new Definition("scheduler.advisor-weekly-review.lock-name", "AI 주간 검토(가중치·교훈·보고)",
           "scheduler.advisor-weekly-review.cron-expression", List.of("0 0 8 * * SUN"), "scheduler.advisor-weekly-review.enabled", "Asia/Seoul"));
 

@@ -4,6 +4,7 @@ import jakarta.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Map;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -53,6 +54,7 @@ public class AdvisorProperties {
   private Advise advise = new Advise();
   private Prompt prompt = new Prompt();
   private Trend trend = new Trend();
+  private Morning morning = new Morning();
   private Scoring scoring = new Scoring();
   private Ic ic = new Ic();
   private Lesson lesson = new Lesson();
@@ -148,6 +150,39 @@ public class AdvisorProperties {
 
     /** TREND_INV 적중 판정: 무효화 발동일과 전환일의 허용 거리(거래일) */
     private int invalidationToleranceDays = 2;
+  }
+
+  /**
+   * 미국 연동(advice-v3): 판단 입력 market.link 의 β·상관 쌍과 07:30 아침 점검(MORNING_CHECK) 판정 손잡이.
+   */
+  @Data
+  public static class Morning {
+
+    /** 국내 지수:미국 심볼 쌍. 지수별 첫 쌍이 아침 점검의 예상 갭에 쓰는 주 심볼이다 */
+    private List<String> linkPairs = List.of("0001:SPX", "0001:SOX", "1001:COMP", "1001:SOX");
+
+    /** β·상관 추정 창(국내 거래일) */
+    private int linkWindowDays = 60;
+
+    /** 판정 임계 = 이 배수 × σ_1d(직전 sigma-lookback-days). |예상 갭| 이 미만이면 HOLD */
+    private double sigmaMultiple = 1.0;
+
+    /** 미국 데이터가 판단 기준일보다 이 캘린더일 이상 오래됐으면(휴장·수집 실패) 점검을 SKIPPED 로 닫는다 */
+    private int maxUsLagDays = 4;
+
+    /**
+     * 지수 코드 → 주 심볼 (linkPairs 의 첫 쌍).
+     */
+    public Map<String, String> primarySymbols() {
+      Map<String, String> primary = new java.util.LinkedHashMap<>();
+      for (String pair : linkPairs) {
+        String[] parts = pair.split(":", 2);
+        if (parts.length == 2) {
+          primary.putIfAbsent(parts[0].trim(), parts[1].trim());
+        }
+      }
+      return primary;
+    }
   }
 
   @Data

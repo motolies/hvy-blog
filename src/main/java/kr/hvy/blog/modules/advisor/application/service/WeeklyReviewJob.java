@@ -199,6 +199,10 @@ public class WeeklyReviewJob implements AdvisorJob {
         kpiLines.add(String.format("%d일 추세 지속 적중 %.0f%% (n=%d) · 무효화 신호 적중 %.0f%% (n=%d)", properties.getTrend().getScoreHorizonDays(),
             pct(trend.hitRate()), trend.calls(), pct(trend.invalidationHitRate()), trend.invalidationCalls()));
       }
+      AdvisorKpiService.MorningSummary morning = kpi.morningSummary(AdviceVariant.LIVE, from, today);
+      if (morning.calls() > 0) {
+        kpiLines.add(String.format("아침 갭 판정 적중 %.0f%% (n=%d) · 주의 비율 %.0f%%", pct(morning.hitRate()), morning.calls(), pct(morning.cautionRate())));
+      }
       if (kpiLines.isEmpty()) {
         kpiLines.add("채점된 픽 없음");
       }

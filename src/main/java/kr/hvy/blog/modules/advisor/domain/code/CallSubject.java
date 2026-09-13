@@ -17,7 +17,9 @@ public enum CallSubject implements EnumCode<String> {
   /** 추세 지속 기간 버킷 (h=20 진단 패스, Brier 는 적중 기준 — INDEX 의 부호 기준과 섞지 않는다) */
   TREND("TREND", "추세 지속"),
   /** 무효화 조건의 조기 신호 적중 (혼동행렬: 전환·발동 일치가 적중) */
-  TREND_INV("TREND_INV", "추세 무효화");
+  TREND_INV("TREND_INV", "추세 무효화"),
+  /** 아침 점검 예상 갭(β × 미국 밤사이 수익률) vs D+1 시가 갭 (h=1) */
+  MORNING("MORNING", "아침 갭 판정");
 
   private final String code;
   private final String desc;

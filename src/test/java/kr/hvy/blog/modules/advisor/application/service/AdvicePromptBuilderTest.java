@@ -61,6 +61,9 @@ class AdvicePromptBuilderTest {
     assertThat(json).contains("\"window\":{\"entry\":\"2026-09-14\",\"exit\":\"2026-09-18\",\"entryRule\":\"다음 영업일 시가\",\"exitRule\":\"5번째 영업일 종가\"}");
     assertThat(json).contains("\"dataQuality\":\"DEGRADED\"");
     assertThat(json.indexOf("\"dataQuality\"")).isLessThan(json.indexOf("\"sectors\""));
+    // advice-v3: 미국 r20/r60 과 연동 강도
+    assertThat(json).contains("\"global\":[{\"sym\":\"SPX\",\"date\":\"2026-09-10\",\"close\":6500.5,\"r1\":0.0061,\"r5\":0.0154,\"r20\":0.0312,\"r60\":0.0871}]");
+    assertThat(json).contains("\"link\":[{\"kr\":\"0001\",\"us\":\"SPX\",\"beta\":0.512,\"corr\":0.615,\"n\":60},{\"kr\":\"1001\",\"us\":\"COMP\",\"n\":0}]");
   }
 
   @Test
@@ -89,11 +92,13 @@ class AdvicePromptBuilderTest {
     return new MarketFeatures(LocalDate.of(2026, 9, 11),
         List.of(new MarketFeatures.IndexFeature("0001", "KOSPI", 2731.44, 0.0042, -0.0113, 0.0287, null, 0.0129, 0.0402)),
         List.of(new MarketFeatures.FlowFeature("KOSPI", -182000000000L, 94000000000L, 88000000000L, -410000000000L, 221000000000L, null)),
-        List.of(new MarketFeatures.GlobalFeature("SPX", LocalDate.of(2026, 9, 10), 6500.5, 0.0061, 0.0154)),
+        List.of(new MarketFeatures.GlobalFeature("SPX", LocalDate.of(2026, 9, 10), 6500.5, 0.0061, 0.0154, 0.0312, 0.0871)),
         List.of(new MarketFeatures.SectorFeature("G2510", "반도체", 0.0412, 0.71, 0.34, 286000000000L, 58)),
         List.of(new MarketFeatures.SectorFeature("G3020", "음식료", -0.0231, 0.19, 0.03, -41000000000L, 42)),
         Map.of("0001", 0.01023), LocalDate.of(2026, 9, 10), 1, LocalDate.of(2026, 9, 11), LocalDate.of(2026, 9, 11),
-        LocalDate.of(2026, 9, 14), LocalDate.of(2026, 9, 18), List.of(trend()));
+        LocalDate.of(2026, 9, 14), LocalDate.of(2026, 9, 18), List.of(trend()),
+        List.of(new kr.hvy.blog.modules.advisor.domain.model.GlobalLink("0001", "SPX", 0.5123, 0.6149, 60),
+            new kr.hvy.blog.modules.advisor.domain.model.GlobalLink("1001", "COMP", null, null, 0)));
   }
 
   static MarketTrend trend() {

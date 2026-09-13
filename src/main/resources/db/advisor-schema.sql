@@ -459,6 +459,35 @@ COMMENT ON COLUMN tb_advisor_intraday_check.verdict         IS 'ON_TRACK | MIXED
 COMMENT ON COLUMN tb_advisor_intraday_check.comment         IS '규칙 기반 요약';
 COMMENT ON COLUMN tb_advisor_intraday_check.created_at      IS '생성일시';
 
+CREATE TABLE IF NOT EXISTS tb_advisor_morning_check
+(
+    check_id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    advice_id    BIGINT           NOT NULL REFERENCES tb_advisor_advice (advice_id) ON DELETE CASCADE,
+    run_id       BIGINT                    DEFAULT NULL,
+    base_date    DATE             NOT NULL,
+    us_date      DATE             NOT NULL,
+    gap_kospi    DOUBLE PRECISION          DEFAULT NULL,
+    gap_kosdaq   DOUBLE PRECISION          DEFAULT NULL,
+    verdict      VARCHAR(20)      NOT NULL,
+    detail_json  JSONB                     DEFAULT NULL,
+    published_at TIMESTAMPTZ(6)            DEFAULT NULL,
+    created_at   TIMESTAMPTZ(6)   NOT NULL DEFAULT NOW(),
+    CONSTRAINT uk_advisor_morning_check UNIQUE (advice_id)
+);
+
+COMMENT ON TABLE  tb_advisor_morning_check              IS '아침 해외 반영 점검 (07:30, 규칙 기반, LLM 미사용, advice-v3). 원 판단(tb_advisor_advice)은 수정하지 않는다';
+COMMENT ON COLUMN tb_advisor_morning_check.check_id     IS '점검 식별자';
+COMMENT ON COLUMN tb_advisor_morning_check.advice_id    IS '점검 대상 판단 (직전 영업일 LIVE)';
+COMMENT ON COLUMN tb_advisor_morning_check.run_id       IS '점검 run';
+COMMENT ON COLUMN tb_advisor_morning_check.base_date    IS '판단 기준일';
+COMMENT ON COLUMN tb_advisor_morning_check.us_date      IS '반영한 미국 세션의 현지 거래일 (KST 새벽 마감, 정상이면 base_date 와 같다)';
+COMMENT ON COLUMN tb_advisor_morning_check.gap_kospi    IS 'KOSPI 예상 갭 = β(주 심볼) × 미국 1일 수익률';
+COMMENT ON COLUMN tb_advisor_morning_check.gap_kosdaq   IS 'KOSDAQ 예상 갭';
+COMMENT ON COLUMN tb_advisor_morning_check.verdict      IS 'REINFORCE 강화 | HOLD 유지 | CAUTION 주의 (지수별 판정 중 가장 심각한 것)';
+COMMENT ON COLUMN tb_advisor_morning_check.detail_json  IS '{us:{sym:{date,r1}}, index:{code:{beta,symbol,gapEst,threshold,predicted,verdict}}}';
+COMMENT ON COLUMN tb_advisor_morning_check.published_at IS 'Slack 발행 시각';
+COMMENT ON COLUMN tb_advisor_morning_check.created_at   IS '생성일시';
+
 CREATE TABLE IF NOT EXISTS tb_advisor_prompt_input
 (
     run_id         BIGINT         NOT NULL REFERENCES tb_advisor_run (run_id) ON DELETE CASCADE,

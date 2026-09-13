@@ -15,6 +15,7 @@ import java.util.Map;
  * @param entryDate            적용 진입일(예정) = 기준일 다음 영업일 시가
  * @param exitDate             적용 청산일(예정) = h번째 영업일 종가
  * @param trends               지수별 규칙 기반 중기 추세 (KOSPI·KOSDAQ)
+ * @param links                국내 지수 ↔ 미국 심볼 연동 강도 (advice-v3, 없으면 빈 목록)
  */
 public record MarketFeatures(
     LocalDate asOf,
@@ -30,7 +31,8 @@ public record MarketFeatures(
     LocalDate sectorAsOf,
     LocalDate entryDate,
     LocalDate exitDate,
-    List<MarketTrend> trends) {
+    List<MarketTrend> trends,
+    List<GlobalLink> links) {
 
   public record IndexFeature(String code, String name, double close, Double r1, Double r5, Double r20, Double r60, Double distMa20, Double distMa60) {
   }
@@ -39,7 +41,8 @@ public record MarketFeatures(
   public record FlowFeature(String market, Long frgn1, Long inst1, Long indi1, Long frgn5, Long inst5, Long indi5) {
   }
 
-  public record GlobalFeature(String symbol, LocalDate date, double close, Double r1, Double r5) {
+  /** 미국 T-1 마감(현지일 < 국내 기준일)의 종가와 1/5/20/60일 수익률 */
+  public record GlobalFeature(String symbol, LocalDate date, double close, Double r1, Double r5, Double r20, Double r60) {
   }
 
   /** 섹터 5일 시총가중 등락 합, 최신일 상승 비율·52주 고점 근접 비율, 외인 5일 순매수 합, 구성 종목 수 */

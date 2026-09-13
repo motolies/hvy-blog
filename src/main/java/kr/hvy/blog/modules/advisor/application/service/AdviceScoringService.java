@@ -136,6 +136,7 @@ public class AdviceScoringService {
   private final NamedParameterJdbcTemplate jdbc;
   private final ScoreWriter scoreWriter;
   private final AdvisorProperties properties;
+  private final kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter morningChecks;
 
   /** 채점 결과 요약 */
   public record Outcome(long adviceId, int horizonDays, int candidates, int scored, int missing, int calls) {
@@ -153,6 +154,7 @@ public class AdviceScoringService {
     List<CallScoreRow> calls = new ArrayList<>(indexScores(advice, horizonDays, stage));
     calls.addAll(sectorScores(advice, horizonDays, stage));
     calls.addAll(trendScores(advice, horizonDays, stage));
+    calls.addAll(morningScores(advice, horizonDays, stage));
     if (!calls.isEmpty()) {
       scoreWriter.upsertCallScores(calls);
     }
@@ -346,6 +348,66 @@ public class AdviceScoringService {
       }
     }
     return rows;
+  }
+
+  /** D+1 시가 갭: 기준일 종가 → 다음 영업일 시가 */
+  private static final String GAP_SQL = """
+      WITH cal AS (SELECT trade_date, ROW_NUMBER() OVER (ORDER BY trade_date) AS rn FROM vw_stock_market_calendar),
+      base AS (SELECT rn FROM cal WHERE trade_date = :baseDate),
+      nxt AS (SELECT c1.trade_date FROM base b JOIN cal c1 ON c1.rn = b.rn + 1)
+      SELECT i0.index_code, i0.close_price AS base_close, i1.open_price AS next_open
+      FROM tb_stock_index_daily i0
+               CROSS JOIN nxt
+               LEFT JOIN tb_stock_index_daily i1 ON i1.index_code = i0.index_code AND i1.trade_date = nxt.trade_date
+      WHERE i0.trade_date = :baseDate AND i0.index_code IN (:codes)
+      """;
+
+  /**
+   * 아침 점검 채점 (h=1 패스만): 예상 갭(β × 밤사이 미국 수익률)의 부호·크기 판정을 D+1 시가 갭과 대조한다.
+   * HOLD 는 |실제 갭| < 임계가 적중, REINFORCE·CAUTION 은 부호 일치가 적중. 예상 갭이 없던 지수(미국 휴장·β 결손)는 MISSING.
+   * 점검 행이 없는 판단(섀도·점검 전)은 빈 목록.
+   */
+  List<CallScoreRow> morningScores(AdviceHeader advice, int h, ScoreStage stage) {
+    if (h != 1 || advice.adviceId() == null) {
+      return List.of();
+    }
+    Optional<kr.hvy.blog.modules.advisor.domain.model.MorningCheckRow> check = morningChecks.findByAdvice(advice.adviceId());
+    if (check.isEmpty() || !(check.get().detailJson().get("index") instanceof Map<?, ?> indexDetail)) {
+      return List.of();
+    }
+    Map<String, double[]> gaps = new java.util.HashMap<>();
+    jdbc.query(GAP_SQL, Map.of("baseDate", advice.baseDate(), "codes", List.of("0001", "1001")), rs -> {
+      Double base = nullable(rs.getObject("base_close"));
+      Double open = nullable(rs.getObject("next_open"));
+      if (base != null && open != null && base > 0) {
+        gaps.put(rs.getString("index_code"), new double[]{base, open});
+      }
+    });
+    List<CallScoreRow> rows = new ArrayList<>();
+    for (String code : List.of("0001", "1001")) {
+      if (!(indexDetail.get(code) instanceof Map<?, ?> d)) {
+        continue;
+      }
+      Double gapEst = num(d.get("gapEst"));
+      Double threshold = num(d.get("threshold"));
+      String verdict = d.get("verdict") == null ? null : String.valueOf(d.get("verdict"));
+      CallScoreRow.CallScoreRowBuilder row = CallScoreRow.builder().adviceId(advice.adviceId()).subjectType(CallSubject.MORNING).subjectCode(code)
+          .horizonDays(h).stage(stage).predicted(verdict == null ? "HOLD" : verdict).band(threshold);
+      double[] g = gaps.get(code);
+      if (gapEst == null || threshold == null || g == null) {
+        rows.add(row.status(ScoreStatus.MISSING).build());
+        continue;
+      }
+      double actual = g[1] / g[0] - 1;
+      String actualDir = Math.abs(actual) < threshold ? DirectionCall.NEUTRAL.getCode() : actual > 0 ? DirectionCall.UP.getCode() : DirectionCall.DOWN.getCode();
+      boolean hit = "HOLD".equals(verdict) ? Math.abs(actual) < threshold : Math.signum(actual) == Math.signum(gapEst);
+      rows.add(row.status(ScoreStatus.SCORED).baseValue(g[0]).exitValue(g[1]).actualRet(actual).actualDir(actualDir).hit(hit).build());
+    }
+    return rows;
+  }
+
+  private static Double num(Object value) {
+    return value instanceof Number n ? n.doubleValue() : null;
   }
 
   private static Integer intOrNull(Object value) {

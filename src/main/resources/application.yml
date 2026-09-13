@@ -267,10 +267,10 @@ advisor:
     quant-top-n: 7                # 정량 top-N 섀도(LLM 없음)
     nomem-weeks: 8                # 메모리 활성 후 메모리 없는 LLM 호출 병행 기간
   model:
-    judge: ${ADVISOR_JUDGE_MODEL:}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
+    judge: ${ADVISOR_JUDGE_MODEL:pt-5.6-terra}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
     judge-max-completion-tokens: 8000
     # judge-temperature: 0.0                  # 추론 모델은 temperature 를 받지 않으므로 기본 미설정
-    assist: ${ADVISOR_ASSIST_MODEL:}          # 채점 요약·교훈용 저가 모델 ID
+    assist: ${ADVISOR_ASSIST_MODEL:gpt-5.6-luna}          # 채점 요약·교훈용 저가 모델 ID
     assist-max-completion-tokens: 2000
   cost:
     input-per-1m-usd: 0           # 0 이면 비용 미계산. 모델 단가로 채우면 run.cost_usd 에 기록

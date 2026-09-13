@@ -3,6 +3,7 @@ package kr.hvy.blog.modules.advisor;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import kr.hvy.blog.common.AbstractTestContainers;
+import kr.hvy.blog.modules.advisor.application.chat.AdvisorChatClient;
 import kr.hvy.blog.modules.advisor.application.chat.SlackChatRouter;
 import kr.hvy.blog.modules.advisor.application.chat.SlackSocketModeRunner;
 import kr.hvy.blog.modules.advisor.application.service.AdviseJob;
@@ -65,6 +66,7 @@ class AdvisorContextBootTest {
     void chatBeansAreWiredButSocketModeIsNotStarted() {
       assertAdvisorBeansWired(context);
       assertThat(context.getBean(SlackChatRouter.class)).isNotNull();
+      assertThat(context.getBean(AdvisorChatClient.class)).as("도구 루프 답변자(chatChatClient 빈 + toolkit 4종)").isNotNull();
       SlackSocketModeRunner runner = context.getBean(SlackSocketModeRunner.class);
       assertThat(runner.isAutoStartup()).isFalse();
       assertThat(runner.isRunning()).isFalse();

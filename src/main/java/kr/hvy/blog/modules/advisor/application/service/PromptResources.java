@@ -26,18 +26,24 @@ public class PromptResources {
   public static final String ADVICE_VERSION = "advice-v5";
   /** lesson-v2 (2026-09-13): condition 에 trend 키 */
   public static final String LESSON_VERSION = "lesson-v2";
+  /** chat-v1 (2026-09-13): Slack #hvy-advisor 채팅 봇 시스템 프롬프트 — 도구 결과만 인용·기준일 명시·조건부 시나리오·면책은 코드가 부착 */
+  public static final String CHAT_VERSION = "chat-v1";
   static final String BASE = "prompts/advisor/";
 
   private final String adviceSystem;
   private final String adviceSha256;
   private final String lessonSystem;
   private final String lessonSha256;
+  private final String chatSystem;
+  private final String chatSha256;
 
   public PromptResources() {
     this.adviceSystem = load(BASE + "advice-system-v5.md");
     this.adviceSha256 = sha256(adviceSystem);
     this.lessonSystem = load(BASE + "lesson-system-v2.md");
     this.lessonSha256 = sha256(lessonSystem);
+    this.chatSystem = load(BASE + "chat-system-v1.md");
+    this.chatSha256 = sha256(chatSystem);
   }
 
   public String adviceSystem() {
@@ -54,6 +60,14 @@ public class PromptResources {
 
   public String lessonSha256() {
     return lessonSha256;
+  }
+
+  public String chatSystem() {
+    return chatSystem;
+  }
+
+  public String chatSha256() {
+    return chatSha256;
   }
 
   static String load(String path) {

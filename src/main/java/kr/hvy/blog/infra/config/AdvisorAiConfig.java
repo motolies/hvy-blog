@@ -7,8 +7,14 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
 import java.time.Duration;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.application.chat.AdvisorChatClient;
+import kr.hvy.blog.modules.advisor.application.chat.AdvisorChatProperties;
 import kr.hvy.blog.modules.advisor.application.service.MarketJudgeClient;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.ToolCallingAdvisor;
+import org.springframework.ai.model.tool.ToolCallLimitBehavior;
+import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.http.okhttp.SpringAiOpenAiHttpClient;
@@ -19,7 +25,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * advisor 모듈의 OpenAI ChatModel 1개 + ChatClient 2종(judge 판단용 / assist 보조용) + 그 위의 MarketJudgeClient 2종.
+ * advisor 모듈의 OpenAI ChatModel 1개 + ChatClient 3종(judge 판단용 / assist 보조용 / chat Slack 채팅 봇용) + 그 위의 MarketJudgeClient 2종.
  * <p>
  * Spring AI 2.0 의 OpenAI 자동구성(OpenAiChatAutoConfiguration)은 키가 비어 있으면 기동 자체를 막으므로 yml 에서
  * {@code spring.ai.model.chat=none} 으로 끄고, {@code advisor.enabled=true} 일 때만 여기서 직접 조립한다(로컬·테스트는 키 없이 기동).
@@ -94,6 +100,29 @@ public class AdvisorAiConfig {
     AdvisorProperties.Model model = properties.getModel();
     return ChatClient.builder(advisorChatModel)
         .defaultOptions(chatOptions(model.getAssist(), model.getAssistMaxCompletionTokens(), model.getAssistTemperature()))
+        .build();
+  }
+
+  /**
+   * Slack 채팅 봇용 ChatClient (chat-v1, 2026-09-13) — 자유 텍스트 + 스레드 히스토리 + 도구 루프. 모델은 advisor.chat.model, 비면 assist 모델.
+   * <p>
+   * Spring AI 2.0 에는 반복 횟수 옵션이 없고 ToolCallingManager 의 도구별·총합 호출 상한(기본 40/150 은 Slack 질문 하나에 과함)으로 건다.
+   * 상한 초과는 RETURN_ERROR_RESPONSE — THROW 면 예외가 되어 사용자가 아무 답도 못 받지만, 오류 ToolResponse 로 돌려주면 모델이 "지금까지 얻은 값으로
+   * 답한다" 로 마무리한다. DefaultChatClient 가 ToolCallingAdvisor 를 자동 등록하므로 커스텀 매니저는 5-인자 builder 오버로드로 넘긴다(중복 advisor 금지).
+   */
+  @Bean(AdvisorChatClient.CHAT_BEAN)
+  public ChatClient chatChatClient(OpenAiChatModel advisorChatModel, AdvisorProperties properties, AdvisorChatProperties chat,
+      ObjectProvider<ObservationRegistry> observationRegistry) {
+    ToolCallingManager manager = ToolCallingManager.builder()
+        .maxCallsPerTool(Math.max(1, chat.getMaxCallsPerTool()))
+        .maxTotalToolCalls(Math.max(1, chat.getMaxTotalToolCalls()))
+        .onLimitExceeded(ToolCallLimitBehavior.RETURN_ERROR_RESPONSE)
+        .build();
+    String model = StringUtils.defaultIfBlank(chat.getModel(), properties.getModel().getAssist());
+    ObservationRegistry observations = observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP);
+    return ChatClient.builder(advisorChatModel, observations, null, null,
+            ToolCallingAdvisor.builder().toolCallingManager(manager).conversationHistoryEnabled(true))
+        .defaultOptions(chatOptions(model, chat.getMaxCompletionTokens(), chat.getTemperature()))
         .build();
   }
 

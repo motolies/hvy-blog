@@ -94,7 +94,7 @@ public class MarketJudgeClient {
   /**
    * OpenAI native usage 의 추론 토큰 (없으면 0).
    */
-  static int reasoningTokens(Usage usage) {
+  public static int reasoningTokens(Usage usage) {
     if (usage != null && usage.getNativeUsage() instanceof CompletionUsage native_) {
       return native_.completionTokensDetails().flatMap(CompletionUsage.CompletionTokensDetails::reasoningTokens).map(Long::intValue).orElse(0);
     }
@@ -104,7 +104,7 @@ public class MarketJudgeClient {
   /**
    * OpenAI native usage 의 캐시 적중 입력 토큰 (없으면 0).
    */
-  static int cachedTokens(Usage usage) {
+  public static int cachedTokens(Usage usage) {
     if (usage != null && usage.getNativeUsage() instanceof CompletionUsage native_) {
       return native_.promptTokensDetails().flatMap(CompletionUsage.PromptTokensDetails::cachedTokens).map(Long::intValue).orElse(0);
     }

@@ -81,6 +81,8 @@ class StockWeeklyPipelineJobTest {
     verify(adjustFactor).execute(exec);
     verify(financial).collectAll(eq(exec), anyList());
     assertThat(exec.failureCount()).isEqualTo(1);
+    assertThat(exec.steps()).filteredOn(CollectExecution.StepResult::failed)
+        .extracting(CollectExecution.StepResult::name).containsExactly("STOCK_INFO");
   }
 
   private CollectExecution execution() {

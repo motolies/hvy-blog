@@ -34,6 +34,7 @@ public final class CollectExecution {
   /** 상위 run(BACKFILL_ALL 등). 상위가 취소되면 이 실행도 취소로 본다 */
   private final Long parentRunId;
   private final List<CollectFailure> failures = Collections.synchronizedList(new ArrayList<>());
+  private final List<StepResult> steps = Collections.synchronizedList(new ArrayList<>());
   private final Map<String, Object> metadata = new ConcurrentHashMap<>();
   private final AtomicLong pendingRows = new AtomicLong();
   private final AtomicLong totalRows = new AtomicLong();
@@ -69,6 +70,24 @@ public final class CollectExecution {
 
   /** 종목 단위 실패 1건 */
   public record CollectFailure(String target, String message) {
+  }
+
+  /**
+   * 파이프라인 단계 1개의 결과. PipelineSteps 가 단계 종료 시 단계 안에서 늘어난 processed/failures 델타로 기록한다.
+   * 알림이 run 전체 비율(DAILY ≈2,700 종목)만 보면 단계 하나가 통째로 죽어도 0.04% 라 무음이므로 단계 단위로 판단하기 위한 것(2026-09-13).
+   */
+  public record StepResult(String name, String status, int processed, int failures) {
+
+    /** 단계 본문이 예외로 죽었는지 */
+    public boolean failed() {
+      return "FAILED".equals(status);
+    }
+
+    /** 단계 안에서의 실패율. 대상이 없으면 0 */
+    public double failureRatio() {
+      int total = processed + failures;
+      return total == 0 ? 0.0 : (double) failures / total;
+    }
   }
 
   public Long runId() {
@@ -197,6 +216,17 @@ public final class CollectExecution {
 
   public int failureCount() {
     return failures.size();
+  }
+
+  /**
+   * 파이프라인 단계 결과를 기록한다 (PipelineSteps 전용).
+   */
+  public void recordStep(String name, String status, int processed, int failures) {
+    steps.add(new StepResult(name, status, processed, failures));
+  }
+
+  public List<StepResult> steps() {
+    return List.copyOf(steps);
   }
 
   public int processedCount() {

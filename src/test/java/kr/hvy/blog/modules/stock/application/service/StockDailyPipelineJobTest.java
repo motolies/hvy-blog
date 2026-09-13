@@ -89,8 +89,13 @@ class StockDailyPipelineJobTest {
     List<Map<String, Object>> steps = (List<Map<String, Object>>) exec.metadataSnapshot().get("steps");
     assertThat(steps).extracting(s -> s.get("step")).containsExactly("INDEX", "PRICE", "VALUATION", "INVESTOR", "MARKET_INVESTOR", "ETF_NAV", "STATS", "CA_HINT", "VALIDATE", "DERIVED");
     assertThat(steps.get(1).get("status")).isEqualTo("FAILED");
+    assertThat(steps.get(1).get("processed")).isEqualTo(0);
     assertThat(steps.get(6).get("status")).isEqualTo("OK"); // kis.stats.enabled 기본 true
     assertThat(steps.get(9).get("status")).isEqualTo("SKIPPED");
+    // 알림이 단계 단위로 결손을 판단할 수 있도록 실행 컨텍스트에도 남는다 (SKIPPED 는 단계 결과가 아니라 미기록)
+    assertThat(exec.steps()).hasSize(9);
+    assertThat(exec.steps()).filteredOn(CollectExecution.StepResult::failed)
+        .extracting(CollectExecution.StepResult::name).containsExactly("PRICE");
   }
 
   @Test

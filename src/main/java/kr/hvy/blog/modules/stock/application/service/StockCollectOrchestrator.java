@@ -64,25 +64,37 @@ public class StockCollectOrchestrator {
   /**
    * 상위 run 아래에서 하위 잡을 실행한다(BACKFILL_ALL). 상위가 취소되면 하위도 종목 경계에서 멈춘다.
    * 하위는 항상 호출 스레드에서 동기 실행된다.
+   * <p>
+   * run 생성 전 거부(잡 미등록·키 누락·검증 실패·이미 실행 중·DB 오류)는 예외로 돌려주되, 최상위 스케줄 트리거만은 던지기 전에 Slack 으로 알린다.
+   * API 트리거는 400/409 응답으로 사용자가 즉시 보고, BACKFILL_ALL 의 하위 run(SCHEDULER + parentRunId)은 FullBackfillJob 이 거부를 단계 실패로
+   * 기록해 상위 run 의 비율 알림이 나가므로 제외한다. 스케줄러 쪽은 AbstractScheduler 가 예외를 로그로만 삼킨다(2026-09-13).
    */
   public TriggerResult trigger(CollectJobType jobType, BackfillRequest request, TriggerType triggerType, Long parentRunId) {
     BackfillRequest effective = request == null ? BackfillRequest.empty() : request;
-    CollectJob job = jobs.get(jobType);
-    if (job == null) {
-      throw new CollectRequestException("실행 가능한 잡이 아닙니다: " + jobType);
-    }
-    if (!properties.isConfigured()) {
-      throw new CollectRequestException("KIS 앱키가 설정되지 않았습니다 (KIS_APP_KEY/KIS_APP_SECRET)");
-    }
-    effective.validate();
-
+    boolean scheduled = triggerType == TriggerType.SCHEDULER && parentRunId == null;
+    CollectJob job;
     StockCollectRun run;
     try {
-      run = runService.start(jobType, triggerType, MarketClock.today(), effective.startDate(), effective.endDate(),
-          effective.toMetadata());
-    } catch (DataIntegrityViolationException e) {
-      // 사전 조회와 INSERT 사이에 끼어든 경합: 부분 유니크 인덱스가 막았다. 롤백된 뒤 새 트랜잭션에서 id 를 찾아 409 로 돌린다
-      throw new CollectAlreadyRunningException(jobType, runService.findRunningId(jobType).orElse(null));
+      job = jobs.get(jobType);
+      if (job == null) {
+        throw new CollectRequestException("실행 가능한 잡이 아닙니다: " + jobType);
+      }
+      if (!properties.isConfigured()) {
+        throw new CollectRequestException("KIS 앱키가 설정되지 않았습니다 (KIS_APP_KEY/KIS_APP_SECRET)");
+      }
+      effective.validate();
+      try {
+        run = runService.start(jobType, triggerType, MarketClock.today(), effective.startDate(), effective.endDate(),
+            effective.toMetadata());
+      } catch (DataIntegrityViolationException e) {
+        // 사전 조회와 INSERT 사이에 끼어든 경합: 부분 유니크 인덱스가 막았다. 롤백된 뒤 새 트랜잭션에서 id 를 찾아 409 로 돌린다
+        throw new CollectAlreadyRunningException(jobType, runService.findRunningId(jobType).orElse(null));
+      }
+    } catch (RuntimeException e) {
+      if (scheduled) {
+        notifier.afterTriggerRejected(jobType, e);
+      }
+      throw e;
     }
     CollectExecution execution = new CollectExecution(run, effective, runService, parentRunId);
 

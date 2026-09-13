@@ -3,6 +3,7 @@ package kr.hvy.blog.modules.stock.application.service;
 import java.util.List;
 import java.util.Optional;
 import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
+import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
 import kr.hvy.blog.modules.stock.domain.code.CollectStatus;
 import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
 import kr.hvy.common.infrastructure.notification.slack.Notify;
@@ -66,6 +67,17 @@ public class CollectNotifier {
         run.getRunId(), run.getJobType(), run.getJobType().getDesc(),
         cause.toString(), execution.processedCount(), execution.totalRows(), execution.rateLimitHits(),
         flushNote(execution));
+    send(SlackChannel.ERROR, text, true);
+  }
+
+  /**
+   * 스케줄 트리거가 run 을 만들기 전에 거부됐을 때(잡 미등록·KIS 키 누락·이미 실행 중·DB 오류).
+   * run 이 없어 이력에도 남지 않고 AbstractScheduler 는 예외를 로그로만 삼키므로, 여기서 알리지 않으면 스케줄 잡이 며칠째 안 돌아도
+   * 아무도 모른다(2026-09-13 스케줄러 활성화 전 점검). 빈도 상한이 cron 횟수라 소음이 될 수 없어 항상 #hvy-error + 멘션.
+   */
+  public void afterTriggerRejected(CollectJobType jobType, Exception cause) {
+    String text = String.format("[주식 수집 미실행] SCHEDULER %s(%s)%n원인: %s%nrun 이 생성되지 않았습니다 — 원인 해소 후 POST /api/stock/admin/collect/%s 로 보충",
+        jobType, jobType.getDesc(), cause, jobType.getCode());
     send(SlackChannel.ERROR, text, true);
   }
 

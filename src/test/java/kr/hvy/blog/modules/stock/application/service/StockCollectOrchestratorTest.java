@@ -19,26 +19,32 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
 import kr.hvy.blog.modules.stock.application.dto.BackfillRequest;
 import kr.hvy.blog.modules.stock.client.KisProperties;
 import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
 import kr.hvy.blog.modules.stock.domain.code.CollectStatus;
 import kr.hvy.blog.modules.stock.domain.code.TriggerType;
 import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
+import kr.hvy.common.infrastructure.notification.slack.Notify;
+import kr.hvy.common.infrastructure.notification.slack.NotifyRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 /**
  * 오케스트레이터의 run 생명주기 규칙 (Spring 없이 Mockito 로).
+ * notifier 는 실제 객체에 Notify 목을 꽂는다 — CollectNotifier 를 목으로 바꾸면 decideStatus 가 null 을 돌려줘 finish 검증이 깨진다.
  */
 class StockCollectOrchestratorTest {
 
   private final CollectRunService runService = mock(CollectRunService.class);
   private final KisProperties properties = new KisProperties();
-  private final CollectNotifier notifier = new CollectNotifier(Optional.empty());
+  private final Notify notify = mock(Notify.class);
+  private final CollectNotifier notifier = new CollectNotifier(Optional.of(notify));
   private StockCollectRun run;
 
   @BeforeEach
@@ -171,6 +177,57 @@ class StockCollectOrchestratorTest {
     assertThatThrownBy(() -> orchestrator.trigger(CollectJobType.MASTER, null, TriggerType.API))
         .isInstanceOf(CollectRequestException.class).hasMessageContaining("KIS_APP_KEY");
     verify(runService, never()).start(any(), any(), any(), any(), any(), any());
+    verify(notify, never()).sendMessage(any(NotifyRequest.class)); // API 거부는 400 응답으로 보이므로 Slack 무음
+  }
+
+  @Test
+  @DisplayName("최상위 스케줄 트리거가 이미 실행 중으로 거부되면 run 없이 #hvy-error 로 알린 뒤 예외를 다시 던진다")
+  void scheduledTriggerRejectedByRunningJobAlerts() {
+    when(runService.start(any(), any(), any(), any(), any(), any()))
+        .thenThrow(new CollectAlreadyRunningException(CollectJobType.DAILY, 63L));
+    CollectJob job = job(CollectJobType.DAILY, exec -> {
+    });
+
+    assertThatThrownBy(() -> orchestrator(job, Runnable::run).trigger(CollectJobType.DAILY, null, TriggerType.SCHEDULER))
+        .isInstanceOf(CollectAlreadyRunningException.class);
+
+    ArgumentCaptor<NotifyRequest> captor = ArgumentCaptor.forClass(NotifyRequest.class);
+    verify(notify).sendMessage(captor.capture());
+    assertThat(captor.getValue().getChannel()).isEqualTo(SlackChannel.ERROR.getChannel());
+    assertThat(captor.getValue().isNotify()).isTrue();
+    assertThat(captor.getValue().getMessage()).contains("미실행").contains("DAILY").contains("runId=63");
+    verify(runService, never()).finish(anyLong(), any(), any());
+  }
+
+  @Test
+  @DisplayName("최상위 스케줄 트리거가 KIS 키 누락으로 거부되면 start 전에 #hvy-error 로 알린다")
+  void scheduledTriggerRejectedByMissingKeyAlerts() {
+    properties.setAppKey("");
+    CollectJob job = job(CollectJobType.MASTER, exec -> {
+    });
+
+    assertThatThrownBy(() -> orchestrator(job, Runnable::run).trigger(CollectJobType.MASTER, null, TriggerType.SCHEDULER))
+        .isInstanceOf(CollectRequestException.class);
+
+    ArgumentCaptor<NotifyRequest> captor = ArgumentCaptor.forClass(NotifyRequest.class);
+    verify(notify).sendMessage(captor.capture());
+    assertThat(captor.getValue().getChannel()).isEqualTo(SlackChannel.ERROR.getChannel());
+    assertThat(captor.getValue().getMessage()).contains("KIS_APP_KEY");
+    verify(runService, never()).start(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("BACKFILL_ALL 하위 run(SCHEDULER + parentRunId)의 거부는 상위가 단계 실패로 기록하므로 Slack 무음이다")
+  void childRunRejectionStaysQuiet() {
+    when(runService.start(any(), any(), any(), any(), any(), any()))
+        .thenThrow(new CollectAlreadyRunningException(CollectJobType.PRICE_BACKFILL, 63L));
+    CollectJob job = job(CollectJobType.PRICE_BACKFILL, exec -> {
+    });
+
+    assertThatThrownBy(() -> orchestrator(job, Runnable::run).trigger(CollectJobType.PRICE_BACKFILL, null, TriggerType.SCHEDULER, 99L))
+        .isInstanceOf(CollectAlreadyRunningException.class);
+
+    verify(notify, never()).sendMessage(any(NotifyRequest.class));
   }
 
   @Test

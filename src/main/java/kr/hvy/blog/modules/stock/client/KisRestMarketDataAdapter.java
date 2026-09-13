@@ -317,32 +317,37 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
   }
 
   /**
-   * 종합 시황/공시(제목). 기준 일시부터 과거 방향, tr_cont 연속조회. 다음 페이지는 마지막 행의 일련번호(FID_INPUT_SRNO)를 이어 붙인다 —
-   * 공식 예제가 tr_cont 만으로 이어가므로 헤더가 우선이고 일련번호는 보조다. 경로·TR ID·파라미터 코드는 kis.news.* (실측 항목).
+   * 종합 시황/공시(제목). 최신순 첫 페이지 + tr_cont 연속조회 — 응답 헤더가 M 이면 **같은 파라미터**에 tr_cont=N 만 붙여 재호출한다(공식 예제
+   * news_title.py 와 동일, 일련번호를 이어 붙이지 않는다). 필터는 kis.news.* 값을 그대로 보내며 기본은 전부 공백. 날짜·시각·일련번호는 보내지 않는다 —
+   * 2026-09-13 운영에서 이 값들을 채웠더니 열흘 넘게 오래된 구간이 돌아왔다. 요청 키는 공백이라도 빠뜨리지 않는다(null 이면 URI 에서 사라진다).
    */
   @Override
-  public List<KisNewsTitleResponse.Row> fetchNewsTitles(LocalDate date, java.time.LocalTime time, String ticker, int maxPages, KisCallContext context) {
+  public List<KisNewsTitleResponse.Row> fetchNewsTitles(String ticker, int maxPages, KisCallContext context) {
     KisProperties.News news = kisProperties.getNews();
     Map<String, String> params = new LinkedHashMap<>();
-    params.put("FID_NEWS_OFER_ENTP_CODE", news.getProviderCode());
-    params.put("FID_COND_MRKT_CLS_CODE", news.getMarketClsCode());
-    params.put("FID_INPUT_ISCD", ticker == null ? "" : ticker);
+    params.put("FID_NEWS_OFER_ENTP_CODE", orBlank(news.getProviderCode()));
+    params.put("FID_COND_MRKT_CLS_CODE", orBlank(news.getMarketClsCode()));
+    params.put("FID_INPUT_ISCD", orBlank(ticker));
     params.put("FID_TITL_CNTT", "");
-    params.put("FID_INPUT_DATE_1", KisValues.format(date));
-    params.put("FID_INPUT_HOUR_1", time.format(java.time.format.DateTimeFormatter.ofPattern("HHmmss")));
-    params.put("FID_RANK_SORT_CLS_CODE", news.getSortCode());
+    params.put("FID_INPUT_DATE_1", "");
+    params.put("FID_INPUT_HOUR_1", "");
+    params.put("FID_RANK_SORT_CLS_CODE", orBlank(news.getSortCode()));
     params.put("FID_INPUT_SRNO", "");
     PageResult<KisNewsTitleResponse> result = trContPaginator.paginate(news.getPath(), news.getTrId(), params, KisNewsTitleResponse.class,
-        context.withTarget(ticker == null ? "MARKET" : ticker), Math.max(1, maxPages),
-        page -> {
-          List<KisNewsTitleResponse.Row> rows = page.rows();
-          return rows.isEmpty() || rows.getLast().serialNo() == null ? Map.of() : Map.of("FID_INPUT_SRNO", rows.getLast().serialNo());
-        },
+        context.withTarget(ticker == null || ticker.isBlank() ? "MARKET" : ticker), Math.max(1, maxPages),
+        page -> Map.of(),
         (previous, current) -> !previous.rows().isEmpty() && previous.rows().equals(current.rows()));
     List<KisNewsTitleResponse.Row> rows = new ArrayList<>();
     for (KisNewsTitleResponse page : result.pages()) {
       rows.addAll(page.rows());
     }
     return rows;
+  }
+
+  /**
+   * null → 공백. KIS FID 파라미터는 "없음" 을 공백으로 표현하므로 키를 빼는 대신 빈 값을 보낸다.
+   */
+  private static String orBlank(String value) {
+    return value == null ? "" : value;
   }
 }

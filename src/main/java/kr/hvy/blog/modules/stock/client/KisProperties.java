@@ -171,22 +171,25 @@ public class KisProperties {
     /** 뉴스 제목 API 경로 */
     private String path = "/uapi/domestic-stock/v1/quotations/news-title";
 
-    /** TR ID (실측 항목) */
+    /** TR ID (2026-09-13 운영 실측 확정: rt_cd=0, 응답 필드 파싱 정상) */
     private String trId = "FHKST01011800";
 
-    /** 뉴스 제공 업체 코드 (fid_news_ofer_entp_code). 0 전체 — 제공사 편중이 보이면 실측 뒤 조정 */
-    private String providerCode = "0";
+    /**
+     * 뉴스 제공 업체 코드 (fid_news_ofer_entp_code). 공백 = 전체 — KIS 공식 확인 스크립트(chk_news_title.py)가 공백을 보낸다.
+     * '0' 을 보내면 열흘 넘게 오래된 행만 돌아온다(2026-09-13 운영 실측, 수집 0건의 원인).
+     */
+    private String providerCode = "";
 
-    /** 조건 시장 구분 코드 (fid_cond_mrkt_cls_code) */
-    private String marketClsCode = "00";
+    /** 조건 시장 구분 코드 (fid_cond_mrkt_cls_code). 공백 = 전체 */
+    private String marketClsCode = "";
 
-    /** 순위 정렬 구분 (fid_rank_sort_cls_code) */
-    private String sortCode = "01";
+    /** 순위 정렬 구분 (fid_rank_sort_cls_code). 공백 = 기본(최신순) */
+    private String sortCode = "";
 
     /** 수집 1회당 연속조회 페이지 상한 */
     private int maxPages = 5;
 
-    /** 이보다 오래된 기사(작성 시각 기준)는 수집하지 않는다 — advisor 창(36h)보다 넉넉히 */
+    /** 이보다 오래된 기사(작성 시각 기준)는 수집하지 않는다 — advisor 창(36h)보다 넉넉히. yml kis.news.lookback-hours 와 같은 값을 둔다 */
     private int lookbackHours = 48;
   }
 

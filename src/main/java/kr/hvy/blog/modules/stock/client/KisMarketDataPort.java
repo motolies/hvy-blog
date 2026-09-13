@@ -123,9 +123,12 @@ public interface KisMarketDataPort {
   List<KisMarketInvestorResponse.Row> fetchMarketInvestorDaily(MarketType market, LocalDate baseDate, KisCallContext context);
 
   /**
-   * 국내주식 종합 시황/공시(제목): 기준 일시(KST)부터 과거 방향으로 최신 제목 목록 (kis.news.*, 연속조회 tr_cont). 제목·작성 시각·관련 종목코드만 온다.
+   * 국내주식 종합 시황/공시(제목): 최신순 제목 목록 (kis.news.*, 연속조회 tr_cont). 제목·작성 시각·관련 종목코드만 온다.
+   * 요청 필터(제공사·시장·정렬·날짜·시각·일련번호)는 KIS 공식 확인 스크립트(chk_news_title.py)처럼 전부 공백이 기본이다 — 2026-09-13 운영에서
+   * 제공사 0·시장 00·정렬 01·날짜/시각=지금 을 보냈더니 열흘 넘게 오래된 40행만 돌아와 수집이 0건이었다.
    *
-   * @param ticker 종목코드 (null·빈 문자열이면 전체 시황)
+   * @param ticker   종목코드 (null·빈 문자열이면 전체 시황)
+   * @param maxPages 연속조회 페이지 상한
    */
-  List<KisNewsTitleResponse.Row> fetchNewsTitles(LocalDate date, java.time.LocalTime time, String ticker, int maxPages, KisCallContext context);
+  List<KisNewsTitleResponse.Row> fetchNewsTitles(String ticker, int maxPages, KisCallContext context);
 }

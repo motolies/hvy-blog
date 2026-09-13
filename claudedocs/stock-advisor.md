@@ -34,7 +34,7 @@
 
 비정형 입력은 LLM 의 진짜 우위이지만 **백테스트가 불가능**하므로(KIS 제목 API 는 실시간 조회) 가치는 섀도로만 잰다.
 
-- 수집(stock 모듈, `NEWS` 잡, `scheduler.stock-news` 평일 08:05~19:35 30분): KIS 종합 시황/공시(제목) 전체 피드를 현재 시각부터 과거로 연속조회해 `tb_stock_news` 에 넣는다. 제목·작성 시각·관련 종목코드(iscd1~5)만 있고 본문은 없다. 중복 키 = (source, 정규화 제목 sha256, published_at). **경로·TR ID(`kis.news.path/tr-id`, 후보 `FHKST01011800`)·응답 배열 키·제공사 코드는 `KisNewsTitleManualTest` 로 실측한 뒤 켠다.** "실시간" 은 하루 1회 19:30 판단에 가치가 없어 30분이면 충분하다.
+- 수집(stock 모듈, `NEWS` 잡, `scheduler.stock-news` 평일 08:05~19:35 30분): KIS 종합 시황/공시(제목) 전체 피드를 최신순으로 받아(응답 헤더 `tr_cont=M` 인 동안 같은 파라미터로 재호출, 공식 예제와 동일) `tb_stock_news` 에 넣는다. 제목·작성 시각·관련 종목코드(iscd1~5)만 있고 본문은 없다. 중복 키 = (source, 정규화 제목 sha256, published_at). **경로·TR ID `FHKST01011800`·응답 필드는 2026-09-13 운영 실측으로 확정. 요청 필터(제공사·시장·정렬·날짜·시각·일련번호)는 KIS 공식 확인 스크립트(`chk_news_title.py`)처럼 전부 공백으로 보낸다 — 제공사 `0`·정렬 `01`·날짜/시각=지금 을 보냈던 첫 운영 실행은 열흘 넘게 오래된 40행만 받아 0건이었다.** run 메타 `fetched → candidates → inserted`(+`skippedOld`·`unparsed`)와 받은 행의 작성 시각 경계 `newest/oldest` 로 깔때기를 본다. 받았는데 전부 못 쓰면 WARN. "실시간" 은 하루 1회 19:30 판단에 가치가 없어 30분이면 충분하다.
 - 주입(advisor, `advisor.news.enabled`): `NewsFeatureService` 가 판단 시각(= min(now, 기준일 `cutoff` 20:00 KST) — 사후 재실행에서도 미래 기사가 새지 않게) 이전 `window-hours`(36) 창에서 시장 헤드라인 ≤12·후보 종목별 ≤3·전체 ≤40 을 골라 `N1…` id 를 붙인다. 프롬프트 `news{asOf, windowHours, columns, market[[id,time,title]], byTicker{tkr:[…]}}` 는 candidates 뒤에 실리고 **news 전용 자 상한(7,000)** 을 넘으면 후보별 → 시장 순으로 먼저 줄인다(뉴스가 후보를 밀어내지 않는다). 룩어헤드 방어는 수집 시각이 아니라 **작성 시각(published_at ≤ 판단 시각)** 이다.
 - 출력·가드: 픽마다 `citedNews`(그날 id enum 주입) — 입력에 없던 id 는 인용만 제거(`unknownNews`), 다른 종목에만 태깅된 기사 인용은 제거(`newsMismatch`), 픽은 버리지 않는다. `tb_advisor_advice.news_ids`, `tb_advisor_pick.cited_news` 에 저장. 주간 재현성 재실행은 동결 페이로드의 news id 도 스키마 enum 에 넣는다. Slack 에는 제목 원문을 싣지 않는다(재배포 우려) — thesis 안 요약만.
 - 섀도 `LLM_NONEWS`: 뉴스가 실린 첫 LIVE 판단부터 `advisor.shadow.nonews-weeks`(8) 동안 뉴스 블록만 뺀 같은 입력(메모리는 LIVE 와 같음)으로 한 번 더 판단. 요인 분리 — LIVE=뉴스+메모리, LLM_NOMEM=뉴스 있음·메모리 없음, LLM_NONEWS=메모리 있음·뉴스 없음. **뉴스 가치 = LIVE − LLM_NONEWS** 를 `GET /scores/summary` 변형 표에서 8주 뒤 se 와 함께 본다(se 안이면 뉴스 off). 호출 수는 메모리 전 2/일, 후 3/일.
@@ -68,7 +68,7 @@
 | `advisor.news.enabled` | false | 뉴스 입력 on/off. 켜면 news 블록·citedNews·LLM_NONEWS 섀도가 함께 켜진다. 선행: `scheduler.stock-news` 로 `tb_stock_news` 가 쌓여 있어야 함 |
 | `advisor.news.window-hours` / `market-limit` / `per-ticker-limit` / `total-limit` / `max-chars` / `title-chars` / `cutoff` | 36 / 12 / 3 / 40 / 7000 / 120 / 20:00 | 창·상한·news 블록 자 상한·판단 마감(사후 재실행 룩어헤드 상한) |
 | `advisor.shadow.nonews-weeks` | 8 | 뉴스 없는 섀도 병행 기간 |
-| `kis.news.*` | path·tr-id `FHKST01011800`·provider-code 0·max-pages 5·lookback-hours 48 | 수집 API 파라미터 (실측 항목) |
+| `kis.news.*` | path·tr-id `FHKST01011800`·provider/market/sort 공백·max-pages 5·lookback-hours 48 | 수집 API 파라미터. 필터 공백 = 전체(공식 예제와 동일), 값을 채우면 오래된 구간이 온다. 소급 창을 임시로 늘릴 땐 env `KIS_NEWS_LOOKBACKHOURS`(컨테이너 재생성 필요) |
 | `scheduler.stock-news.enabled` | false (default·prod 모두) | 실측 뒤 prod true 로 |
 | `advisor.horizon-days` | 5 | 결정 호라이즌. 채점·KPI·학습 전부 이 값 |
 | `advisor.candidate-limit` / `max-per-sector` / `pick-min` / `pick-max` | 30 / 4 / 3 / 10 | 깔때기 |
@@ -180,7 +180,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - `KisIndexPriceManualTest`: 지수 현재가 TR ID 실측(틀리면 rt_cd≠0, 장중 점검 INDEX 실패로 기록).
 - `AdvisorOpenAiManualTest`: strict 스키마(nullable enum 포함, **v2 의 2단계 중첩 trendOutlook**) 수용 여부·토큰·지연. 프롬프트 v2 로 `promptChars` 가 v1 보다 약 1,500자 늘어난다(시장 trend 블록 2행 + dataAsOf + window).
 - 추세 임계 실측: §3 의 분포 SQL 을 psql 로 돌려 yml `advisor.trend.*` 를 조정한다. breadth 성분은 MV 가 생긴 뒤에야 과거 분포를 볼 수 있다.
-- `KisNewsTitleManualTest`: 뉴스 제목 API 경로·TR ID·응답 배열 키(output1/output)·제공사 코드·tr_cont 연속조회·하루 건수·종목 태그 비율. 틀리면 `kis.news.*` 만 바꾼다. 실측 전엔 `scheduler.stock-news`·`advisor.news.enabled` 모두 off.
+- `KisNewsTitleManualTest`: 경로·TR ID·응답 필드는 2026-09-13 운영 실측으로 확정(rt_cd=0, 40행 파싱). 남은 실측은 **공백 필터로 최신 기사가 오는지·`tr_cont=M` 연속조회 여부·페이지당 건수·하루 건수·종목 태그 비율**(변형 BLANK/LEGACY/BLANK_TIME 비교). 페이지당 건수 × `max-pages` 가 밤사이 건수보다 적으면 `scheduler.stock-news` cron 을 24시간(`0 5/30 * * * MON-FRI`)으로 넓힌다 — 순회는 "현재부터 과거로" 라 놓친 기사는 나중에 되찾지 못한다.
 - `KisOverseasSymbolManualTest`(미작성): VIX·미국 10년물 심볼을 KIS 가 주는지. 주면 yml `kis.overseas.symbols` 추가만.
 - psql 적용 순서(v2~v4 한 번에): `db/stock-schema.sql`(tb_stock_news) → `cat db/stock-derived-rebuild.sql db/stock-derived.sql | psql -1`(breadth MV) → `db/advisor-schema.sql`(13번째 테이블·ALTER 블록) → `db/advisor-seed.sql`.
 - 섹터 채점의 업종 지수 코드(`sector_code` ↔ `tb_stock_index_daily.index_code`) 동일성 — 불일치면 MV 폴백이 자동 적용.

@@ -13,7 +13,9 @@ import tools.jackson.databind.json.JsonMapper;
 public final class AdvisorJson {
 
   public static final JsonMapper MAPPER = JsonMapper.builder()
-      .changeDefaultPropertyInclusion(incl -> incl.withValueInclusion(JsonInclude.Include.NON_NULL))
+      // 객체 속성·Map 값의 null 은 생략 (프롬프트 토큰 절약). List 원소의 null 은 표 형태 행의 열 정렬을 위해 유지된다
+      .changeDefaultPropertyInclusion(incl -> incl.withValueInclusion(JsonInclude.Include.NON_NULL)
+          .withContentInclusion(JsonInclude.Include.NON_NULL))
       .build();
 
   private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {

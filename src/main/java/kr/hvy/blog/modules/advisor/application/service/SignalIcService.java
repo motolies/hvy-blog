@@ -18,7 +18,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * 시그널 rank-IC 계산과 가중치 세트 산출. 학습 신호는 픽이 아니라 전 유니버스(하루 수백 종목)다.
+ * 시그널 rank-IC 계산과 가중치 세트 산출. 학습 신호는 픽이 아니라 유니버스 전체(advisor.markets 시장, 하루 수백 종목)다 — 스크리닝과 같은
+ * 특징 CTE·시장 필터를 쓰므로 척도가 일치한다. 시장 목록을 바꾸면 저장된 IC 행은 옛 유니버스 기준이니 IC_BACKFILL 로 덮어쓴다.
  * <p>
  * IC_k(d) = corr(rank s_k(i,d), rank ex_h(i,d)), ex_h = 종목 수정주가 d→d+h 수익률 − 소속 시장 지수 d→d+h 수익률.
  * d+h 는 캘린더의 h번째 다음 영업일이며 LEAD 는 이 쿼리에만 있다(특징 SQL 에는 절대 없음).
@@ -81,7 +82,7 @@ public class SignalIcService {
         + ")\n"
         + "SELECT trade_date, signal_code, corr(rs, rx) AS rank_ic, COUNT(*) AS n\n"
         + "FROM ranked GROUP BY trade_date, signal_code HAVING COUNT(*) >= 30 AND corr(rs, rx) IS NOT NULL ORDER BY trade_date, signal_code";
-    return jdbc.query(sql, Map.of("from", from, "to", to, "h", horizonDays),
+    return jdbc.query(sql, Map.of("from", from, "to", to, "h", horizonDays, "markets", properties.getMarkets()),
         (rs, i) -> new SignalIcRow(rs.getString("signal_code"), rs.getObject("trade_date", LocalDate.class), horizonDays,
             rs.getDouble("rank_ic"), rs.getInt("n")));
   }

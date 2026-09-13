@@ -151,6 +151,7 @@ public class AdviseJob implements AdvisorJob {
     if (result.candidates().size() < properties.getPickMin()) {
       throw new IllegalStateException("후보가 너무 적습니다: " + result.candidates().size() + " (universe " + result.universeSize() + ")");
     }
+    execution.putMetadata("markets", properties.getMarkets());
     execution.putMetadata("universe", result.universeSize());
     execution.putMetadata("cut", result.cutSize());
     execution.putMetadata("candidates", result.candidates().size());
@@ -240,6 +241,7 @@ public class AdviseJob implements AdvisorJob {
     steps.run("PUBLISH", () -> {
       DailyAdviceMessage message = DailyAdviceMessage.builder()
           .header(header.toBuilder().adviceId(adviceId[0]).build()).picks(guarded.picks()).candidates(byTicker)
+          .marketLabel(String.join("·", properties.getMarkets()))
           .scoreboardLines(scoreboard[0].slackLines()).runId(execution.runId())
           .promptTokens(execution.promptTokens()).completionTokens(execution.completionTokens())
           .costText(execution.costUsd().signum() > 0 ? "$" + execution.costUsd().setScale(4, java.math.RoundingMode.HALF_UP) : null)

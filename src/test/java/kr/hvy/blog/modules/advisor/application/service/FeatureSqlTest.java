@@ -58,10 +58,11 @@ class FeatureSqlTest {
   }
 
   @Test
-  @DisplayName("특징 CTE 는 기준일 이하만 본다 — 미래를 보는 LEAD·'> :to' 가 없다")
+  @DisplayName("특징 CTE 는 기준일 이하만 본다 — 미래를 보는 LEAD·'> :to' 가 없다 — 그리고 시장은 :markets 로 한정한다")
   void noLookahead() {
     String ctes = FeatureSql.featureCtes();
     assertThat(ctes).doesNotContain("LEAD(").doesNotContain("> :to");
     assertThat(ctes).contains("BETWEEN :from AND :to");
+    assertThat(ctes).as("advice-v5: 스크리닝·IC 가 같은 시장 필터를 쓴다").contains("WHERE ms.market_type IN (:markets)");
   }
 }

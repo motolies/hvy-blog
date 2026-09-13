@@ -79,6 +79,8 @@ class AdvisorScreeningPgTest {
     NamedParameterJdbcTemplate named = new NamedParameterJdbcTemplate(ds);
     properties = new AdvisorProperties(new MockEnvironment());
     properties.getIc().setMinNEff(1);
+    // 합성 시드는 i 홀짝으로 KOSPI/KOSDAQ 를 나눈다 — 아래 단언(유니버스 40·IC n=40·HAVING ≥30)은 양시장 기준. KOSPI 한정은 kospiOnlyUniverse 가 따로 본다
+    properties.setMarkets(List.of("KOSPI", "KOSDAQ"));
     WeightSetRepository weightSets = new WeightSetRepository(jdbc);
     screening = new CandidateScreeningService(named, weightSets, properties);
     icService = new SignalIcService(named, new SignalIcWriter(new BatchUpsertSupport(jdbc), jdbc), weightSets, properties);
@@ -121,6 +123,21 @@ class AdvisorScreeningPgTest {
     assertThat(top.signals().get("MOM_20D").pct()).as("가장 큰 모멘텀은 백분위 1.0").isEqualTo(1.0);
     assertThat(top.signals().get("MOM_20D").raw()).isCloseTo(39 / 40.0, org.assertj.core.data.Offset.offset(1e-6));
     assertThat(result.weightSetId()).isPositive();
+  }
+
+  @Test
+  @DisplayName("KOSPI 한정(advisor.markets 기본, advice-v5): 유니버스 20 → 컷 19, 후보 전부 KOSPI·벤치 0001, 백분위는 KOSPI 안에서 다시 매겨진다")
+  void kospiOnlyUniverse() {
+    properties.setMarkets(List.of("KOSPI"));
+    ScreeningResult result = screening.screen(BASE);
+    assertThat(result.universeSize()).as("짝수 종목만").isEqualTo(20);
+    assertThat(result.cutSize()).as("T00(KOSPI) 만 컷").isEqualTo(19);
+    assertThat(result.candidates()).isNotEmpty()
+        .allMatch(c -> "KOSPI".equals(c.marketType()) && "0001".equals(c.benchIndexCode()));
+    assertThat(result.candidates()).extracting(CandidateRow::ticker).doesNotContain("T39", "T37", "T01");
+    CandidateRow top = result.candidates().stream().filter(c -> c.ticker().equals("T38")).findFirst().orElseThrow();
+    assertThat(top.signals().get("MOM_20D").pct()).as("KOSPI 안 최대 모멘텀이 백분위 1.0 (양시장이면 T39 가 1.0)").isEqualTo(1.0);
+    assertThat(top.signals().get("MOM_20D").raw()).isCloseTo(38 / 40.0, org.assertj.core.data.Offset.offset(1e-6));
   }
 
   @Test

@@ -19,6 +19,9 @@ public final class FeatureSql {
   /**
    * 기간 [:from, :to] 의 유니버스 특징 행 CTE 묶음 (feat 까지). 호출자가 뒤에 SELECT 를 붙인다.
    * cal 은 영업일(KOSPI 일봉 존재일), base 는 유니버스, vol/sector5 는 창 함수 보조.
+   * <p>
+   * feat 는 {@code :markets}(advisor.markets, 시장 코드 목록) 로 시장을 한정한다 — 호출자는 :from/:to 와 함께 반드시 바인딩한다.
+   * 스크리닝 백분위·유니버스 수·rank-IC 표본이 모두 이 필터 뒤의 행이므로 세 척도가 같은 유니버스를 쓴다(advice-v5, 2026-09-13).
    */
   public static String featureCtes() {
     return """
@@ -65,6 +68,7 @@ public final class FeatureSql {
                      LEFT JOIN vol vo ON vo.ticker = m.ticker AND vo.trade_date = m.trade_date
                      LEFT JOIN mv_stock_index_metric ix ON ix.index_code = CASE ms.market_type WHEN 'KOSPI' THEN '0001' ELSE '1001' END
                                                        AND ix.trade_date = m.trade_date
+            WHERE ms.market_type IN (:markets)
         )
         """;
   }

@@ -19,10 +19,11 @@ import org.springframework.stereotype.Component;
 public class PromptResources {
 
   /**
-   * advice-v4 (2026-09-13): news 블록 입력 + citedNews 출력 (advisor.news.enabled 일 때만 블록이 실린다). v3 는 market.global r20/r60 + market.link(β·상관) 입력. v2 는 dataAsOf·window·dataQuality·market.trend 입력, trendOutlook 출력.
+   * advice-v5 (2026-09-13): 종목 후보를 KOSPI 로 한정(advisor.markets)·섹터 지표는 양시장 기준임을 명시·thesis 300자/risk 150자 + 근거→해석→기대 흐름 구조
+   * (Slack 이 전문을 싣는다). v4 는 news 블록 입력 + citedNews 출력. v3 는 market.global r20/r60 + market.link(β·상관) 입력. v2 는 dataAsOf·window·dataQuality·market.trend 입력, trendOutlook 출력.
    * 옛 파일은 비교용으로 남긴다.
    */
-  public static final String ADVICE_VERSION = "advice-v4";
+  public static final String ADVICE_VERSION = "advice-v5";
   /** lesson-v2 (2026-09-13): condition 에 trend 키 */
   public static final String LESSON_VERSION = "lesson-v2";
   static final String BASE = "prompts/advisor/";
@@ -33,7 +34,7 @@ public class PromptResources {
   private final String lessonSha256;
 
   public PromptResources() {
-    this.adviceSystem = load(BASE + "advice-system-v4.md");
+    this.adviceSystem = load(BASE + "advice-system-v5.md");
     this.adviceSha256 = sha256(adviceSystem);
     this.lessonSystem = load(BASE + "lesson-system-v2.md");
     this.lessonSha256 = sha256(lessonSystem);

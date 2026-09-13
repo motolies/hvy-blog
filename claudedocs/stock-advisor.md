@@ -9,13 +9,13 @@
 | 시각(KST) | 잡 | 내용 |
 |---|---|---|
 | 18:30 평일 | stock DAILY | 일봉·지표 수집 (advisor 의 입력) |
-| 19:30~19:55 5분 간격 | **ADVISE** | 게이트(DAILY 완료·PRICE/DERIVED OK) → 채점·IC 증분 → 시장 특징(지수·수급·해외·섹터·σ + **규칙 추세·관측 기준일·적용 구간**) → 정량 스크리닝(유니버스 ≈1,200 → 컷 → 후보 30, 섹터당 ≤4) → 정량 top-N 섀도 → LLM 판단(strict JSON, 후보 enum) → 가드 → 저장·입력 스냅샷 → **#hvy-advisor 발행** → (메모리 활성 시) 메모리 없는 LLM 섀도 |
+| 19:30~19:55 5분 간격 | **ADVISE** | 게이트(DAILY 완료·PRICE/DERIVED OK) → 채점·IC 증분 → 시장 특징(지수·수급·해외·섹터·σ + **규칙 추세·관측 기준일·적용 구간**) → 정량 스크리닝(KOSPI 유니버스 `advisor.markets` ≈ 수백 → 컷 → 후보 30, 섹터당 ≤4) → 정량 top-N 섀도 → LLM 판단(strict JSON, 후보 enum) → 가드 → 저장·입력 스냅샷 → **#hvy-advisor 발행** → (메모리 활성 시) 메모리 없는 LLM 섀도 |
 | 07:30 평일 | **MORNING_CHECK** | 06:30 해외 수집 뒤·09:00 개장 전. 밤사이 미국 마감 수익률 × 기준일 β(주 심볼)로 **예상 갭**을 계산해 직전 판단의 지수 방향을 유지/강화/주의 판정(규칙 기반, LLM 없음, 원 판단 불변). `tb_advisor_morning_check` 1행 + Slack 짧은 보고. h=1 채점에서 D+1 시가 갭과 대조(`MORNING`) |
 | 12:00 평일 | **INTRADAY** | 직전 영업일 판단을 KIS 현재가로 대조, 일치율·판정 짧은 보고(규칙 기반, 학습 미반영) |
 | 08:00 일요일 | **WEEKLY_REVIEW** | 확정 재채점 → IC 가중치 세트(n_eff 게이트) → 교훈(누적 픽 게이트) → 동결 입력 재실행 Jaccard → 주간 보고 → 스냅샷 보존 정리 |
 | 수동 | SCORE / IC_BACKFILL | 채점 보충 / IC 사전 추정(1회) |
 
-학습 신호는 두 층으로 분리된다(2026-09-13 설계 검토): **시그널 가중치 = 전 유니버스 rank-IC**(하루 수백 종목), **LLM 부가가치 = 픽 − 후보군 평균 초과수익**. 픽 적중률로 가중치를 만지지 않는다.
+학습 신호는 두 층으로 분리된다(2026-09-13 설계 검토): **시그널 가중치 = 설정 시장(KOSPI) 유니버스 rank-IC**(하루 수백 종목), **LLM 부가가치 = 픽 − 후보군 평균 초과수익**. 픽 적중률로 가중치를 만지지 않는다.
 
 ### 1.1 시간축 (advice-v2, 2026-09-13)
 
@@ -39,6 +39,16 @@
 - 출력·가드: 픽마다 `citedNews`(그날 id enum 주입) — 입력에 없던 id 는 인용만 제거(`unknownNews`), 다른 종목에만 태깅된 기사 인용은 제거(`newsMismatch`), 픽은 버리지 않는다. `tb_advisor_advice.news_ids`, `tb_advisor_pick.cited_news` 에 저장. 주간 재현성 재실행은 동결 페이로드의 news id 도 스키마 enum 에 넣는다. Slack 에는 제목 원문을 싣지 않는다(재배포 우려) — thesis 안 요약만.
 - 섀도 `LLM_NONEWS`: 뉴스가 실린 첫 LIVE 판단부터 `advisor.shadow.nonews-weeks`(8) 동안 뉴스 블록만 뺀 같은 입력(메모리는 LIVE 와 같음)으로 한 번 더 판단. 요인 분리 — LIVE=뉴스+메모리, LLM_NOMEM=뉴스 있음·메모리 없음, LLM_NONEWS=메모리 있음·뉴스 없음. **뉴스 가치 = LIVE − LLM_NONEWS** 를 `GET /scores/summary` 변형 표에서 8주 뒤 se 와 함께 본다(se 안이면 뉴스 off). 호출 수는 메모리 전 2/일, 후 3/일.
 
+### 1.4 KOSPI 한정 유니버스·근거 전문 Slack (advice-v5, 2026-09-13)
+
+09-11 판단 메시지의 픽 근거가 `…` 로 잘려 읽을 수 없던 문제와 "종목 추천은 KOSPI 로" 결정을 함께 반영했다.
+
+- **말줄임의 원인은 프롬프트가 아니라 Slack 계층**이었다. 프롬프트 200자·가드 400자·DB 600자 모두 여유가 있는데 `DailyAdviceMessage` 가 픽 10개를 section 1개(Block Kit 3,000자 상한)에 몰아넣느라 한글 29자/19자로 잘랐다. v5 부터 **픽마다 section 1개** 에 전문을 싣는다(픽당 ≤ ~830자, 블록 수 고정 14 + 픽 ≤10 = 24 ≤ 50; `pick-max` 를 36 넘게 올리면 상한). 근거 첫 줄, `⚠` 리스크는 같은 인용의 둘째 줄.
+- **유니버스 = `advisor.markets`(기본 `[KOSPI]`)**. 필터는 스크리닝·rank-IC 가 공유하는 `FeatureSql.featureCtes()` 의 feat CTE 한 곳(`ms.market_type IN (:markets)`)이라 백분위 점수·유니버스 수·IC 표본이 같은 유니버스를 쓴다. 기동 시 `MarketType` 코드 검증(빈 목록·오타는 기동 실패). run 메타 `markets` 로 어느 유니버스 판단인지 남는다. 종목 헤딩은 `*종목 (n) · KOSPI*`.
+- **그대로인 것**: 시장 국면 `kospiDir/kosdaqDir`·추세 전망 `trendOutlook.kosdaq`·KOSDAQ 추세 라벨·채점(지수·breadth MV 기준, strict 스키마와 맞물림), 섹터 지표(`mv_stock_sector_daily` 양시장 전체 — 프롬프트에 "후보 없는 섹터를 주도 섹터로 고르지 말라" 명시), 픽 벤치마크(후보의 `bench_index_code`, KOSPI → 0001), QUANT_TOPN·"후보군 대비" KPI(같은 후보 목록).
+- **프롬프트 v5**: 1행 범위(시장 판단은 양지수, 픽은 KOSPI), candidates 가 KOSPI 만임을 명시, thesis **300자**/risk **150자** + 구조(근거 특징 2~3개 → 해석 → 적용 구간 기대 흐름 / 리스크 = 틀리게 만들 조건 + 첫 신호). 가드 400/300·DB 600 은 그대로. 출력 토큰이 늘어난다(관찰 항목).
+- **전환 절차(배포 후 1회)**: 저장된 IC 행은 양시장 기준이므로 `POST /api/advisor/admin/jobs/IC_BACKFILL`(baseDate 없이) 로 덮어쓴다(`SignalIcWriter.upsert` 가 (signal_code, trade_date) 키로 교체, BACKFILL 세트 새로 활성화). 증분은 `maxTradeDate()+1` 부터만 계산하므로 **자동으로 재기준화되지 않는다**. 전환일(2026-09-1x, 첫 v5 LIVE run) 을 기록해 둘 것 — 이전 LIVE 픽·교훈 셀·"후보군 대비" 90일 창은 양시장 후보와 섞인다(run 7회 시점이라 실질 영향 없음). 후보가 `pick-min`(3) 아래로 떨어지면 ADVISE 가 FAILED 이므로 첫 주 `metadata.cut` 을 본다.
+
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
 19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.
@@ -56,7 +66,8 @@
 | `advisor.model.judge` / `assist` | `${ADVISOR_JUDGE_MODEL:}` / `${ADVISOR_ASSIST_MODEL:}` | 판단용 / 보조용 모델 ID. **코드에 박지 않는다**. 추론 모델이면 temperature 미설정 |
 | `advisor.model.judge-max-completion-tokens` | 8000 | 추론 토큰 포함 출력 상한 (비용 손잡이) |
 | `advisor.cost.*` | 0 | 100만 토큰당 USD. 채우면 run.cost_usd 계산 |
-| `advisor.prompt.version` | `advice-v2` | 프롬프트 버전. 파일(`prompts/advisor/advice-system-v2.md`)을 고치면 `PromptResources.ADVICE_VERSION` 과 같이 올린다 |
+| `advisor.prompt.version` | `advice-v5` | 프롬프트 버전(표기용 — 실제 로드는 `PromptResources.ADVICE_VERSION`·파일명 `prompts/advisor/advice-system-v5.md`). 파일을 고치면 둘을 같이 올린다 |
+| `advisor.markets` | `[KOSPI]` | 스크리닝·rank-IC 유니버스 시장(`MarketType` 코드). 빈 목록·오타는 기동 실패. **바꾸면 `IC_BACKFILL`(baseDate 없이) 재실행**으로 IC 재기준화(§1.4) |
 | `advisor.trend.bull-threshold` / `bear-threshold` | 2 / −2 | 추세 성분 합 임계. 배포 후 10년 라벨 분포(§3 SQL)로 조정 — 보합 <15% 면 ±3, >55% 면 ret60 컷 0.03 |
 | `advisor.trend.ret60-threshold` / `breadth-high` / `breadth-low` | 0.05 / 0.60 / 0.40 | 60일 수익률·MA20 상회 비율 성분 컷 |
 | `advisor.trend.confirm-days` | 2 | 전환 확인 연속 거래일 |
@@ -101,6 +112,7 @@
 6. `POST /api/advisor/admin/jobs/IC_BACKFILL` → run 메타 `weights` 검토. `GET /weights` 에서 `flagged`(IC 음수) 시그널 확인 — 부호가 틀린 시그널은 하한 배수 0.5 만 받는다.
    월 청크(`IC:2020-01` …)마다 저장·기록되므로 `GET /runs/{id}` 의 `steps` 로 진행이 보인다. `baseDate` 를 주면 그 날부터만 계산한다(공백 보충용).
    **순서를 건너뛰고 ADVISE 를 먼저 부르면** 증분이 최근 45일(`advisor.ic.incremental-max-days`)만 계산하고 warnings 에 `IC 공백 2020-01-01~…` 을 남긴다 — 판단은 진행되지만 가중치 학습 창이 비어 있으니 IC_BACKFILL 을 이어서 돌린다.
+   **`advisor.markets` 를 바꾼 뒤(advice-v5 의 KOSPI 한정 포함)에도 같은 명령을 baseDate 없이 1회** — 저장된 IC 행이 옛 유니버스 기준이라 upsert 로 덮어써야 하며 증분은 이를 건드리지 않는다.
 7. `POST /api/advisor/admin/jobs/ADVISE?baseDate=<직전 영업일>` 수동 1회 → Slack 수신·`GET /advices/{id}` 확인.
 8. prod `scheduler.advisor-*.enabled: true` 로 재기동.
 
@@ -172,6 +184,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - 수집 항목 추가 → `FeatureSql.featureCtes()` feat CTE 컬럼 1줄 + `SignalCode` 상수 1줄 + `advisor-seed.sql` 행 1개(+ `schema-postgres.sql` 미러). 스크리닝·IC·프롬프트가 자동 반영.
 - 추세 성분 추가 → `TrendSql.labelCtes()` 의 comp CTE 에 CASE 1줄 + score 합에 항 추가 + `MarketTrendService` components 맵 + `AdvisorProperties.Trend` 손잡이. 판단·채점·기저율이 자동으로 같은 정의를 쓴다.
 - 연동 쌍 추가 → yml `advisor.morning.link-pairs` 에 `지수:심볼` 1개(심볼은 `kis.overseas.symbols` 에 수집돼 있어야 함). 코드 변경 없음.
+- 유니버스 시장 변경(KOSDAQ 포함 등) → yml `advisor.markets` + `IC_BACKFILL` 재실행. 코드 변경 없음(§1.4).
 - 뉴스 소스 추가 → `tb_stock_news.source` 값을 달리해 넣는 수집 잡 1개(`NewsItem` 생성·`StockNewsWriter.upsert`). advisor 는 source 를 가리지 않는다. DART 공시가 1순위 후보.
 - 2차: 실시간 웹소켓(장중 점검 주기 확대), 백테스트(밸류 이력·상폐 유니버스 스냅샷이 쌓인 뒤). 2026-09-13 프롬프트 v2~v4 계획 원문 `~/.claude/plans/moto-planner-agent-transient-lovelace.md`.
 

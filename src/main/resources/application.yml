@@ -245,12 +245,13 @@ advisor:
   diagnostic-horizons: [1, 20]    # 진단 저장만(학습·KPI 미포함)
   candidate-limit: 30             # LLM 후보 상한 (≈2,500 토큰)
   max-per-sector: 4
+  markets: [KOSPI]                # 스크리닝·rank-IC 유니버스 시장(MarketType 코드, advice-v5). 바꾸면 IC_BACKFILL 을 baseDate 없이 재실행해 IC 재기준화
   pick-min: 3                     # 가드 후 픽이 이보다 적으면 FAILED(미발행)
-  pick-max: 10
+  pick-max: 10                    # Slack 은 픽마다 section 1개 — 36 초과면 블록 50 상한
   advise:
     deadline: "19:55"             # DAILY 완료 대기 마감(KST). 이후 미완료면 SKIPPED + #hvy-error
   prompt:
-    version: advice-v4            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스 (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
+    version: advice-v5            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문 (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
   news:                           # 뉴스 입력(advice-v4). tb_stock_news(scheduler.stock-news) 가 쌓여 있어야 하고 KisNewsTitleManualTest 실측 뒤 켠다
     enabled: ${NEWS_ENABLED:false}

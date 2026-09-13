@@ -36,24 +36,26 @@ import lombok.Builder;
  * 일일 판단 Block Kit 메시지 (#hvy-advisor, 멘션 없음).
  * <pre>
  * 헤더 → 추세(규칙) → 국면(5일) → 추세 전망(LLM) → 데이터 기준·적용 구간 → 주도 섹터 → 종목 표(고정폭: 순위 코드 종목명 방향 확신 점수)
- * → 픽별 근거·리스크 한 줄 → 최근 채점 → 총평 → run 메타 → 면책
+ * → 픽마다 근거·리스크 인용 블록(전문) → 최근 채점 → 총평 → run 메타 → 면책
  * </pre>
  * 종목 표는 고정폭 코드 블록(Block Kit fields 는 2열 고정이라 표가 깨진다)이며 폭은 {@link SlackWidth} 로 한글 2칸을 계산한다. 모바일 코드 블록이
- * 40칸 남짓에서 접히므로 표는 39칸 안에 두고 근거·리스크는 표 밖 인용 줄로 내렸다(advice-v2). 하단 면책 문구는 고정이다.
+ * 40칸 남짓에서 접히므로 표는 39칸 안에 두고 근거·리스크는 표 밖 인용 블록으로 내렸다. 근거·리스크는 **픽마다 section 1개** 에 전문을 싣는다(advice-v5) —
+ * 픽 10개를 section 1개(3,000자 상한)에 몰아넣느라 한글 29자/19자로 잘랐던 v2~v4 결함의 수정. 픽당 최대 ≈830자(가드 400+300+헤더), 블록 수는
+ * 고정 14 + 픽 수(≤ pick-max 10) 로 메시지 상한 50 안이다. 하단 면책 문구는 고정이다.
  */
 @Builder
 public class DailyAdviceMessage implements SlackMessage {
 
   public static final String DISCLAIMER = "⚠️ 투자 자문이 아닙니다. 개인 실험(정량 스크리닝 + LLM 판단) 결과이며 어떤 손실도 책임지지 않습니다.";
   static final DateTimeFormatter MMDD = DateTimeFormatter.ofPattern("MM-dd");
-  static final int THESIS_CELLS = 60;
-  static final int RISK_CELLS = 40;
   /** 미국 데이터가 이 영업일 수 이상 뒤처지면 경고 표시 */
   static final int GLOBAL_STALE_DAYS = 2;
 
   private final AdviceHeader header;
   private final List<PickRow> picks;
   private final Map<String, CandidateRow> candidates;
+  /** 후보 유니버스 시장 라벨(예: "KOSPI", advisor.markets). 종목 헤딩에 붙는다. null 이면 생략 */
+  private final String marketLabel;
   /** 전일 채점 요약 줄들 (없으면 빈 목록) */
   private final List<String> scoreboardLines;
   private final long runId;
@@ -94,10 +96,11 @@ public class DailyAdviceMessage implements SlackMessage {
     blocks.add(divider());
     blocks.add(section(s -> s.text(markdownText("*주도 섹터*  " + sectorText()))));
     blocks.add(divider());
-    blocks.add(section(s -> s.text(markdownText(String.format("*종목 (%d)*%n```%s```", picks.size(), pickTable())))));
-    String notes = pickNotes();
-    if (!notes.isBlank()) {
-      blocks.add(section(s -> s.text(markdownText(notes))));
+    String label = marketLabel == null || marketLabel.isBlank() ? "" : " · " + marketLabel.strip();
+    blocks.add(section(s -> s.text(markdownText(String.format("*종목 (%d)%s*%n```%s```", picks.size(), label, pickTable())))));
+    for (PickRow p : picks) {
+      String note = pickNote(p);
+      blocks.add(section(s -> s.text(markdownText(note))));
     }
     if (scoreboardLines != null && !scoreboardLines.isEmpty()) {
       blocks.add(divider());
@@ -217,21 +220,23 @@ public class DailyAdviceMessage implements SlackMessage {
   }
 
   /**
-   * 픽별 근거·리스크 한 줄: "> *1 삼성전자(005930)* 근거… ⚠ 리스크…".
+   * 픽 1개의 근거·리스크 인용 블록(전문, advice-v5). 첫 줄 "> *1 삼성전자(005930)* 근거", 리스크가 있으면 둘째 줄 "> ⚠ 리스크".
+   * 리스크를 근거 뒤에 이어 붙이지 않는 이유: 근거가 300자면 리스크가 문단 끝에 묻힌다. 본문 안 줄바꿈은 인용이 끊기지 않게 "> " 를 이어 붙인다.
    */
-  String pickNotes() {
+  String pickNote(PickRow p) {
+    CandidateRow c = candidates.get(p.ticker());
+    String name = c == null || c.stockName() == null ? p.ticker() : c.stockName();
     StringBuilder sb = new StringBuilder();
-    for (PickRow p : picks) {
-      CandidateRow c = candidates.get(p.ticker());
-      String name = c == null || c.stockName() == null ? p.ticker() : c.stockName();
-      sb.append("> *").append(p.pickRank()).append(' ').append(name).append('(').append(p.ticker()).append(")* ")
-          .append(SlackWidth.abbreviate(p.thesis() == null ? "" : p.thesis(), THESIS_CELLS));
-      if (p.riskNote() != null && !p.riskNote().isBlank()) {
-        sb.append(" ⚠ ").append(SlackWidth.abbreviate(p.riskNote(), RISK_CELLS));
-      }
-      sb.append('\n');
+    sb.append("> *").append(p.pickRank()).append(' ').append(name).append('(').append(p.ticker()).append(")* ").append(quoted(p.thesis()));
+    if (p.riskNote() != null && !p.riskNote().isBlank()) {
+      sb.append("\n> ⚠ ").append(quoted(p.riskNote()));
     }
-    return sb.toString().stripTrailing();
+    return sb.toString();
+  }
+
+  /** 인용 블록 본문: 앞뒤 공백 제거, 내부 줄바꿈은 "> " 로 이어 인용이 끊기지 않게 */
+  static String quoted(String text) {
+    return text == null ? "" : text.strip().replaceAll("\\R", "\n> ");
   }
 
   static String invalidationText(InvalidationType type, MarketTrend trend) {
@@ -291,13 +296,6 @@ public class DailyAdviceMessage implements SlackMessage {
       case SATURDAY -> "토";
       case SUNDAY -> "일";
     };
-  }
-
-  static String abbreviate(String text, int max) {
-    if (text == null) {
-      return "";
-    }
-    return text.length() <= max ? text : text.substring(0, max - 1) + "…";
   }
 
   /** 섹터 콜 목록을 헤더 형태로 (테스트·미리보기용) */

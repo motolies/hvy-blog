@@ -141,7 +141,7 @@ class AdviseJobTest {
     assertThat(live.model()).isEqualTo("judge-x");
     assertThat(live.weightSetId()).isEqualTo(1L);
     assertThat(live.leadingSectors()).hasSize(1);
-    assertThat(live.promptVersion()).isEqualTo("advice-v4");
+    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION);
     assertThat(live.trendKospi()).as("규칙 추세는 시장 특징에서").isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
     assertThat(live.trendKosdaq()).as("KOSDAQ 추세 없음(픽스처)").isNull();
     assertThat(live.outlooks()).hasSize(2);

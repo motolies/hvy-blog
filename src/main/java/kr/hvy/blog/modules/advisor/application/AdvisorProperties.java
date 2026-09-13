@@ -3,8 +3,10 @@ package kr.hvy.blog.modules.advisor.application;
 import jakarta.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.time.LocalTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.stock.domain.code.MarketType;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -45,10 +47,17 @@ public class AdvisorProperties {
   /** 후보 안 섹터당 최대 종목 수 (단일 테마 쏠림 방지) */
   private int maxPerSector = 4;
 
+  /**
+   * 스크리닝·rank-IC 유니버스의 시장({@link MarketType} 코드: KOSPI·KOSDAQ). 기본 KOSPI 만 — 종목 픽을 KOSPI 로 한정한 2026-09-13 결정(advice-v5).
+   * 백분위 점수·IC·가중치가 같은 유니버스 CTE(FeatureSql.featureCtes)를 쓰므로 값을 바꾸면 IC_BACKFILL 을 baseDate 없이 다시 돌려 IC 를 재기준화한다.
+   * 시장 국면·추세 전망(KOSPI·KOSDAQ 지수)과 섹터 지표(양시장 전체)는 이 값과 무관하다.
+   */
+  private List<String> markets = List.of("KOSPI");
+
   /** 가드 통과 후 픽이 이 수 미만이면 run FAILED (발행 안 함) */
   private int pickMin = 3;
 
-  /** 픽 상한 — 초과분은 확신 내림차순으로 자른다 */
+  /** 픽 상한 — 초과분은 확신 내림차순으로 자른다. Slack 은 픽마다 section 1개라 36 을 넘기면 메시지 블록 50 상한에 걸린다 */
   private int pickMax = 10;
 
   private Advise advise = new Advise();
@@ -83,10 +92,11 @@ public class AdvisorProperties {
   }
 
   /**
-   * 기동 시 설정 상태를 남긴다. 키 값은 출력하지 않는다.
+   * 기동 시 설정 상태를 남긴다. 키 값은 출력하지 않는다. 시장 목록 검증은 비활성이어도 돌린다 — 잘못된 설정은 켜기 전에 드러나는 편이 낫다.
    */
   @PostConstruct
   void logStatus() {
+    validateMarkets();
     if (!enabled) {
       log.info("advisor 비활성(advisor.enabled=false) — AI 판단 잡·ChatClient 미등록");
       return;
@@ -96,12 +106,29 @@ public class AdvisorProperties {
           trend.getScoreHorizonDays(), diagnosticHorizons);
     }
     if (isConfigured()) {
-      log.info("advisor 설정 확인: judge={}, assist={}, horizon={}일, candidates={}, picks={}~{}, trend=[{}..{}] confirm {}일",
-          model.getJudge(), model.getAssist(), horizonDays, candidateLimit, pickMin, pickMax, trend.getBearThreshold(), trend.getBullThreshold(),
-          trend.getConfirmDays());
+      log.info("advisor 설정 확인: judge={}, assist={}, horizon={}일, markets={}, candidates={}, picks={}~{}, trend=[{}..{}] confirm {}일",
+          model.getJudge(), model.getAssist(), horizonDays, markets, candidateLimit, pickMin, pickMax, trend.getBearThreshold(),
+          trend.getBullThreshold(), trend.getConfirmDays());
     } else {
       log.warn("advisor 가 켜져 있으나 OpenAI 키(OPENAI_API_KEY) 또는 모델 ID(ADVISOR_JUDGE_MODEL/ADVISOR_ASSIST_MODEL)가 비어 있어 잡 실행 시 거부됩니다");
     }
+  }
+
+  /**
+   * advisor.markets 검증·정규화(trim·대문자). 비어 있으면 SQL `IN ()` 문법 오류로, 모르는 코드면 유니버스 0 → 판단 FAILED 로 런타임에야 드러나므로
+   * 기동 시점에 거부한다.
+   */
+  void validateMarkets() {
+    if (markets == null || markets.isEmpty()) {
+      throw new IllegalStateException("advisor.markets 가 비어 있습니다 — KOSPI, KOSDAQ 중 하나 이상을 지정하세요");
+    }
+    List<String> normalized = markets.stream().map(m -> m == null ? "" : m.trim().toUpperCase()).toList();
+    for (String code : normalized) {
+      if (Arrays.stream(MarketType.values()).noneMatch(t -> t.getCode().equals(code))) {
+        throw new IllegalStateException("advisor.markets 에 모르는 시장 코드 '" + code + "' — 허용: KOSPI, KOSDAQ");
+      }
+    }
+    markets = normalized;
   }
 
   @Data

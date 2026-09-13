@@ -83,6 +83,7 @@ class AdviceScoringPgTest {
     NamedParameterJdbcTemplate named = new NamedParameterJdbcTemplate(ds);
     properties = new AdvisorProperties(new MockEnvironment());
     properties.getLesson().setMinPicks(1);
+    properties.setMarkets(List.of("KOSPI", "KOSDAQ")); // 합성 시드가 양시장이라 IC 증분(HAVING ≥30)이 조용히 0행이 되지 않게
     adviceWriter = new AdviceWriter(jdbc);
     scoreWriter = new ScoreWriter(new BatchUpsertSupport(jdbc), jdbc);
     morningChecks = new kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter(jdbc);

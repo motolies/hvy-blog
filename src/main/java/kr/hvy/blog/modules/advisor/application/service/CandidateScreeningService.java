@@ -19,7 +19,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * 정량 깔때기: 유니버스(≈1,200) → 1차 컷(≈300) → 종합 점수 상위 N(섹터당 ≤k). LLM 은 이 후보만 본다.
+ * 정량 깔때기: 유니버스(advisor.markets 시장, KOSPI 기본 ≈ 수백) → 1차 컷 → 종합 점수 상위 N(섹터당 ≤k). LLM 은 이 후보만 본다.
  * <p>
  * 백분위는 1차 컷이 아니라 유니버스 전체 기준으로 매겨 IC 와 같은 척도를 쓴다. 결과 후보에는 그날의 시그널 백분위·가중치·원값을
  * 스냅샷으로 넣어(동결) 가중치가 바뀌어도 재현된다.
@@ -58,6 +58,7 @@ public class CandidateScreeningService {
     params.put("to", baseDate);
     params.put("limit", limit);
     params.put("maxPerSector", maxPerSector);
+    params.put("markets", properties.getMarkets());
 
     String sql = FeatureSql.featureCtes()
         + ", pct AS (\n"
@@ -90,8 +91,12 @@ public class CandidateScreeningService {
     return new ScreeningResult(baseDate, universe, cut, set.weightSetId(), candidates);
   }
 
+  /**
+   * 후보가 0건이라 본 쿼리의 universe_size 를 못 받을 때의 유니버스 수. 본 쿼리와 같은 시장 필터를 건다.
+   */
   private int countUniverse(LocalDate baseDate) {
-    Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM vw_stock_universe_daily WHERE trade_date = :d", Map.of("d", baseDate), Integer.class);
+    Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM vw_stock_universe_daily u JOIN tb_stock_master ms ON ms.ticker = u.ticker "
+        + "WHERE u.trade_date = :d AND ms.market_type IN (:markets)", Map.of("d", baseDate, "markets", properties.getMarkets()), Integer.class);
     return n == null ? 0 : n;
   }
 

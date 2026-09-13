@@ -44,6 +44,7 @@ DROP TABLE IF EXISTS tb_api_log CASCADE;
 DROP TABLE IF EXISTS shedlock CASCADE;
 
 -- AI 시장 판단(advisor) 모듈 (생성 역순, 2026-09-13). stock 과는 FK 가 없고 ticker 는 값 참조
+DROP TABLE IF EXISTS tb_advisor_chat CASCADE;
 DROP TABLE IF EXISTS tb_advisor_prompt_input CASCADE;
 DROP TABLE IF EXISTS tb_advisor_morning_check CASCADE;
 DROP TABLE IF EXISTS tb_advisor_intraday_check CASCADE;
@@ -2271,6 +2272,68 @@ COMMENT ON COLUMN tb_advisor_prompt_input.user_payload   IS '사용자 메시지
 COMMENT ON COLUMN tb_advisor_prompt_input.options_json   IS '모델·출력 상한·응답 스키마';
 COMMENT ON COLUMN tb_advisor_prompt_input.raw_output     IS '가드 이전 원본 응답';
 COMMENT ON COLUMN tb_advisor_prompt_input.created_at     IS '생성일시';
+
+-- =============================================
+-- 8. Slack 채팅 봇 감사 (chat-v1, 2026-09-13) — #hvy-advisor 질문 1건 = 1행. 예산 집계·비용 진단·사후 검토용
+-- =============================================
+CREATE TABLE IF NOT EXISTS tb_advisor_chat
+(
+    chat_id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    event_id          VARCHAR(64)    NOT NULL,
+    channel_id        VARCHAR(32)    NOT NULL,
+    thread_ts         VARCHAR(32)    NOT NULL,
+    message_ts        VARCHAR(32)    NOT NULL,
+    slack_user_id     VARCHAR(32)    NOT NULL,
+    question          TEXT           NOT NULL,
+    answer            TEXT                    DEFAULT NULL,
+    status            VARCHAR(20)    NOT NULL,
+    model             VARCHAR(80)             DEFAULT NULL,
+    prompt_version    VARCHAR(40)             DEFAULT NULL,
+    history_messages  INTEGER        NOT NULL DEFAULT 0,
+    tool_calls        INTEGER        NOT NULL DEFAULT 0,
+    tool_calls_json   JSONB                   DEFAULT NULL,
+    prompt_tokens     INTEGER        NOT NULL DEFAULT 0,
+    completion_tokens INTEGER        NOT NULL DEFAULT 0,
+    reasoning_tokens  INTEGER        NOT NULL DEFAULT 0,
+    cached_tokens     INTEGER        NOT NULL DEFAULT 0,
+    cost_usd          NUMERIC(12, 6) NOT NULL DEFAULT 0,
+    data_as_of        DATE                    DEFAULT NULL,
+    duration_ms       BIGINT                  DEFAULT NULL,
+    error_message     TEXT                    DEFAULT NULL,
+    created_at        TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ(6) NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE  tb_advisor_chat                   IS 'Slack #hvy-advisor 채팅 봇 감사 — 질문 1건 = 1행 (chat-v1, 2026-09-13). 일일 토큰 예산·비용 진단·사후 검토에 쓴다';
+COMMENT ON COLUMN tb_advisor_chat.chat_id           IS '식별자';
+COMMENT ON COLUMN tb_advisor_chat.event_id          IS 'Slack event_id — 유니크. Redis 중복 제거(10분)가 비어도 재전송을 막는 2차 방어선';
+COMMENT ON COLUMN tb_advisor_chat.channel_id        IS 'Slack 채널 ID (C…)';
+COMMENT ON COLUMN tb_advisor_chat.thread_ts         IS '답글을 단 스레드 ts (댓글이면 원 스레드, 새 글이면 그 글의 ts)';
+COMMENT ON COLUMN tb_advisor_chat.message_ts        IS '질문 메시지 ts';
+COMMENT ON COLUMN tb_advisor_chat.slack_user_id     IS '질문한 Slack 사용자 ID (U…)';
+COMMENT ON COLUMN tb_advisor_chat.question          IS '질문 원문';
+COMMENT ON COLUMN tb_advisor_chat.answer            IS '답변 본문 (mrkdwn 변환 전 모델 출력)';
+COMMENT ON COLUMN tb_advisor_chat.status            IS 'RUNNING → SUCCESS | FAILED | SKIPPED(예산·쿨다운 거부) — AdvisorStatus 재사용';
+COMMENT ON COLUMN tb_advisor_chat.model             IS '응답 모델 ID';
+COMMENT ON COLUMN tb_advisor_chat.prompt_version    IS '시스템 프롬프트 버전 (chat-v1 …)';
+COMMENT ON COLUMN tb_advisor_chat.history_messages  IS '프롬프트에 넣은 스레드 이전 메시지 수 (입력 토큰 진단: 히스토리 vs 도구 결과)';
+COMMENT ON COLUMN tb_advisor_chat.tool_calls        IS '도구 호출 횟수';
+COMMENT ON COLUMN tb_advisor_chat.tool_calls_json   IS '호출한 도구 이름 목록 (순서대로) ["dataFreshness","resolveStock",…]';
+COMMENT ON COLUMN tb_advisor_chat.prompt_tokens     IS '입력 토큰 (도구 루프 누적)';
+COMMENT ON COLUMN tb_advisor_chat.completion_tokens IS '출력 토큰 (추론 토큰 포함, 누적)';
+COMMENT ON COLUMN tb_advisor_chat.reasoning_tokens  IS '추론 토큰';
+COMMENT ON COLUMN tb_advisor_chat.cached_tokens     IS '프롬프트 캐시 적중 입력 토큰';
+COMMENT ON COLUMN tb_advisor_chat.cost_usd          IS 'advisor.cost 단가로 계산한 비용 (0 이면 미계산)';
+COMMENT ON COLUMN tb_advisor_chat.data_as_of        IS '답변이 참조한 데이터 기준일 (도구 반환 asOf 중 가장 이른 값)';
+COMMENT ON COLUMN tb_advisor_chat.duration_ms       IS '수신부터 답글까지 소요(ms)';
+COMMENT ON COLUMN tb_advisor_chat.error_message     IS '실패 사유';
+COMMENT ON COLUMN tb_advisor_chat.created_at        IS '생성일시';
+COMMENT ON COLUMN tb_advisor_chat.updated_at        IS '수정일시';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_advisor_chat_event ON tb_advisor_chat (event_id);
+CREATE INDEX IF NOT EXISTS idx_advisor_chat_created ON tb_advisor_chat (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_advisor_chat_user ON tb_advisor_chat (slack_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_advisor_chat_thread ON tb_advisor_chat (channel_id, thread_ts, created_at);
 
 -- =============================================
 -- 마이그레이션 (advice-v2, 2026-09-13). 신규 설치는 위 CREATE 본문에 이미 포함돼 있고, 기존 설치는 아래가 컬럼을 보탠다. 재실행 안전.

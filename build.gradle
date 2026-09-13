@@ -83,6 +83,13 @@ dependencies {
     implementation platform('org.springframework.ai:spring-ai-bom:2.0.1')
     implementation 'org.springframework.ai:spring-ai-starter-model-openai'
 
+    // Slack Socket Mode 수신(advisor 채팅 봇, 2026-09-13) — bolt 코어(1.50.0)는 hvy-common 이 api 로 이미 제공하므로 어댑터만 더한다.
+    // bolt-socket-mode 의 pom 은 javax.websocket-api·Tyrus·Java-WebSocket 을 전부 provided 로 두므로 WebSocket 구현은 여기서 하나만 고른다:
+    // Java-WebSocket(SocketModeClient.Backend.JavaWebSocket) 은 javax/jakarta websocket API 를 참조하지 않아 Boot 4(jakarta) 와 충돌이 없다.
+    // jakarta 변형(bolt-jakarta-socket-mode)은 별도 코어(bolt-jakarta)를 끌어와 App 클래스가 겹치므로 쓰지 않는다.
+    implementation 'com.slack.api:bolt-socket-mode:1.50.0'
+    implementation 'org.java-websocket:Java-WebSocket:1.6.0'
+
 
     // redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'

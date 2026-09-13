@@ -310,6 +310,28 @@ advisor:
     input-per-1m-usd: 0           # 0 이면 비용 미계산. 모델 단가로 채우면 run.cost_usd 에 기록
     output-per-1m-usd: 0
   retention-days: 180             # 프롬프트 입력 스냅샷 보존
+  # Slack #hvy-advisor 채팅 봇 (chat-v1, 2026-09-13). Socket Mode 수신 — 공개 URL·서명 검증 없음, app-level 토큰 1개.
+  # 토큰·채널·허용 사용자 중 하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨). bot 토큰은 slack.token(SLACK_BOT_TOKEN) 재사용
+  chat:
+    enabled: ${ADVISOR_CHAT_ENABLED:false}
+    app-token: ${SLACK_APP_TOKEN:}                     # xapp-… (Socket Mode, scope connections:write)
+    channel-id: ${ADVISOR_CHAT_CHANNEL_ID:}            # C… (#hvy-advisor 채널 ID)
+    allowed-user-ids: ${ADVISOR_CHAT_ALLOWED_USERS:}   # U…,U… 쉼표 구분 — 목록 밖 메시지는 조용히 무시
+    model: ${ADVISOR_CHAT_MODEL:}                      # 비면 advisor.model.assist
+    # temperature:                                     # 추론 모델은 받지 않으므로 기본 미설정
+    max-completion-tokens: 3000
+    max-calls-per-tool: 6                              # ToolCallingManager 도구별 호출 상한
+    max-total-tool-calls: 12                           # 질문 1건 도구 호출 총합 상한
+    thread-history-limit: 30                           # conversations.replies limit
+    max-history-chars: 12000                           # 프롬프트에 넣는 스레드 히스토리 문자 상한(오래된 것부터 제거, 루트 보존)
+    tool-row-limit: 50
+    tool-timeout-seconds: 5                            # 도구 SQL statement_timeout
+    answer-timeout-seconds: 180                        # 질문 1건 소프트 마감
+    daily-token-budget: 300000                         # 입력+출력, KST 자정 기준. 0 이면 무제한 (P3)
+    per-user-cooldown-seconds: 20                      # (P3)
+    max-blocks: 20                                     # 답글 Block Kit 블록 상한
+    disconnect-alert-cooldown-minutes: 30              # WebSocket close/error 경보(#hvy-notify) 최소 간격
+    dedup-ttl-minutes: 10                              # event_id 중복 제거 Redis TTL
 
 # scheduler
 scheduler:
@@ -394,6 +416,11 @@ cache:
   logging:
     enabled: false
 # scheduler
+# Slack 채팅 봇 — prod 는 켜 두되 env(SLACK_APP_TOKEN·ADVISOR_CHAT_CHANNEL_ID·ADVISOR_CHAT_ALLOWED_USERS)가 없으면 WARN 만 남기고 연결하지 않는다. 롤백은 ADVISOR_CHAT_ENABLED=false
+advisor:
+  chat:
+    enabled: ${ADVISOR_CHAT_ENABLED:true}
+
 scheduler:
   public-ip:
     lock-name: PUBLIC-IP-PROD

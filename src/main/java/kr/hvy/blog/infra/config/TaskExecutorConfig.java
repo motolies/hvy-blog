@@ -88,6 +88,26 @@ public class TaskExecutorConfig extends TaskExecutorConfigurer {
     return executor;
   }
 
+  /**
+   * Slack 채팅 봇(advisor chat) 전용 실행기 (2026-09-13).
+   * <p>
+   * Socket Mode 이벤트 스레드는 3초 안에 ack 해야 하므로 라우터가 필터만 하고 여기에 제출한다. advisorExecutor(1스레드·큐 5)를 같이 쓰면
+   * ADVISE 가 수 분을 점유하는 동안 질문이 그 뒤에 줄을 서므로 분리했다. 2스레드 — 도구 호출 상한 12 × statement_timeout 5초 = 질문 하나가
+   * 최악 60초 DB 를 잡을 수 있어 동시성을 낮게 둔다. 큐가 차면 라우터가 "잠시 후 다시" 한 줄을 답하고 버린다.
+   * ThreadPoolTaskExecutor 빈이므로 TraceTaskDecoratorBeanPostProcessor 가 traceId 전파를 자동으로 붙인다.
+   */
+  @Bean(name = "advisorChatExecutor", destroyMethod = "shutdown")
+  public ThreadPoolTaskExecutor advisorChatExecutor() {
+    var executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(2);
+    executor.setMaxPoolSize(2);
+    executor.setQueueCapacity(10);
+    executor.setThreadNamePrefix("advisor-chat-");
+    executor.setWaitForTasksToCompleteOnShutdown(false);
+    executor.initialize();
+    return executor;
+  }
+
   // 스케줄러 강제 지정 (여러 스케줄러/Executor가 있을 때 안전)
   @Bean
   public SchedulingConfigurer schedulingConfigurer(@Qualifier("platformTaskScheduler") TaskScheduler scheduler) {

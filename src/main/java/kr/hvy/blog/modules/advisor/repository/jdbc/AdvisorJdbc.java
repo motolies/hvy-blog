@@ -23,6 +23,8 @@ final class AdvisorJdbc {
   };
   private static final TypeReference<List<Long>> LIST_OF_LONG = new TypeReference<>() {
   };
+  private static final TypeReference<List<String>> LIST_OF_STRING = new TypeReference<>() {
+  };
 
   private AdvisorJdbc() {
   }
@@ -78,6 +80,11 @@ final class AdvisorJdbc {
   static List<Long> jsonListOfLong(ResultSet rs, String column) throws SQLException {
     String json = rs.getString(column);
     return json == null || json.isBlank() ? List.of() : AdvisorJson.MAPPER.readValue(json, LIST_OF_LONG);
+  }
+
+  static List<String> jsonListOfString(ResultSet rs, String column) throws SQLException {
+    String json = rs.getString(column);
+    return json == null || json.isBlank() ? List.of() : AdvisorJson.MAPPER.readValue(json, LIST_OF_STRING);
   }
 
   static <T extends Enum<T>> T enumOrNull(ResultSet rs, String column, Class<T> type) throws SQLException {

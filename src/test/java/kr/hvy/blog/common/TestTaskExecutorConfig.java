@@ -39,4 +39,12 @@ public class TestTaskExecutorConfig {
   public TaskExecutor advisorExecutor() {
     return new SyncTaskExecutor();
   }
+
+  /**
+   * Slack 채팅 봇 실행기의 테스트 대체 — 호출 스레드에서 동기 실행.
+   */
+  @Bean(name = "advisorChatExecutor")
+  public TaskExecutor advisorChatExecutor() {
+    return new SyncTaskExecutor();
+  }
 }

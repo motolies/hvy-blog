@@ -3,6 +3,8 @@ package kr.hvy.blog.modules.advisor;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import kr.hvy.blog.common.AbstractTestContainers;
+import kr.hvy.blog.modules.advisor.application.chat.SlackChatRouter;
+import kr.hvy.blog.modules.advisor.application.chat.SlackSocketModeRunner;
 import kr.hvy.blog.modules.advisor.application.service.AdviseJob;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorOrchestrator;
 import kr.hvy.blog.modules.advisor.application.service.MarketJudgeClient;
@@ -45,6 +47,27 @@ class AdvisorContextBootTest {
     @Test
     void advisorBeansAreWired() {
       assertAdvisorBeansWired(context);
+    }
+  }
+
+  /**
+   * Slack 채팅 봇(chat-v1)을 켰지만 app-level 토큰·채널·허용 사용자가 없는 경우 — 러너·라우터 빈은 조립되되 Socket Mode 연결은 열지 않고 기동은 성공해야 한다.
+   * 잘못된 Slack 설정으로 블로그 전체가 안 뜨면 안 된다는 AdvisorChatProperties 의 계약이 이 테스트의 존재 이유다.
+   */
+  @Nested
+  @SpringBootTest(properties = {"advisor.enabled=true", "spring.ai.openai.api-key=test-key", "advisor.chat.enabled=true", "advisor.chat.app-token="})
+  class WithChatEnabledButUnconfigured extends AbstractTestContainers {
+
+    @Autowired
+    private ApplicationContext context;
+
+    @Test
+    void chatBeansAreWiredButSocketModeIsNotStarted() {
+      assertAdvisorBeansWired(context);
+      assertThat(context.getBean(SlackChatRouter.class)).isNotNull();
+      SlackSocketModeRunner runner = context.getBean(SlackSocketModeRunner.class);
+      assertThat(runner.isAutoStartup()).isFalse();
+      assertThat(runner.isRunning()).isFalse();
     }
   }
 

@@ -34,6 +34,15 @@ class AdviceSchemaFactoryTest {
     Map<String, Object> sector = (Map<String, Object>) ((Map<String, Object>) props.get("sectors")).get("items");
     assertThat((List<String>) ((Map<String, Object>) ((Map<String, Object>) sector.get("properties")).get("code")).get("enum")).containsExactly("G2510");
 
+    assertThat(pickProps).containsKey("citedNews");
+    assertThat((Map<String, Object>) ((Map<String, Object>) pickProps.get("citedNews")).get("items")).as("뉴스 없으면 자유 문자열 배열")
+        .containsEntry("type", "string").doesNotContainKey("enum");
+    Map<String, Object> withNews = AdviceSchemaFactory.schema(List.of("005930"), List.of(), List.of("N1", "N2"));
+    Map<String, Object> newsPick = (Map<String, Object>) ((Map<String, Object>) ((Map<String, Object>) withNews.get("properties")).get("picks")).get("items");
+    Map<String, Object> citedNews = (Map<String, Object>) ((Map<String, Object>) newsPick.get("properties")).get("citedNews");
+    assertThat((List<String>) ((Map<String, Object>) citedNews.get("items")).get("enum")).as("그날 헤드라인 id 가 enum 으로").containsExactly("N1", "N2");
+    assertStrict(withNews);
+
     String json = AdviceSchemaFactory.schemaJson(List.of("005930"), List.of());
     assertThat(json).contains("\"additionalProperties\":false").contains("\"enum\":[\"005930\"]");
     Map<String, Object> noSectors = AdviceSchemaFactory.schema(List.of("005930"), List.of());

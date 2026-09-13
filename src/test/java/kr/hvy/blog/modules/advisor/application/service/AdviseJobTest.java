@@ -63,6 +63,9 @@ class AdviseJobTest {
   private final AdvisorNotifier notifier = mock(AdvisorNotifier.class);
   @SuppressWarnings("unchecked")
   private final ObjectProvider<AdviseJob.ScoreHook> hookProvider = mock(ObjectProvider.class);
+  @SuppressWarnings("unchecked")
+  private final ObjectProvider<NewsFeatureService> newsProvider = mock(ObjectProvider.class);
+  private final NewsFeatureService newsFeatures = mock(NewsFeatureService.class);
   private final LocalDate base = LocalDate.of(2026, 9, 11);
   private final AtomicInteger llmCalls = new AtomicInteger();
   /** 후보 T00~T02 를 고르고 T00 은 입력 특징(r20=0.012345)을 허용오차 안에서 인용 */
@@ -88,8 +91,10 @@ class AdviseJobTest {
           ChatResponseMetadata.builder().id("resp").model("judge-x").usage(new DefaultUsage(6000, 1900)).build());
     };
     job = new AdviseJob(properties, gate, icService, marketFeatures, screening, weightSets, new AdvicePromptBuilder(properties), new PromptResources(),
-        new MarketJudgeClient(ChatClient.create(stub), "judge-x"), adviceWriter, promptInputs, lessons, notifier, hookProvider);
+        new MarketJudgeClient(ChatClient.create(stub), "judge-x"), adviceWriter, promptInputs, lessons, notifier, hookProvider, newsProvider);
     when(hookProvider.getIfAvailable()).thenReturn(null);
+    when(newsProvider.getIfAvailable()).thenReturn(newsFeatures);
+    when(adviceWriter.firstNewsAdviceDate()).thenReturn(Optional.empty());
     when(gate.decide(any(), any())).thenReturn(new AdvisorGateService.Decision(true, false, true, false, DataQuality.OK, "DAILY 완료"));
     when(icService.computeIncremental(any())).thenReturn(Optional.empty());
     when(marketFeatures.features(base)).thenReturn(AdvicePromptBuilderTest.market());
@@ -99,7 +104,7 @@ class AdviseJobTest {
     when(adviceWriter.find(any(), anyString(), any())).thenReturn(Optional.empty());
     when(adviceWriter.findLatest(any(), any())).thenReturn(Optional.empty());
     when(adviceWriter.countLivePicks()).thenReturn(0);
-    when(adviceWriter.insertHeader(any())).thenReturn(842L, 843L);
+    when(adviceWriter.insertHeader(any())).thenReturn(842L, 843L, 844L);
     when(notifier.publish(any())).thenReturn(true);
   }
 
@@ -136,7 +141,7 @@ class AdviseJobTest {
     assertThat(live.model()).isEqualTo("judge-x");
     assertThat(live.weightSetId()).isEqualTo(1L);
     assertThat(live.leadingSectors()).hasSize(1);
-    assertThat(live.promptVersion()).isEqualTo("advice-v3");
+    assertThat(live.promptVersion()).isEqualTo("advice-v4");
     assertThat(live.trendKospi()).as("규칙 추세는 시장 특징에서").isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
     assertThat(live.trendKosdaq()).as("KOSDAQ 추세 없음(픽스처)").isNull();
     assertThat(live.outlooks()).hasSize(2);
@@ -158,6 +163,39 @@ class AdviseJobTest {
     assertThat(execution.metadata("adviceId")).isEqualTo(843L);
     assertThat(execution.steps()).extracting(AdvisorExecution.StepResult::name)
         .contains("IC", "FEATURES", "SCREEN", "SHADOW_QUANT", "JUDGE", "SAVE", "PUBLISH", "SHADOW_NOMEM");
+  }
+
+  @Test
+  @DisplayName("뉴스가 켜지면 news 블록·citedNews 스키마가 붙고, 뉴스 없는 섀도(LLM_NONEWS)가 한 번 더 돌아 LLM 2회·헤더 3개가 된다")
+  void newsEnabledAddsNonewsShadow() {
+    properties.getNews().setEnabled(true);
+    kr.hvy.blog.modules.advisor.domain.model.NewsBlock block = new kr.hvy.blog.modules.advisor.domain.model.NewsBlock(
+        java.time.Instant.parse("2026-09-11T10:30:00Z"), 36,
+        List.of(new kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline("N1", "09-11 16:20", "외국인 이틀째 순매수", List.of())),
+        java.util.Map.of("T00", List.of(new kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline("N2", "09-11 08:40", "종목0 신제품 발표", List.of("T00")))));
+    when(newsFeatures.news(eq(base), any())).thenReturn(Optional.of(block));
+    llmReply = REPLY.replace("\"citedFeatures\":[{\"name\":\"r20\",\"value\":0.0123}]", "\"citedFeatures\":[{\"name\":\"r20\",\"value\":0.0123}],\"citedNews\":[\"N2\",\"N1\",\"N9\"]");
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SUCCESS);
+    assertThat(llmCalls.get()).as("LIVE + LLM_NONEWS").isEqualTo(2);
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter, org.mockito.Mockito.times(3)).insertHeader(headers.capture());
+    assertThat(headers.getAllValues()).extracting(AdviceHeader::variant).containsExactly(AdviceVariant.QUANT_TOPN, AdviceVariant.LIVE, AdviceVariant.LLM_NONEWS);
+    AdviceHeader live = headers.getAllValues().get(1);
+    assertThat(live.newsIds()).containsExactly("N1", "N2");
+    assertThat(headers.getAllValues().get(2).newsIds()).as("뉴스 없는 섀도").isEmpty();
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<PickRow>> picks = ArgumentCaptor.forClass(List.class);
+    verify(adviceWriter, org.mockito.Mockito.times(3)).insertPicks(anyLong(), picks.capture());
+    PickRow t00 = picks.getAllValues().get(1).stream().filter(p -> p.ticker().equals("T00")).findFirst().orElseThrow();
+    assertThat(t00.citedNews()).as("입력에 없던 N9 는 제거").containsExactly("N2", "N1");
+    assertThat(live.guard()).containsEntry("unknownNews", 1);
+    assertThat(execution.metadata("newsIds")).isEqualTo(2);
+    assertThat(execution.metadata("shadowNonewsAdviceId")).isEqualTo(844L);
+    assertThat(execution.steps()).extracting(AdvisorExecution.StepResult::name).contains("NEWS", "SHADOW_NONEWS");
   }
 
   @Test

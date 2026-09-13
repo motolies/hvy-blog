@@ -12,6 +12,7 @@ import kr.hvy.blog.modules.advisor.domain.model.GlobalLink;
 import kr.hvy.blog.modules.advisor.domain.model.LessonRow;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
 import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
+import kr.hvy.blog.modules.advisor.domain.model.NewsBlock;
 import kr.hvy.blog.modules.advisor.domain.model.PromptPayload;
 import kr.hvy.blog.modules.advisor.domain.model.ScreeningResult;
 import lombok.RequiredArgsConstructor;
@@ -41,10 +42,20 @@ public class AdvicePromptBuilder {
    */
   public PromptPayload build(MarketFeatures market, ScreeningResult screening, Map<String, Object> scoreboard, List<LessonRow> lessons,
       Map<String, Double> weights, DataQuality quality) {
+    return build(market, screening, scoreboard, lessons, weights, quality, null);
+  }
+
+  /**
+   * @param news 뉴스 블록(없으면 null). news 전용 자 상한(advisor.news.max-chars)을 넘으면 후보별 → 시장 순으로 먼저 줄이고, 그 뒤에야 후보 행을 자른다
+   *             — 뉴스가 후보를 밀어내지 않게.
+   */
+  public PromptPayload build(MarketFeatures market, ScreeningResult screening, Map<String, Object> scoreboard, List<LessonRow> lessons,
+      Map<String, Double> weights, DataQuality quality, NewsBlock news) {
+    NewsBlock fitted = fitNews(news);
     int limit = screening.candidates().size();
     while (true) {
       List<CandidateRow> included = screening.candidates().subList(0, limit);
-      String json = AdvisorJson.write(payload(market, screening, included, scoreboard, lessons, weights, quality));
+      String json = AdvisorJson.write(payload(market, screening, included, scoreboard, lessons, weights, quality, fitted));
       if (json.length() <= properties.getPrompt().getMaxInputChars() || limit <= Math.max(properties.getPickMin(), 5)) {
         List<String> tickers = included.stream().map(CandidateRow::ticker).toList();
         LinkedHashSet<String> sectors = new LinkedHashSet<>();
@@ -52,14 +63,60 @@ public class AdvicePromptBuilder {
         market.bottomSectors().forEach(s -> sectors.add(s.code()));
         included.stream().map(CandidateRow::sectorCode).filter(c -> c != null).forEach(sectors::add);
         return new PromptPayload(json, tickers, new ArrayList<>(sectors), included.size(), limit < screening.candidates().size(),
-            json.length() / 3);
+            json.length() / 3, fitted == null ? List.of() : fitted.ids());
       }
       limit -= 5;
     }
   }
 
+  /**
+   * news 블록을 자 상한 안으로: (후보별 3, 시장 12) → (2, 12) → (1, 12) → (1, 6) → (0, 6) → 없음.
+   */
+  NewsBlock fitNews(NewsBlock news) {
+    if (news == null) {
+      return null;
+    }
+    int max = properties.getNews().getMaxChars();
+    int perTicker = properties.getNews().getPerTickerLimit();
+    int market = properties.getNews().getMarketLimit();
+    NewsBlock current = news;
+    while (current != null && AdvisorJson.write(newsBlock(current)).length() > max) {
+      if (perTicker > 1) {
+        perTicker--;
+      } else if (market > 6) {
+        market = 6;
+      } else if (perTicker == 1) {
+        perTicker = 0;
+      } else {
+        return null;
+      }
+      current = news.trimmed(perTicker, market);
+    }
+    return current;
+  }
+
+  /**
+   * news 블록 JSON: [id, "MM-dd HH:mm", 제목] 표 형태로 토큰을 아낀다.
+   */
+  static Map<String, Object> newsBlock(NewsBlock news) {
+    Map<String, Object> n = new LinkedHashMap<>();
+    n.put("asOf", news.asOf().toString());
+    n.put("windowHours", news.windowHours());
+    n.put("columns", List.of("id", "time", "title"));
+    n.put("market", news.market().stream().map(h -> List.of(h.id(), h.time(), h.title())).toList());
+    Map<String, Object> byTicker = new LinkedHashMap<>();
+    news.byTicker().forEach((t, list) -> byTicker.put(t, list.stream().map(h -> List.of(h.id(), h.time(), h.title())).toList()));
+    n.put("byTicker", byTicker);
+    return n;
+  }
+
   Map<String, Object> payload(MarketFeatures market, ScreeningResult screening, List<CandidateRow> candidates, Map<String, Object> scoreboard,
       List<LessonRow> lessons, Map<String, Double> weights, DataQuality quality) {
+    return payload(market, screening, candidates, scoreboard, lessons, weights, quality, null);
+  }
+
+  Map<String, Object> payload(MarketFeatures market, ScreeningResult screening, List<CandidateRow> candidates, Map<String, Object> scoreboard,
+      List<LessonRow> lessons, Map<String, Double> weights, DataQuality quality, NewsBlock news) {
     Map<String, Object> root = new LinkedHashMap<>();
     root.put("asOf", screening.baseDate().toString());
     root.put("horizonDays", properties.getHorizonDays());
@@ -150,6 +207,9 @@ public class AdvicePromptBuilder {
     cand.put("rows", candidates.stream().map(AdvicePromptBuilder::candidateRow).toList());
     root.put("candidates", cand);
 
+    if (news != null && news.size() > 0) {
+      root.put("news", newsBlock(news));
+    }
     if (scoreboard != null && !scoreboard.isEmpty()) {
       root.put("scoreboard", scoreboard);
     }

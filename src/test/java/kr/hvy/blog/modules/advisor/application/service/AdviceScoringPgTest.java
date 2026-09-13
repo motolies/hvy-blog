@@ -315,10 +315,18 @@ class AdviceScoringPgTest {
         .outlooks(List.of(new kr.hvy.blog.modules.advisor.domain.model.TrendOutlook("0001", kr.hvy.blog.modules.advisor.domain.code.TrendHorizon.ABOUT_20D, 0.65,
             kr.hvy.blog.modules.advisor.domain.code.InvalidationType.BELOW_MA60)))
         .dataAsOf(Map.of("domestic", D.get(3).toString(), "globalAgeTradingDays", 1, "flowProvisional", true))
-        .entryDate(D.get(4)).exitDate(D.get(8)).dataQuality(DataQuality.OK).promptVersion("advice-v2").model("m").build();
+        .entryDate(D.get(4)).exitDate(D.get(8)).newsIds(List.of("N1", "N2")).dataQuality(DataQuality.OK).promptVersion("advice-v2").model("m").build();
 
+    assertThat(adviceWriter.firstNewsAdviceDate()).isEmpty();
     long id = adviceWriter.insertHeader(header);
     AdviceHeader saved = adviceWriter.findById(id).orElseThrow();
+    assertThat(saved.newsIds()).containsExactly("N1", "N2");
+    assertThat(adviceWriter.firstNewsAdviceDate()).contains(D.get(3));
+    adviceWriter.insertCandidates(id, List.of(CandidateRow.builder().ticker(AdvisorSyntheticData.ticker(1)).quantRank(1).quantScore(0.5).stockName("종목1")
+        .marketType("KOSDAQ").benchIndexCode("1001").sectorCode("S1").signals(Map.of()).features(Map.of()).appliedLessonIds(List.of()).build()));
+    adviceWriter.insertPicks(id, List.of(PickRow.builder().ticker(AdvisorSyntheticData.ticker(1)).pickRank(1).direction(PickDirection.LONG).conviction(0.7)
+        .citedNews(List.of("N2")).build()));
+    assertThat(adviceWriter.picks(id).getFirst().citedNews()).containsExactly("N2");
 
     assertThat(saved.trendKospi()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
     assertThat(saved.trendKosdaq()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BEAR);

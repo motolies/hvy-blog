@@ -142,6 +142,29 @@ class AdviceGuardTest {
     assertThat(missing.stats()).containsEntry("missingOutlook", 2).doesNotContainKey("badPersist");
   }
 
+  @Test
+  @DisplayName("인용 헤드라인: 입력에 없던 id 제거(unknownNews), 다른 종목에만 태깅된 기사 제거(newsMismatch), 시장 헤드라인은 허용, 뉴스 블록이 없으면 전부 제거")
+  void citedNewsFiltering() {
+    kr.hvy.blog.modules.advisor.domain.model.NewsBlock news = new kr.hvy.blog.modules.advisor.domain.model.NewsBlock(java.time.Instant.now(), 36,
+        List.of(new kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline("N1", "09-11 16:20", "시장", List.of())),
+        Map.of("005930", List.of(new kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline("N2", "09-11 08:40", "삼성", List.of("005930"))),
+            "000660", List.of(new kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline("N3", "09-11 09:00", "하이닉스", List.of("000660")))));
+    List<CandidateRow> candidates = List.of(candidate("005930", 0.081), candidate("000660", 0.05));
+    AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("RISK_ON", "UP", "UP", "0.60", ""), outlook, List.of(),
+        List.of(new AdviceResponse.Pick("005930", "LONG", "0.60", "근거", "리스크", List.of(), List.of("N1", "N2", "N3", "N2", "N7")),
+            new AdviceResponse.Pick("000660", "LONG", "0.60", "근거", "리스크", List.of(), null)), "");
+
+    AdviceGuard.Result result = guard.validate(response, candidates, sectors, trends, news);
+    assertThat(result.picks()).hasSize(2);
+    assertThat(result.picks().getFirst().citedNews()).containsExactly("N1", "N2");
+    assertThat(result.picks().get(1).citedNews()).isEmpty();
+    assertThat(result.stats()).containsEntry("newsMismatch", 1).containsEntry("unknownNews", 1);
+
+    AdviceGuard.Result noNews = guard.validate(response, candidates, sectors, trends, null);
+    assertThat(noNews.picks().getFirst().citedNews()).isEmpty();
+    assertThat(noNews.stats()).containsEntry("unknownNews", 5);
+  }
+
   private static CandidateRow candidate(String ticker, double r20) {
     return CandidateRow.builder().ticker(ticker).quantRank(1).quantScore(0.5).stockName("n").marketType("KOSPI").benchIndexCode("0001")
         .sectorCode("G2510").sectorName("반도체")
@@ -150,6 +173,6 @@ class AdviceGuardTest {
   }
 
   private static AdviceResponse.Pick pick(String ticker, String direction, String conviction, List<AdviceResponse.Cited> cited) {
-    return new AdviceResponse.Pick(ticker, direction, conviction, "근거", "리스크", cited);
+    return new AdviceResponse.Pick(ticker, direction, conviction, "근거", "리스크", cited, null);
   }
 }

@@ -15,5 +15,7 @@ public record PickRow(
     double conviction,
     String thesis,
     String riskNote,
-    List<CitedFeature> cited) {
+    List<CitedFeature> cited,
+    /** 인용한 헤드라인 id (advice-v4, 가드가 입력에 있던 id 만 남긴다) */
+    List<String> citedNews) {
 }

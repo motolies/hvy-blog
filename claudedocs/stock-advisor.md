@@ -30,6 +30,15 @@
 
 `MarketRegimeCode`(RISK_ON/NEUTRAL/RISK_OFF, 5거래일 위험 선호)와 `MarketTrendCode`(중기 추세)는 **다른 축**이다 — 강세장 안의 단기 위험 회피가 실재하므로 합치지 않는다. 시장 breadth 는 새 MV `mv_stock_market_breadth_daily`(stock 모듈, DAILY DERIVED 가 갱신)에서 온다. 교훈 condition 에 `trend` 키가 추가됐고(lesson-v2) 이 조건은 규칙이 기준일에 확정한 **오늘** 값으로 판정한다(`regime` 조건은 여전히 어제 LIVE 국면).
 
+### 1.3 뉴스 입력 (advice-v4, 2026-09-13) — 기본 off
+
+비정형 입력은 LLM 의 진짜 우위이지만 **백테스트가 불가능**하므로(KIS 제목 API 는 실시간 조회) 가치는 섀도로만 잰다.
+
+- 수집(stock 모듈, `NEWS` 잡, `scheduler.stock-news` 평일 08:05~19:35 30분): KIS 종합 시황/공시(제목) 전체 피드를 현재 시각부터 과거로 연속조회해 `tb_stock_news` 에 넣는다. 제목·작성 시각·관련 종목코드(iscd1~5)만 있고 본문은 없다. 중복 키 = (source, 정규화 제목 sha256, published_at). **경로·TR ID(`kis.news.path/tr-id`, 후보 `FHKST01011800`)·응답 배열 키·제공사 코드는 `KisNewsTitleManualTest` 로 실측한 뒤 켠다.** "실시간" 은 하루 1회 19:30 판단에 가치가 없어 30분이면 충분하다.
+- 주입(advisor, `advisor.news.enabled`): `NewsFeatureService` 가 판단 시각(= min(now, 기준일 `cutoff` 20:00 KST) — 사후 재실행에서도 미래 기사가 새지 않게) 이전 `window-hours`(36) 창에서 시장 헤드라인 ≤12·후보 종목별 ≤3·전체 ≤40 을 골라 `N1…` id 를 붙인다. 프롬프트 `news{asOf, windowHours, columns, market[[id,time,title]], byTicker{tkr:[…]}}` 는 candidates 뒤에 실리고 **news 전용 자 상한(7,000)** 을 넘으면 후보별 → 시장 순으로 먼저 줄인다(뉴스가 후보를 밀어내지 않는다). 룩어헤드 방어는 수집 시각이 아니라 **작성 시각(published_at ≤ 판단 시각)** 이다.
+- 출력·가드: 픽마다 `citedNews`(그날 id enum 주입) — 입력에 없던 id 는 인용만 제거(`unknownNews`), 다른 종목에만 태깅된 기사 인용은 제거(`newsMismatch`), 픽은 버리지 않는다. `tb_advisor_advice.news_ids`, `tb_advisor_pick.cited_news` 에 저장. 주간 재현성 재실행은 동결 페이로드의 news id 도 스키마 enum 에 넣는다. Slack 에는 제목 원문을 싣지 않는다(재배포 우려) — thesis 안 요약만.
+- 섀도 `LLM_NONEWS`: 뉴스가 실린 첫 LIVE 판단부터 `advisor.shadow.nonews-weeks`(8) 동안 뉴스 블록만 뺀 같은 입력(메모리는 LIVE 와 같음)으로 한 번 더 판단. 요인 분리 — LIVE=뉴스+메모리, LLM_NOMEM=뉴스 있음·메모리 없음, LLM_NONEWS=메모리 있음·뉴스 없음. **뉴스 가치 = LIVE − LLM_NONEWS** 를 `GET /scores/summary` 변형 표에서 8주 뒤 se 와 함께 본다(se 안이면 뉴스 off). 호출 수는 메모리 전 2/일, 후 3/일.
+
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
 19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.
@@ -56,6 +65,11 @@
 | `advisor.morning.link-pairs` | `0001:SPX, 0001:SOX, 1001:COMP, 1001:SOX` | β·상관 쌍. 지수별 첫 쌍이 아침 점검 예상 갭의 주 심볼 |
 | `advisor.morning.link-window-days` / `sigma-multiple` / `max-us-lag-days` | 60 / 1.0 / 4 | β 창(국내 거래일) / 아침 판정 임계 배수(× σ_1d) / 미국 데이터 허용 지연(캘린더일, 초과면 SKIPPED) |
 | `scheduler.advisor-morning-check.enabled` | default false / prod true | 07:30 MON-FRI, 기동 시 평가 |
+| `advisor.news.enabled` | false | 뉴스 입력 on/off. 켜면 news 블록·citedNews·LLM_NONEWS 섀도가 함께 켜진다. 선행: `scheduler.stock-news` 로 `tb_stock_news` 가 쌓여 있어야 함 |
+| `advisor.news.window-hours` / `market-limit` / `per-ticker-limit` / `total-limit` / `max-chars` / `title-chars` / `cutoff` | 36 / 12 / 3 / 40 / 7000 / 120 / 20:00 | 창·상한·news 블록 자 상한·판단 마감(사후 재실행 룩어헤드 상한) |
+| `advisor.shadow.nonews-weeks` | 8 | 뉴스 없는 섀도 병행 기간 |
+| `kis.news.*` | path·tr-id `FHKST01011800`·provider-code 0·max-pages 5·lookback-hours 48 | 수집 API 파라미터 (실측 항목) |
+| `scheduler.stock-news.enabled` | false (default·prod 모두) | 실측 뒤 prod true 로 |
 | `advisor.horizon-days` | 5 | 결정 호라이즌. 채점·KPI·학습 전부 이 값 |
 | `advisor.candidate-limit` / `max-per-sector` / `pick-min` / `pick-max` | 30 / 4 / 3 / 10 | 깔때기 |
 | `advisor.advise.deadline` | 19:55 | 이후에도 DAILY 미완료면 SKIPPED + #hvy-error |
@@ -97,6 +111,7 @@
 | 1차 | 배포 직후 | 스크리닝(초기 세트) + LLM + Slack + 후보 동결 + 채점 + IC 보고 + QUANT_TOPN 섀도 + 장중 점검 |
 | 2차 | 누적 LIVE 픽 ≥ `lesson.min-picks`(300, ≈8주) | 실적 블록·보정 표 주입, 교훈 제안·활성, LLM_NOMEM 섀도 |
 | 3차 | IC n_eff ≥ `ic.min-n-eff`(24) | 주간 가중치 세트 자동 갱신 |
+| 뉴스 | `KisNewsTitleManualTest` 실측 → `scheduler.stock-news` on → 며칠 쌓인 뒤 `advisor.news.enabled` on | news 블록·citedNews·LLM_NONEWS 섀도(8주). **뉴스 가치는 8주 뒤 LIVE − LLM_NONEWS 로만 판정**, se 안이면 다시 off |
 
 전부 yml 임계라 코드 변경 없이 켜진다. **3개월 규칙**: `GET /scores/summary` 의 LIVE 부가가치(픽 − 후보군)가 se 안에서 ≈0 이면 LLM 을 설명 전용으로 내리고 픽은 QUANT_TOPN 으로 전환할 것(사전 결정).
 
@@ -157,13 +172,16 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - 수집 항목 추가 → `FeatureSql.featureCtes()` feat CTE 컬럼 1줄 + `SignalCode` 상수 1줄 + `advisor-seed.sql` 행 1개(+ `schema-postgres.sql` 미러). 스크리닝·IC·프롬프트가 자동 반영.
 - 추세 성분 추가 → `TrendSql.labelCtes()` 의 comp CTE 에 CASE 1줄 + score 합에 항 추가 + `MarketTrendService` components 맵 + `AdvisorProperties.Trend` 손잡이. 판단·채점·기저율이 자동으로 같은 정의를 쓴다.
 - 연동 쌍 추가 → yml `advisor.morning.link-pairs` 에 `지수:심볼` 1개(심볼은 `kis.overseas.symbols` 에 수집돼 있어야 함). 코드 변경 없음.
-- 다음 단계(계획 `~/.claude/plans/moto-planner-agent-transient-lovelace.md`): **Phase 3 뉴스**(KIS 종합 시황/공시 제목 API → `tb_stock_news`, `citedNews` id enum 가드, `LLM_NONEWS` 섀도 8주 대조 — 백테스트 불가라 섀도가 유일한 측정). Phase 2 미국 연동은 §1.2 로 반영됐다.
-- 2차: DART, 실시간 웹소켓(장중 점검 주기 확대), 백테스트(밸류 이력·상폐 유니버스 스냅샷이 쌓인 뒤).
+- 뉴스 소스 추가 → `tb_stock_news.source` 값을 달리해 넣는 수집 잡 1개(`NewsItem` 생성·`StockNewsWriter.upsert`). advisor 는 source 를 가리지 않는다. DART 공시가 1순위 후보.
+- 2차: 실시간 웹소켓(장중 점검 주기 확대), 백테스트(밸류 이력·상폐 유니버스 스냅샷이 쌓인 뒤). 2026-09-13 프롬프트 v2~v4 계획 원문 `~/.claude/plans/moto-planner-agent-transient-lovelace.md`.
 
 ## 10. 미실측·잔여
 
 - `KisIndexPriceManualTest`: 지수 현재가 TR ID 실측(틀리면 rt_cd≠0, 장중 점검 INDEX 실패로 기록).
 - `AdvisorOpenAiManualTest`: strict 스키마(nullable enum 포함, **v2 의 2단계 중첩 trendOutlook**) 수용 여부·토큰·지연. 프롬프트 v2 로 `promptChars` 가 v1 보다 약 1,500자 늘어난다(시장 trend 블록 2행 + dataAsOf + window).
 - 추세 임계 실측: §3 의 분포 SQL 을 psql 로 돌려 yml `advisor.trend.*` 를 조정한다. breadth 성분은 MV 가 생긴 뒤에야 과거 분포를 볼 수 있다.
+- `KisNewsTitleManualTest`: 뉴스 제목 API 경로·TR ID·응답 배열 키(output1/output)·제공사 코드·tr_cont 연속조회·하루 건수·종목 태그 비율. 틀리면 `kis.news.*` 만 바꾼다. 실측 전엔 `scheduler.stock-news`·`advisor.news.enabled` 모두 off.
+- `KisOverseasSymbolManualTest`(미작성): VIX·미국 10년물 심볼을 KIS 가 주는지. 주면 yml `kis.overseas.symbols` 추가만.
+- psql 적용 순서(v2~v4 한 번에): `db/stock-schema.sql`(tb_stock_news) → `cat db/stock-derived-rebuild.sql db/stock-derived.sql | psql -1`(breadth MV) → `db/advisor-schema.sql`(13번째 테이블·ALTER 블록) → `db/advisor-seed.sql`.
 - 섹터 채점의 업종 지수 코드(`sector_code` ↔ `tb_stock_index_daily.index_code`) 동일성 — 불일치면 MV 폴백이 자동 적용.
 - 관리자 화면(`/admin/advisor`) 없음. 프론트는 범위 밖.

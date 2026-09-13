@@ -59,6 +59,8 @@ public class SchedulerCatalog {
           "scheduler.stock-daily.cron-expression", List.of("0 30 18 * * MON-FRI"), "scheduler.stock-daily.enabled", "Asia/Seoul"),
       new Definition("scheduler.stock-overseas.lock-name", "해외 지표 증분 수집",
           "scheduler.stock-overseas.cron-expression", List.of("0 30 6 * * TUE-SAT"), "scheduler.stock-overseas.enabled", "Asia/Seoul"),
+      new Definition("scheduler.stock-news.lock-name", "뉴스 제목 수집",
+          "scheduler.stock-news.cron-expression", List.of("0 5/30 8-19 * * MON-FRI"), "scheduler.stock-news.enabled", "Asia/Seoul"),
       new Definition("scheduler.stock-weekly.lock-name", "주식 주간 수집(기업행사·계수·재무)",
           "scheduler.stock-weekly.cron-expression", List.of("0 0 3 * * SUN"), "scheduler.stock-weekly.enabled", "Asia/Seoul"),
       // AI 시장 판단(advisor) 3종 (2026-09-13). ADVISE 는 실제 cron 이 19:30~19:55 5분 간격 6회라 expectedInterval 이 5분으로 잡혀 STALE 오판이

@@ -16,6 +16,7 @@ import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisNewsTitleResponse;
 import kr.hvy.blog.modules.stock.client.dto.KsdInfoPage;
 import kr.hvy.blog.modules.stock.client.dto.KisPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisStockInfoResponse;
@@ -120,4 +121,11 @@ public interface KisMarketDataPort {
    * 시장별 투자자매매동향(일별): 기준일 기준 (FHPTJ04040000, 연속조회 없음). 호출당 일수는 실측 항목.
    */
   List<KisMarketInvestorResponse.Row> fetchMarketInvestorDaily(MarketType market, LocalDate baseDate, KisCallContext context);
+
+  /**
+   * 국내주식 종합 시황/공시(제목): 기준 일시(KST)부터 과거 방향으로 최신 제목 목록 (kis.news.*, 연속조회 tr_cont). 제목·작성 시각·관련 종목코드만 온다.
+   *
+   * @param ticker 종목코드 (null·빈 문자열이면 전체 시황)
+   */
+  List<KisNewsTitleResponse.Row> fetchNewsTitles(LocalDate date, java.time.LocalTime time, String ticker, int maxPages, KisCallContext context);
 }

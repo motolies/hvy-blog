@@ -38,6 +38,8 @@ public record AdviceHeader(
     Map<String, Object> dataAsOf,
     LocalDate entryDate,
     LocalDate exitDate,
+    /** 프롬프트에 실린 헤드라인 id (advice-v4, 뉴스 없으면 빈 목록). LLM_NONEWS 게이트·재현성 스키마 재구성에 쓴다 */
+    List<String> newsIds,
     String promptVersion,
     String model,
     String systemFingerprint,

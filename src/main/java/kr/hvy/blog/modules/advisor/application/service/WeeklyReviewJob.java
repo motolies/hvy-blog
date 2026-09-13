@@ -263,7 +263,9 @@ public class WeeklyReviewJob implements AdvisorJob {
         }
       }
     }
-    String schema = AdviceSchemaFactory.schemaJson(tickers, new ArrayList<>(sectors));
+    // advice-v4: 동결 페이로드의 news 블록 id 도 스키마 enum 에 넣어야 strict 불일치로 재실행이 깨지지 않는다
+    List<String> newsIds = newsIdsOf(payload);
+    String schema = AdviceSchemaFactory.schemaJson(tickers, new ArrayList<>(sectors), newsIds);
     List<Set<String>> pickSets = new ArrayList<>();
     List<String> regimes = new ArrayList<>();
     for (int i = 0; i < runs; i++) {
@@ -306,6 +308,34 @@ public class WeeklyReviewJob implements AdvisorJob {
   private List<String> sectorCodes() {
     return jdbc.queryForList("SELECT DISTINCT sector_code FROM tb_stock_sector_map WHERE source = 'KRX' AND valid_to IS NULL ORDER BY sector_code",
         String.class);
+  }
+
+  /**
+   * 동결 페이로드의 news 블록(market[[id,time,title]], byTicker{tkr:[[id,…]]})에서 헤드라인 id 를 순서대로 뽑는다. 뉴스가 없으면 빈 목록.
+   */
+  static List<String> newsIdsOf(Map<String, Object> payload) {
+    java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+    if (payload.get("news") instanceof Map<?, ?> news) {
+      if (news.get("market") instanceof List<?> rows) {
+        rows.forEach(row -> {
+          if (row instanceof List<?> r && !r.isEmpty()) {
+            ids.add(String.valueOf(r.get(0)));
+          }
+        });
+      }
+      if (news.get("byTicker") instanceof Map<?, ?> byTicker) {
+        byTicker.values().forEach(v -> {
+          if (v instanceof List<?> rows) {
+            rows.forEach(row -> {
+              if (row instanceof List<?> r && !r.isEmpty()) {
+                ids.add(String.valueOf(r.get(0)));
+              }
+            });
+          }
+        });
+      }
+    }
+    return new ArrayList<>(ids);
   }
 
   private static double pct(Double v) {

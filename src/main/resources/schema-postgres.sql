@@ -61,6 +61,7 @@ DROP TABLE IF EXISTS tb_advisor_run CASCADE;
 -- 주식(KIS) 수집 모듈 (생성 역순). CASCADE 가 파생 객체도 함께 제거한다:
 --   mv_stock_adjust_factor, vw_stock_daily_price_adj, vw_stock_market_calendar,
 --   mv_stock_daily_metric, mv_stock_index_metric, mv_stock_sector_daily, mv_stock_market_breadth_daily, vw_stock_universe_daily
+DROP TABLE IF EXISTS tb_stock_news CASCADE;
 DROP TABLE IF EXISTS tb_stock_daily_metric CASCADE;
 DROP TABLE IF EXISTS tb_stock_market_investor_daily CASCADE;
 DROP TABLE IF EXISTS tb_stock_etf_nav_daily CASCADE;
@@ -1530,6 +1531,43 @@ COMMENT ON COLUMN tb_stock_daily_metric.computed_at        IS '마지막 계산 
 
 CREATE INDEX IF NOT EXISTS idx_stock_daily_metric_date
     ON tb_stock_daily_metric (trade_date);
+
+-- =============================================
+-- 뉴스 제목 (종합 시황/공시, advisor 판단 근거 입력, 2026-09-13). 본문은 저장하지 않는다.
+-- 룩어헤드 방어는 수집 시각이 아니라 published_at(기사 작성 시각) 기준이며, 판단 시각 이후 기사는 프롬프트에 들어가지 않는다.
+-- 조회 패턴이 "기간 + 후보 종목 ∩ tickers" 하나뿐이라 조인 테이블 대신 배열 + GIN 이다.
+-- =============================================
+CREATE TABLE IF NOT EXISTS tb_stock_news
+(
+    news_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source        VARCHAR(20)    NOT NULL,
+    provider_code VARCHAR(10)             DEFAULT NULL,
+    serial_no     VARCHAR(40)             DEFAULT NULL,
+    published_at  TIMESTAMPTZ(6) NOT NULL,
+    title         VARCHAR(500)   NOT NULL,
+    title_hash    BYTEA          NOT NULL,
+    category_code VARCHAR(20)             DEFAULT NULL,
+    origin        VARCHAR(60)             DEFAULT NULL,
+    tickers       VARCHAR(10)[]           DEFAULT NULL,
+    collected_at  TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
+    CONSTRAINT uk_stock_news UNIQUE (source, title_hash, published_at)
+);
+
+COMMENT ON TABLE  tb_stock_news               IS '뉴스·공시 제목 (KIS 종합 시황/공시). advisor 판단 근거 입력, 제목만 저장·본문 없음';
+COMMENT ON COLUMN tb_stock_news.news_id       IS '식별자';
+COMMENT ON COLUMN tb_stock_news.source        IS '출처: KIS';
+COMMENT ON COLUMN tb_stock_news.provider_code IS '뉴스 제공 업체 코드 (news_ofer_entp_code)';
+COMMENT ON COLUMN tb_stock_news.serial_no     IS '제공사 일련번호 (cntt_usiq_srno)';
+COMMENT ON COLUMN tb_stock_news.published_at  IS '기사 작성 시각 (data_dt + data_tm, KST → timestamptz). 룩어헤드 방어 기준';
+COMMENT ON COLUMN tb_stock_news.title         IS '제목 (500자 절단)';
+COMMENT ON COLUMN tb_stock_news.title_hash    IS 'sha256(공백·구두점을 지운 제목) — 재전송·공백 차이 중복 제거 키';
+COMMENT ON COLUMN tb_stock_news.category_code IS '뉴스 대구분 (news_lrdv_code)';
+COMMENT ON COLUMN tb_stock_news.origin        IS '자료원 (dorg)';
+COMMENT ON COLUMN tb_stock_news.tickers       IS '관련 종목코드 iscd1~5 중 6자리만 (KIS 가 태깅)';
+COMMENT ON COLUMN tb_stock_news.collected_at  IS '수집 시각';
+
+CREATE INDEX IF NOT EXISTS idx_stock_news_published ON tb_stock_news (published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_news_tickers ON tb_stock_news USING GIN (tickers);
 -- <<< END db/stock-schema.sql
 
 -- >>> BEGIN db/stock-derived.sql
@@ -1875,6 +1913,7 @@ CREATE TABLE IF NOT EXISTS tb_advisor_advice
     data_as_of_json    JSONB                   DEFAULT NULL,
     entry_date         DATE                    DEFAULT NULL,
     exit_date          DATE                    DEFAULT NULL,
+    news_ids           JSONB                   DEFAULT NULL,
     prompt_version     VARCHAR(40)             DEFAULT NULL,
     model              VARCHAR(80)             DEFAULT NULL,
     system_fingerprint VARCHAR(80)             DEFAULT NULL,
@@ -1908,6 +1947,7 @@ COMMENT ON COLUMN tb_advisor_advice.outlook_json       IS 'LLM 추세 지속 전
 COMMENT ON COLUMN tb_advisor_advice.data_as_of_json    IS '입력 관측 기준일 {domestic,flow,sector,global,globalAgeTradingDays}';
 COMMENT ON COLUMN tb_advisor_advice.entry_date         IS '적용 진입일(예정) = 기준일 다음 영업일 시가. 실제는 채점 시 캘린더로 재확정';
 COMMENT ON COLUMN tb_advisor_advice.exit_date          IS '적용 청산일(예정) = horizon 번째 영업일 종가';
+COMMENT ON COLUMN tb_advisor_advice.news_ids           IS '프롬프트에 실린 헤드라인 id 목록 ["N1",…] (advice-v4). 비어 있으면 뉴스 없이 판단';
 COMMENT ON COLUMN tb_advisor_advice.prompt_version     IS '프롬프트 버전';
 COMMENT ON COLUMN tb_advisor_advice.model              IS '모델 ID';
 COMMENT ON COLUMN tb_advisor_advice.system_fingerprint IS 'OpenAI system_fingerprint (재현성 추적)';
@@ -1967,6 +2007,7 @@ CREATE TABLE IF NOT EXISTS tb_advisor_pick
     thesis     VARCHAR(600)              DEFAULT NULL,
     risk_note  VARCHAR(600)              DEFAULT NULL,
     cited_json JSONB                     DEFAULT NULL,
+    cited_news JSONB                     DEFAULT NULL,
     CONSTRAINT pk_advisor_pick PRIMARY KEY (advice_id, ticker),
     CONSTRAINT fk_advisor_pick_candidate FOREIGN KEY (advice_id, ticker)
         REFERENCES tb_advisor_candidate (advice_id, ticker) ON DELETE CASCADE
@@ -1981,6 +2022,7 @@ COMMENT ON COLUMN tb_advisor_pick.conviction IS '확신도 (이산 0.55~0.9)';
 COMMENT ON COLUMN tb_advisor_pick.thesis     IS '근거 (200자 목표)';
 COMMENT ON COLUMN tb_advisor_pick.risk_note  IS '리스크';
 COMMENT ON COLUMN tb_advisor_pick.cited_json IS '근거로 인용한 특징 [{name,value}] — 입력값과 대조해 검증';
+COMMENT ON COLUMN tb_advisor_pick.cited_news IS '근거로 인용한 헤드라인 id ["N3",…] — 프롬프트에 실린 id 만 (advice-v4)';
 
 CREATE INDEX IF NOT EXISTS idx_advisor_pick_ticker ON tb_advisor_pick (ticker);
 
@@ -2244,6 +2286,9 @@ ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS exit_date       DATE     
 ALTER TABLE tb_advisor_call_score ALTER COLUMN predicted  TYPE VARCHAR(20);
 ALTER TABLE tb_advisor_call_score ALTER COLUMN actual_dir TYPE VARCHAR(20);
 ALTER TABLE tb_advisor_call_score ADD COLUMN IF NOT EXISTS event_date DATE DEFAULT NULL;
+-- advice-v4 (뉴스): 인용 헤드라인
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS news_ids   JSONB DEFAULT NULL;
+ALTER TABLE tb_advisor_pick   ADD COLUMN IF NOT EXISTS cited_news JSONB DEFAULT NULL;
 -- <<< END db/advisor-schema.sql
 
 -- >>> BEGIN db/advisor-seed.sql

@@ -55,6 +55,7 @@ public class AdvisorProperties {
   private Prompt prompt = new Prompt();
   private Trend trend = new Trend();
   private Morning morning = new Morning();
+  private News news = new News();
   private Scoring scoring = new Scoring();
   private Ic ic = new Ic();
   private Lesson lesson = new Lesson();
@@ -185,6 +186,37 @@ public class AdvisorProperties {
     }
   }
 
+  /**
+   * 뉴스 입력(advice-v4): tb_stock_news 의 제목을 판단 시각 이전 창에서 골라 프롬프트 news 블록으로 넣는다. 기본 off — KisNewsTitleManualTest 실측 뒤 켠다.
+   */
+  @Data
+  public static class News {
+
+    /** false 면 news 블록·citedNews 스키마·LLM_NONEWS 섀도 전부 없음(AdviseJob 호출 수 그대로) */
+    private boolean enabled = false;
+
+    /** 판단 시각부터 거슬러 올라가는 창(시간). 36 = 전일 마감 후 기사 포함, 이미 소화된 48h 는 제외 */
+    private int windowHours = 36;
+
+    /** 종목 태그 없는 시장 헤드라인 상한 */
+    private int marketLimit = 12;
+
+    /** 후보 종목당 헤드라인 상한 */
+    private int perTickerLimit = 3;
+
+    /** 전체 헤드라인 상한 */
+    private int totalLimit = 40;
+
+    /** news 블록 JSON 자 상한. 넘으면 후보별 → 시장 순으로 줄인다(후보 행을 잘라내기 전에) */
+    private int maxChars = 7_000;
+
+    /** 프롬프트에 넣는 제목 최대 길이(자) */
+    private int titleChars = 120;
+
+    /** 판단 마감 시각(KST) — 사후 재실행(baseDate=)에서 이 시각 이후 기사가 새어 들지 않게 상한으로 쓴다 */
+    private LocalTime cutoff = LocalTime.of(20, 0);
+  }
+
   @Data
   public static class Scoring {
 
@@ -257,6 +289,9 @@ public class AdvisorProperties {
 
     /** 메모리 활성 후 메모리 없는 LLM 호출을 병행하는 주 수 */
     private int nomemWeeks = 8;
+
+    /** 뉴스 입력이 켜진 첫 판단부터 뉴스 없는 LLM 섀도(LLM_NONEWS)를 병행하는 주 수 — 뉴스는 백테스트가 불가능해 이 섀도가 유일한 측정이다 */
+    private int nonewsWeeks = 8;
 
     /** 주간 재현성 측정: 직전 LIVE 입력을 동결한 채 재실행하는 횟수 (0 이면 끔). 픽 집합 Jaccard < 0.7 이면 보고에 경고 */
     private int reproducibilityRuns = 3;

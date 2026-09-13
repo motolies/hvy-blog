@@ -32,6 +32,8 @@ public enum CollectJobType implements EnumCode<String> {
   DAILY("DAILY", "일일 증분 수집", true),
   WEEKLY("WEEKLY", "주간 수집", true),
   OVERSEAS_DAILY("OVERSEAS_DAILY", "해외 일일 증분", true),
+  /** 종합 시황/공시 제목 수집 (30분 주기, advisor 뉴스 입력) */
+  NEWS("NEWS", "뉴스 제목 수집", false),
   RELOAD("RELOAD", "부분 재적재", true);
 
   private final String code;

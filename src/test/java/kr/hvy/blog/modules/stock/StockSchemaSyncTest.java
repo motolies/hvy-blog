@@ -66,7 +66,7 @@ class StockSchemaSyncTest {
         tables.add(m.group(1));
       }
     }
-    assertThat(tables).hasSize(22).allMatch(t -> t.startsWith("tb_stock_"));
+    assertThat(tables).hasSize(23).allMatch(t -> t.startsWith("tb_stock_"));
 
     List<String> mirror = lines(MIRROR);
     int firstBegin = indexOfOnly(mirror, "-- >>> BEGIN " + SOURCES.getFirst());

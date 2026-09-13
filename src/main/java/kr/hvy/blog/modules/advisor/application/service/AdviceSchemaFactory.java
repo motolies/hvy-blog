@@ -27,13 +27,21 @@ public final class AdviceSchemaFactory {
    * 후보 티커·섹터 코드로 스키마를 만든다. sectorCodes 가 비면 섹터 code 는 자유 문자열(가드가 검증).
    */
   public static Map<String, Object> schema(List<String> candidateTickers, List<String> sectorCodes) {
+    return schema(candidateTickers, sectorCodes, List.of());
+  }
+
+  /**
+   * @param newsIds 그날 프롬프트에 실린 헤드라인 id (advice-v4). 비면 citedNews 는 자유 문자열 배열이 되고 가드가 전부 제거한다
+   */
+  public static Map<String, Object> schema(List<String> candidateTickers, List<String> sectorCodes, List<String> newsIds) {
     Map<String, Object> pick = object(Map.of(
         "ticker", enumOf(candidateTickers),
         "direction", enumOf(List.of(PickDirection.LONG.getCode(), PickDirection.AVOID.getCode())),
         "conviction", enumOf(CONVICTIONS),
         "thesis", string(),
         "risk", string(),
-        "citedFeatures", array(object(Map.of("name", string(), "value", number())))));
+        "citedFeatures", array(object(Map.of("name", string(), "value", number()))),
+        "citedNews", array(newsIds == null || newsIds.isEmpty() ? string() : enumOf(newsIds))));
     Map<String, Object> regime = object(Map.of(
         "code", enumOf(List.of(MarketRegimeCode.RISK_ON.getCode(), MarketRegimeCode.NEUTRAL.getCode(), MarketRegimeCode.RISK_OFF.getCode())),
         "kospiDir", enumOf(List.of(DirectionCall.UP.getCode(), DirectionCall.NEUTRAL.getCode(), DirectionCall.DOWN.getCode())),
@@ -72,6 +80,10 @@ public final class AdviceSchemaFactory {
    */
   public static String schemaJson(List<String> candidateTickers, List<String> sectorCodes) {
     return AdvisorJson.write(schema(candidateTickers, sectorCodes));
+  }
+
+  public static String schemaJson(List<String> candidateTickers, List<String> sectorCodes, List<String> newsIds) {
+    return AdvisorJson.write(schema(candidateTickers, sectorCodes, newsIds));
   }
 
   static Map<String, Object> object(Map<String, Object> properties) {

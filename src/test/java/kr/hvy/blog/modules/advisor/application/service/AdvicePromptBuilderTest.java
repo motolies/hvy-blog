@@ -88,6 +88,44 @@ class AdvicePromptBuilderTest {
     assertThat(payload.json()).as("quality null 은 OK").contains("\"dataQuality\":\"OK\"");
   }
 
+  @Test
+  @DisplayName("advice-v4: news 블록은 candidates 뒤 표 형태로 실리고 newsIds 가 나오며, 자 상한을 넘으면 후보별 → 시장 순으로 줄인다(후보 행은 그대로)")
+  void newsBlockAndTrimming() {
+    List<kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline> market = new ArrayList<>();
+    for (int i = 1; i <= 12; i++) {
+      market.add(new kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline("N" + i, "09-11 1" + (i % 10) + ":00", "시장 헤드라인 " + i + " — 반도체 수급과 환율 이야기", List.of()));
+    }
+    Map<String, List<kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline>> byTicker = new java.util.LinkedHashMap<>();
+    for (int t = 0; t < 3; t++) {
+      List<kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline> list = new ArrayList<>();
+      for (int j = 0; j < 3; j++) {
+        list.add(new kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline("N" + (13 + t * 3 + j), "09-11 09:0" + j, "종목" + t + " 기사 " + j + " 신제품 발표와 수주 소식", List.of(String.format("T%02d", t))));
+      }
+      byTicker.put(String.format("T%02d", t), list);
+    }
+    kr.hvy.blog.modules.advisor.domain.model.NewsBlock news = new kr.hvy.blog.modules.advisor.domain.model.NewsBlock(java.time.Instant.parse("2026-09-11T10:30:00Z"), 36, market, byTicker);
+
+    PromptPayload full = builder.build(market(), screening(3), null, List.of(), Map.of(), DataQuality.OK, news);
+    assertThat(full.newsIds()).hasSize(21).startsWith("N1").endsWith("N21");
+    String json = full.json();
+    assertThat(json).contains("\"news\":{\"asOf\":\"2026-09-11T10:30:00Z\",\"windowHours\":36,\"columns\":[\"id\",\"time\",\"title\"],\"market\":[[\"N1\",");
+    assertThat(json.indexOf("\"news\"")).isGreaterThan(json.indexOf("\"candidates\"")).isLessThan(json.indexOf("\"weights\""));
+    assertThat(json).contains("\"byTicker\":{\"T00\":[[\"N13\",\"09-11 09:00\",\"종목0 기사 0 신제품 발표와 수주 소식\"]");
+
+    properties.getNews().setMaxChars(700);
+    PromptPayload trimmed = builder.build(market(), screening(3), null, List.of(), Map.of(), DataQuality.OK, news);
+    assertThat(trimmed.newsIds().size()).isLessThan(21).isGreaterThan(0);
+    assertThat(trimmed.candidatesIncluded()).as("뉴스가 후보를 밀어내지 않는다").isEqualTo(3);
+    assertThat(trimmed.truncated()).isFalse();
+    assertThat(builder.fitNews(news).market()).hasSizeLessThanOrEqualTo(6);
+
+    properties.getNews().setMaxChars(10);
+    PromptPayload none = builder.build(market(), screening(3), null, List.of(), Map.of(), DataQuality.OK, news);
+    assertThat(none.newsIds()).isEmpty();
+    assertThat(none.json()).doesNotContain("\"news\"");
+    assertThat(builder.build(market(), screening(3), null, List.of(), Map.of(), DataQuality.OK, null).newsIds()).isEmpty();
+  }
+
   static MarketFeatures market() {
     return new MarketFeatures(LocalDate.of(2026, 9, 11),
         List.of(new MarketFeatures.IndexFeature("0001", "KOSPI", 2731.44, 0.0042, -0.0113, 0.0287, null, 0.0129, 0.0402)),

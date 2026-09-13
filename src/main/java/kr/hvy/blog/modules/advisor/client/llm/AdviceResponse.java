@@ -21,7 +21,8 @@ public record AdviceResponse(Regime regime, TrendOutlookView trendOutlook, List<
   public record SectorView(String code, String reason) {
   }
 
-  public record Pick(String ticker, String direction, String conviction, String thesis, String risk, List<Cited> citedFeatures) {
+  /** citedNews 는 advice-v4 — 프롬프트 news 블록의 헤드라인 id (없으면 null·빈 목록) */
+  public record Pick(String ticker, String direction, String conviction, String thesis, String risk, List<Cited> citedFeatures, List<String> citedNews) {
   }
 
   public record Cited(String name, double value) {

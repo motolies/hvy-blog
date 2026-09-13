@@ -47,6 +47,7 @@ public class KisProperties {
   private Overseas overseas = new Overseas();
   private Stats stats = new Stats();
   private Derived derived = new Derived();
+  private News news = new News();
 
   /**
    * 앱키와 시크릿이 모두 설정되어 있는지 확인한다.
@@ -159,6 +160,34 @@ public class KisProperties {
         "EQ:NAS:TSLA", "EQ:NAS:MSFT", "EQ:NAS:GOOGL", "EQ:NAS:AMZN", "EQ:NYS:ALB", "EQ:AMS:LIT",
         "EQ:AMS:XBI", "EQ:NAS:IBB", "EQ:AMS:ITA", "EQ:NYS:LMT", "EQ:NYS:RTX", "EQ:NYS:NOC",
         "EQ:AMS:XLF", "EQ:AMS:KRE", "EQ:AMS:XLE", "EQ:NAS:BOTZ", "EQ:AMS:ROBO"));
+  }
+
+  /**
+   * 국내주식 종합 시황/공시(제목) 수집(advisor 뉴스 입력, 2026-09-13). 경로·TR ID 는 KIS 문서 기준 후보값이며 KisNewsTitleManualTest 로 실측한다.
+   */
+  @Data
+  public static class News {
+
+    /** 뉴스 제목 API 경로 */
+    private String path = "/uapi/domestic-stock/v1/quotations/news-title";
+
+    /** TR ID (실측 항목) */
+    private String trId = "FHKST01011800";
+
+    /** 뉴스 제공 업체 코드 (fid_news_ofer_entp_code). 0 전체 — 제공사 편중이 보이면 실측 뒤 조정 */
+    private String providerCode = "0";
+
+    /** 조건 시장 구분 코드 (fid_cond_mrkt_cls_code) */
+    private String marketClsCode = "00";
+
+    /** 순위 정렬 구분 (fid_rank_sort_cls_code) */
+    private String sortCode = "01";
+
+    /** 수집 1회당 연속조회 페이지 상한 */
+    private int maxPages = 5;
+
+    /** 이보다 오래된 기사(작성 시각 기준)는 수집하지 않는다 — advisor 창(36h)보다 넉넉히 */
+    private int lookbackHours = 48;
   }
 
   @Data

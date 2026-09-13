@@ -197,6 +197,14 @@ kis:
     work-mem: 512MB           # MV REFRESH 세션 정렬 메모리. 서버 기본 4MB 면 mv_stock_daily_metric 이 100분 초과(2026-09-08 실측). 서버 메모리에 맞춰 조정
     concurrently: false       # 야간 DAILY·백필은 읽는 쪽이 없어 일반 REFRESH (CONCURRENTLY 는 전체 대조로 2배 이상 느림). 낮 수동 실행 중 조회를 막지 않으려면 true
     max-parallel-workers: 0   # REFRESH 세션 병렬 워커. Docker 기본 /dev/shm 64MB 에서 병렬 해시 조인이 'could not resize shared memory segment' 로 실패(2026-09-08). 컨테이너 shm_size 1GB+ 이후 2~4 로
+  news:                       # 종합 시황/공시(제목) [국내주식-141]. 경로·TR ID 는 KIS 문서 기준 후보값 — KisNewsTitleManualTest 로 실측 (2026-09-13)
+    path: /uapi/domestic-stock/v1/quotations/news-title
+    tr-id: FHKST01011800
+    provider-code: "0"        # 뉴스 제공 업체 (0 전체)
+    market-cls-code: "00"
+    sort-code: "01"
+    max-pages: 5              # 수집 1회당 연속조회 페이지 상한
+    lookback-hours: 48        # 이보다 오래된 기사(작성 시각)는 저장하지 않는다
   overseas:
     # "구분:거래소:심볼" — N 지수, X 환율(FHKST03030100), EQ 개별주·ETF(HHDFS76240000, NAS/NYS/AMS). 스펙 §4.4 매핑
     symbols:
@@ -242,8 +250,17 @@ advisor:
   advise:
     deadline: "19:55"             # DAILY 완료 대기 마감(KST). 이후 미완료면 SKIPPED + #hvy-error
   prompt:
-    version: advice-v3            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관) (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
+    version: advice-v4            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스 (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
+  news:                           # 뉴스 입력(advice-v4). tb_stock_news(scheduler.stock-news) 가 쌓여 있어야 하고 KisNewsTitleManualTest 실측 뒤 켠다
+    enabled: false
+    window-hours: 36              # 판단 시각부터 거슬러 올라가는 창 (전일 마감 후 기사 포함)
+    market-limit: 12              # 시장 헤드라인 상한
+    per-ticker-limit: 3           # 후보 종목당 상한
+    total-limit: 40
+    max-chars: 7000               # news 블록 JSON 자 상한 — 넘으면 후보별 → 시장 순으로 줄인다(후보 행을 자르기 전에)
+    title-chars: 120
+    cutoff: "20:00"               # 사후 재실행(baseDate=)에서 이 시각(KST) 이후 기사가 새어 들지 않게
   morning:                        # 미국 연동 입력(market.link)과 07:30 아침 점검(MORNING_CHECK) 판정
     link-pairs: ["0001:SPX", "0001:SOX", "1001:COMP", "1001:SOX"]   # 지수별 첫 쌍이 예상 갭의 주 심볼
     link-window-days: 60
@@ -281,6 +298,7 @@ advisor:
   shadow:
     quant-top-n: 7                # 정량 top-N 섀도(LLM 없음)
     nomem-weeks: 8                # 메모리 활성 후 메모리 없는 LLM 호출 병행 기간
+    nonews-weeks: 8               # 뉴스가 실린 첫 판단부터 뉴스 없는 LLM 호출(LLM_NONEWS) 병행 기간 — 뉴스 가치 = LIVE − NONEWS
   model:
     judge: ${ADVISOR_JUDGE_MODEL:gpt-5.6-terra}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
     judge-max-completion-tokens: 8000
@@ -321,6 +339,10 @@ scheduler:
   stock-overseas:
     lock-name: STOCK-OVERSEAS-TEST
     cron-expression: "0 30 6 * * TUE-SAT"
+    enabled: false
+  stock-news:                     # 종합 시황/공시 제목 30분 주기(08:05~19:35). advisor 19:30 판단의 뉴스 입력 (advisor.news.enabled 와 별개로 쌓아 둔다)
+    lock-name: STOCK-NEWS-TEST
+    cron-expression: "0 5/30 8-19 * * MON-FRI"
     enabled: false
   stock-weekly:
     lock-name: STOCK-WEEKLY-TEST
@@ -402,6 +424,10 @@ scheduler:
     lock-name: STOCK-OVERSEAS-PROD
     cron-expression: "0 30 6 * * TUE-SAT"
     enabled: true
+  stock-news:
+    lock-name: STOCK-NEWS-PROD
+    cron-expression: "0 5/30 8-19 * * MON-FRI"
+    enabled: false                # KisNewsTitleManualTest 로 TR ID·필드 실측 뒤 켠다 (advisor.news.enabled 와 함께)
   stock-weekly:
     lock-name: STOCK-WEEKLY-PROD
     cron-expression: "0 0 3 * * SUN"

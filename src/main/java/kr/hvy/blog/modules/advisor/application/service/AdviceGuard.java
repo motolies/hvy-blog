@@ -16,6 +16,7 @@ import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.CitedFeature;
+import kr.hvy.blog.modules.advisor.domain.model.NewsBlock;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
 import kr.hvy.blog.modules.advisor.domain.model.TrendOutlook;
@@ -68,7 +69,17 @@ public final class AdviceGuard {
    */
   public Result validate(AdviceResponse response, List<CandidateRow> candidates, Map<String, String> sectorNames,
       Map<String, MarketTrendCode> trends) {
+    return validate(response, candidates, sectorNames, trends, null);
+  }
+
+  /**
+   * @param news 프롬프트에 실린 뉴스 블록(없으면 null). citedNews 는 실린 id 만 남기고(unknownNews), 종목 픽이 다른 종목에만 태깅된 기사를 인용하면
+   *             제거(newsMismatch) — 숫자 위조와 달리 픽은 버리지 않는다(시장 헤드라인을 종목 근거로 드는 건 정당하다).
+   */
+  public Result validate(AdviceResponse response, List<CandidateRow> candidates, Map<String, String> sectorNames,
+      Map<String, MarketTrendCode> trends, NewsBlock news) {
     Map<String, Object> stats = new LinkedHashMap<>();
+    Map<String, Set<String>> newsTickers = news == null ? Map.of() : news.tickersById();
     Map<String, CandidateRow> byTicker = new LinkedHashMap<>();
     candidates.forEach(c -> byTicker.put(c.ticker(), c));
 
@@ -140,6 +151,7 @@ public final class AdviceGuard {
             .thesis(sanitize(p.thesis(), THESIS_LIMIT, stats))
             .riskNote(sanitize(p.risk(), RISK_LIMIT, stats))
             .cited(cited)
+            .citedNews(checkCitedNews(p.citedNews(), p.ticker(), newsTickers, stats))
             .build());
       }
     }
@@ -233,6 +245,35 @@ public final class AdviceGuard {
       result.add(new CitedFeature(c.name(), c.value()));
     }
     return result;
+  }
+
+  /**
+   * 인용 헤드라인 검증: 입력에 없던 id 는 제거(unknownNews), 시장 헤드라인이 아니면서 이 종목에 태깅되지 않은 기사도 제거(newsMismatch). 중복 제거.
+   */
+  static List<String> checkCitedNews(List<String> cited, String ticker, Map<String, Set<String>> newsTickers, Map<String, Object> stats) {
+    if (cited == null || cited.isEmpty()) {
+      return List.of();
+    }
+    List<String> kept = new ArrayList<>();
+    for (String id : cited) {
+      if (id == null) {
+        continue;
+      }
+      String key = id.trim();
+      Set<String> tickers = newsTickers.get(key);
+      if (tickers == null) {
+        increment(stats, "unknownNews");
+        continue;
+      }
+      if (!tickers.isEmpty() && !tickers.contains(ticker)) {
+        increment(stats, "newsMismatch");
+        continue;
+      }
+      if (!kept.contains(key)) {
+        kept.add(key);
+      }
+    }
+    return kept;
   }
 
   /**

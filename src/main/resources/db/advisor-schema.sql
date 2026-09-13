@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS tb_advisor_advice
     data_as_of_json    JSONB                   DEFAULT NULL,
     entry_date         DATE                    DEFAULT NULL,
     exit_date          DATE                    DEFAULT NULL,
+    news_ids           JSONB                   DEFAULT NULL,
     prompt_version     VARCHAR(40)             DEFAULT NULL,
     model              VARCHAR(80)             DEFAULT NULL,
     system_fingerprint VARCHAR(80)             DEFAULT NULL,
@@ -189,6 +190,7 @@ COMMENT ON COLUMN tb_advisor_advice.outlook_json       IS 'LLM 추세 지속 전
 COMMENT ON COLUMN tb_advisor_advice.data_as_of_json    IS '입력 관측 기준일 {domestic,flow,sector,global,globalAgeTradingDays}';
 COMMENT ON COLUMN tb_advisor_advice.entry_date         IS '적용 진입일(예정) = 기준일 다음 영업일 시가. 실제는 채점 시 캘린더로 재확정';
 COMMENT ON COLUMN tb_advisor_advice.exit_date          IS '적용 청산일(예정) = horizon 번째 영업일 종가';
+COMMENT ON COLUMN tb_advisor_advice.news_ids           IS '프롬프트에 실린 헤드라인 id 목록 ["N1",…] (advice-v4). 비어 있으면 뉴스 없이 판단';
 COMMENT ON COLUMN tb_advisor_advice.prompt_version     IS '프롬프트 버전';
 COMMENT ON COLUMN tb_advisor_advice.model              IS '모델 ID';
 COMMENT ON COLUMN tb_advisor_advice.system_fingerprint IS 'OpenAI system_fingerprint (재현성 추적)';
@@ -248,6 +250,7 @@ CREATE TABLE IF NOT EXISTS tb_advisor_pick
     thesis     VARCHAR(600)              DEFAULT NULL,
     risk_note  VARCHAR(600)              DEFAULT NULL,
     cited_json JSONB                     DEFAULT NULL,
+    cited_news JSONB                     DEFAULT NULL,
     CONSTRAINT pk_advisor_pick PRIMARY KEY (advice_id, ticker),
     CONSTRAINT fk_advisor_pick_candidate FOREIGN KEY (advice_id, ticker)
         REFERENCES tb_advisor_candidate (advice_id, ticker) ON DELETE CASCADE
@@ -262,6 +265,7 @@ COMMENT ON COLUMN tb_advisor_pick.conviction IS '확신도 (이산 0.55~0.9)';
 COMMENT ON COLUMN tb_advisor_pick.thesis     IS '근거 (200자 목표)';
 COMMENT ON COLUMN tb_advisor_pick.risk_note  IS '리스크';
 COMMENT ON COLUMN tb_advisor_pick.cited_json IS '근거로 인용한 특징 [{name,value}] — 입력값과 대조해 검증';
+COMMENT ON COLUMN tb_advisor_pick.cited_news IS '근거로 인용한 헤드라인 id ["N3",…] — 프롬프트에 실린 id 만 (advice-v4)';
 
 CREATE INDEX IF NOT EXISTS idx_advisor_pick_ticker ON tb_advisor_pick (ticker);
 
@@ -525,3 +529,6 @@ ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS exit_date       DATE     
 ALTER TABLE tb_advisor_call_score ALTER COLUMN predicted  TYPE VARCHAR(20);
 ALTER TABLE tb_advisor_call_score ALTER COLUMN actual_dir TYPE VARCHAR(20);
 ALTER TABLE tb_advisor_call_score ADD COLUMN IF NOT EXISTS event_date DATE DEFAULT NULL;
+-- advice-v4 (뉴스): 인용 헤드라인
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS news_ids   JSONB DEFAULT NULL;
+ALTER TABLE tb_advisor_pick   ADD COLUMN IF NOT EXISTS cited_news JSONB DEFAULT NULL;

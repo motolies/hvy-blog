@@ -18,6 +18,7 @@ import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
+import kr.hvy.blog.modules.stock.client.dto.KisNewsTitleResponse;
 import kr.hvy.blog.modules.stock.domain.code.MarketType;
 import kr.hvy.blog.modules.stock.client.dto.KisKsdInfoResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisPriceResponse;
@@ -82,6 +83,7 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
 
   private final KisApiClient apiClient;
   private final TrContPaginator trContPaginator;
+  private final KisProperties kisProperties;
 
   @Override
   public KisDailyChartResponse fetchDailyChart(String ticker, LocalDate from, LocalDate to, boolean originalPrice,
@@ -312,5 +314,35 @@ public class KisRestMarketDataAdapter implements KisMarketDataPort {
     KisProgramTradeResponse body = apiClient.get(PROGRAM_TRADE_PATH, PROGRAM_TRADE_TR_ID, params,
         KisProgramTradeResponse.class, context.withTarget(ticker)).body();
     return body.output() == null ? List.of() : body.output();
+  }
+
+  /**
+   * 종합 시황/공시(제목). 기준 일시부터 과거 방향, tr_cont 연속조회. 다음 페이지는 마지막 행의 일련번호(FID_INPUT_SRNO)를 이어 붙인다 —
+   * 공식 예제가 tr_cont 만으로 이어가므로 헤더가 우선이고 일련번호는 보조다. 경로·TR ID·파라미터 코드는 kis.news.* (실측 항목).
+   */
+  @Override
+  public List<KisNewsTitleResponse.Row> fetchNewsTitles(LocalDate date, java.time.LocalTime time, String ticker, int maxPages, KisCallContext context) {
+    KisProperties.News news = kisProperties.getNews();
+    Map<String, String> params = new LinkedHashMap<>();
+    params.put("FID_NEWS_OFER_ENTP_CODE", news.getProviderCode());
+    params.put("FID_COND_MRKT_CLS_CODE", news.getMarketClsCode());
+    params.put("FID_INPUT_ISCD", ticker == null ? "" : ticker);
+    params.put("FID_TITL_CNTT", "");
+    params.put("FID_INPUT_DATE_1", KisValues.format(date));
+    params.put("FID_INPUT_HOUR_1", time.format(java.time.format.DateTimeFormatter.ofPattern("HHmmss")));
+    params.put("FID_RANK_SORT_CLS_CODE", news.getSortCode());
+    params.put("FID_INPUT_SRNO", "");
+    PageResult<KisNewsTitleResponse> result = trContPaginator.paginate(news.getPath(), news.getTrId(), params, KisNewsTitleResponse.class,
+        context.withTarget(ticker == null ? "MARKET" : ticker), Math.max(1, maxPages),
+        page -> {
+          List<KisNewsTitleResponse.Row> rows = page.rows();
+          return rows.isEmpty() || rows.getLast().serialNo() == null ? Map.of() : Map.of("FID_INPUT_SRNO", rows.getLast().serialNo());
+        },
+        (previous, current) -> !previous.rows().isEmpty() && previous.rows().equals(current.rows()));
+    List<KisNewsTitleResponse.Row> rows = new ArrayList<>();
+    for (KisNewsTitleResponse page : result.pages()) {
+      rows.addAll(page.rows());
+    }
+    return rows;
   }
 }

@@ -48,10 +48,12 @@ public class AdviceWriter {
   };
   private static final TypeReference<List<TrendOutlook>> OUTLOOKS = new TypeReference<>() {
   };
+  private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {
+  };
 
   private static final String HEADER_COLUMNS = "advice_id, run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, "
       + "kosdaq_dir, p_up, regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, "
-      + "entry_date, exit_date, prompt_version, model, system_fingerprint, weight_set_id, "
+      + "entry_date, exit_date, news_ids, prompt_version, model, system_fingerprint, weight_set_id, "
       + "active_lesson_ids, data_quality, guard_json, published_at, created_at";
 
   private final JdbcTemplate jdbc;
@@ -64,14 +66,14 @@ public class AdviceWriter {
     return jdbc.queryForObject(
         "INSERT INTO tb_advisor_advice (run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, kosdaq_dir, p_up, "
             + "regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, entry_date, exit_date, "
-            + "prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, data_quality, guard_json, published_at) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
+            + "news_ids, prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, data_quality, guard_json, published_at) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
         Long.class,
         h.runId(), h.baseDate(), h.adviceKind(), h.variant().getCode(), h.horizonDays(),
         code(h.regimeCode()), code(h.kospiDir()), code(h.kosdaqDir()), h.pUp(),
         h.regimeRationale(), AdvisorJdbc.jsonb(h.leadingSectors()), h.summary(),
         code(h.trendKospi()), code(h.trendKosdaq()), AdvisorJdbc.jsonb(h.trends()), AdvisorJdbc.jsonb(h.outlooks()), AdvisorJdbc.jsonb(h.dataAsOf()),
-        h.entryDate(), h.exitDate(),
+        h.entryDate(), h.exitDate(), AdvisorJdbc.jsonb(h.newsIds()),
         h.promptVersion(), h.model(), h.systemFingerprint(),
         h.weightSetId(), AdvisorJdbc.jsonb(h.activeLessonIds()),
         (h.dataQuality() == null ? DataQuality.OK : h.dataQuality()).getCode(), AdvisorJdbc.jsonb(h.guard()), AdvisorJdbc.ts(h.publishedAt()));
@@ -127,8 +129,8 @@ public class AdviceWriter {
       return 0;
     }
     int[][] counts = jdbc.batchUpdate(
-        "INSERT INTO tb_advisor_pick (advice_id, ticker, pick_rank, direction, conviction, thesis, risk_note, cited_json) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tb_advisor_pick (advice_id, ticker, pick_rank, direction, conviction, thesis, risk_note, cited_json, cited_news) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rows, rows.size(), (ps, r) -> {
           ps.setLong(1, adviceId);
           ps.setString(2, r.ticker());
@@ -138,6 +140,7 @@ public class AdviceWriter {
           ps.setString(6, r.thesis());
           ps.setString(7, r.riskNote());
           ps.setObject(8, r.cited() == null ? null : AdvisorJson.write(r.cited()), java.sql.Types.OTHER);
+          ps.setObject(9, r.citedNews() == null || r.citedNews().isEmpty() ? null : AdvisorJson.write(r.citedNews()), java.sql.Types.OTHER);
         });
     return sum(counts);
   }
@@ -207,8 +210,16 @@ public class AdviceWriter {
   }
 
   public List<PickRow> picks(long adviceId) {
-    return jdbc.query("SELECT ticker, pick_rank, direction, conviction, thesis, risk_note, cited_json FROM tb_advisor_pick "
+    return jdbc.query("SELECT ticker, pick_rank, direction, conviction, thesis, risk_note, cited_json, cited_news FROM tb_advisor_pick "
         + "WHERE advice_id = ? ORDER BY pick_rank", PICK_MAPPER, adviceId);
+  }
+
+  /**
+   * 뉴스 블록이 실린 첫 LIVE 판단의 기준일 (LLM_NONEWS 섀도 병행 기간의 시작점). 없으면 empty.
+   */
+  public Optional<LocalDate> firstNewsAdviceDate() {
+    return jdbc.query("SELECT MIN(base_date) AS d FROM tb_advisor_advice WHERE variant = 'LIVE' AND news_ids IS NOT NULL AND jsonb_array_length(news_ids) > 0",
+        rs -> rs.next() ? Optional.ofNullable(rs.getObject("d", LocalDate.class)) : Optional.<LocalDate>empty());
   }
 
   /**
@@ -245,6 +256,7 @@ public class AdviceWriter {
       .dataAsOf(AdvisorJdbc.jsonMap(rs, "data_as_of_json"))
       .entryDate(rs.getObject("entry_date", LocalDate.class))
       .exitDate(rs.getObject("exit_date", LocalDate.class))
+      .newsIds(readJson(rs, "news_ids", STRINGS))
       .promptVersion(rs.getString("prompt_version"))
       .model(rs.getString("model"))
       .systemFingerprint(rs.getString("system_fingerprint"))
@@ -298,6 +310,7 @@ public class AdviceWriter {
       .thesis(rs.getString("thesis"))
       .riskNote(rs.getString("risk_note"))
       .cited(readCited(rs))
+      .citedNews(readJson(rs, "cited_news", STRINGS))
       .build();
 
   private static List<CitedFeature> readCited(ResultSet rs) throws SQLException {

@@ -874,3 +874,40 @@ COMMENT ON COLUMN tb_stock_daily_metric.computed_at        IS '마지막 계산 
 
 CREATE INDEX IF NOT EXISTS idx_stock_daily_metric_date
     ON tb_stock_daily_metric (trade_date);
+
+-- =============================================
+-- 뉴스 제목 (종합 시황/공시, advisor 판단 근거 입력, 2026-09-13). 본문은 저장하지 않는다.
+-- 룩어헤드 방어는 수집 시각이 아니라 published_at(기사 작성 시각) 기준이며, 판단 시각 이후 기사는 프롬프트에 들어가지 않는다.
+-- 조회 패턴이 "기간 + 후보 종목 ∩ tickers" 하나뿐이라 조인 테이블 대신 배열 + GIN 이다.
+-- =============================================
+CREATE TABLE IF NOT EXISTS tb_stock_news
+(
+    news_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source        VARCHAR(20)    NOT NULL,
+    provider_code VARCHAR(10)             DEFAULT NULL,
+    serial_no     VARCHAR(40)             DEFAULT NULL,
+    published_at  TIMESTAMPTZ(6) NOT NULL,
+    title         VARCHAR(500)   NOT NULL,
+    title_hash    BYTEA          NOT NULL,
+    category_code VARCHAR(20)             DEFAULT NULL,
+    origin        VARCHAR(60)             DEFAULT NULL,
+    tickers       VARCHAR(10)[]           DEFAULT NULL,
+    collected_at  TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
+    CONSTRAINT uk_stock_news UNIQUE (source, title_hash, published_at)
+);
+
+COMMENT ON TABLE  tb_stock_news               IS '뉴스·공시 제목 (KIS 종합 시황/공시). advisor 판단 근거 입력, 제목만 저장·본문 없음';
+COMMENT ON COLUMN tb_stock_news.news_id       IS '식별자';
+COMMENT ON COLUMN tb_stock_news.source        IS '출처: KIS';
+COMMENT ON COLUMN tb_stock_news.provider_code IS '뉴스 제공 업체 코드 (news_ofer_entp_code)';
+COMMENT ON COLUMN tb_stock_news.serial_no     IS '제공사 일련번호 (cntt_usiq_srno)';
+COMMENT ON COLUMN tb_stock_news.published_at  IS '기사 작성 시각 (data_dt + data_tm, KST → timestamptz). 룩어헤드 방어 기준';
+COMMENT ON COLUMN tb_stock_news.title         IS '제목 (500자 절단)';
+COMMENT ON COLUMN tb_stock_news.title_hash    IS 'sha256(공백·구두점을 지운 제목) — 재전송·공백 차이 중복 제거 키';
+COMMENT ON COLUMN tb_stock_news.category_code IS '뉴스 대구분 (news_lrdv_code)';
+COMMENT ON COLUMN tb_stock_news.origin        IS '자료원 (dorg)';
+COMMENT ON COLUMN tb_stock_news.tickers       IS '관련 종목코드 iscd1~5 중 6자리만 (KIS 가 태깅)';
+COMMENT ON COLUMN tb_stock_news.collected_at  IS '수집 시각';
+
+CREATE INDEX IF NOT EXISTS idx_stock_news_published ON tb_stock_news (published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_news_tickers ON tb_stock_news USING GIN (tickers);

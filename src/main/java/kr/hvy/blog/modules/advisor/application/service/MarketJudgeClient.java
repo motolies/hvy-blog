@@ -35,10 +35,23 @@ public class MarketJudgeClient {
     this.modelHint = modelHint;
   }
 
+  /** 임의 구조화 출력 호출 1건의 결과 */
+  public record CallResult<T>(T value, String rawText, Usage usage, int reasoningTokens, int cachedTokens, String model, String responseId,
+                              Map<String, Object> options) {
+  }
+
   /**
    * 판단을 요청한다. schemaJson 은 그날 후보 티커가 enum 으로 박힌 스키마다.
    */
   public JudgeResult judge(String systemPrompt, PromptPayload payload, String schemaJson) {
+    CallResult<AdviceResponse> r = call(systemPrompt, payload.json(), schemaJson, AdviceResponse.class);
+    return new JudgeResult(r.value(), r.rawText(), r.usage(), r.reasoningTokens(), r.cachedTokens(), r.model(), r.responseId(), r.options());
+  }
+
+  /**
+   * strict JSON 스키마로 구조화 출력을 받는 범용 호출 (교훈 제안·재현성 측정도 이 경로).
+   */
+  public <T> CallResult<T> call(String systemPrompt, String userJson, String schemaJson, Class<T> type) {
     OpenAiChatModel.ResponseFormat format = OpenAiChatModel.ResponseFormat.builder()
         .type(OpenAiChatModel.ResponseFormat.Type.JSON_SCHEMA)
         .jsonSchema(schemaJson)
@@ -47,7 +60,7 @@ public class MarketJudgeClient {
     long started = System.currentTimeMillis();
     ChatResponse response = chatClient.prompt()
         .system(systemPrompt)
-        .user(payload.json())
+        .user(userJson)
         .options(OpenAiChatOptions.builder().responseFormat(format))
         .call()
         .chatResponse();
@@ -58,7 +71,7 @@ public class MarketJudgeClient {
     if (text == null || text.isBlank()) {
       throw new IllegalStateException("판단 모델 응답 본문이 비어 있습니다");
     }
-    AdviceResponse parsed = AdvisorJson.read(text, AdviceResponse.class);
+    T parsed = AdvisorJson.read(text, type);
     ChatResponseMetadata metadata = response.getMetadata();
     Usage usage = metadata == null ? null : metadata.getUsage();
     String model = metadata == null || metadata.getModel() == null || metadata.getModel().isBlank() ? modelHint : metadata.getModel();
@@ -67,9 +80,9 @@ public class MarketJudgeClient {
     options.put("responseFormat", "json_schema/strict");
     options.put("schemaChars", schemaJson.length());
     options.put("latencyMs", System.currentTimeMillis() - started);
-    log.info("판단 모델 호출: model={}, in={}, out={}, {}ms", model, usage == null ? null : usage.getPromptTokens(),
+    log.info("LLM 구조화 호출: type={}, model={}, in={}, out={}, {}ms", type.getSimpleName(), model, usage == null ? null : usage.getPromptTokens(),
         usage == null ? null : usage.getCompletionTokens(), options.get("latencyMs"));
-    return new JudgeResult(parsed, text, usage, reasoningTokens(usage), cachedTokens(usage), model,
+    return new CallResult<>(parsed, text, usage, reasoningTokens(usage), cachedTokens(usage), model,
         metadata == null ? null : metadata.getId(), options);
   }
 

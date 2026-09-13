@@ -178,6 +178,9 @@ public class AdvisorProperties {
 
     /** 메모리 활성 후 메모리 없는 LLM 호출을 병행하는 주 수 */
     private int nomemWeeks = 8;
+
+    /** 주간 재현성 측정: 직전 LIVE 입력을 동결한 채 재실행하는 횟수 (0 이면 끔). 픽 집합 Jaccard < 0.7 이면 보고에 경고 */
+    private int reproducibilityRuns = 3;
   }
 
   @Data

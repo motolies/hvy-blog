@@ -24,7 +24,6 @@ import kr.hvy.blog.modules.advisor.repository.jdbc.AdviceWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.PromptInputWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.WeightSetRepository;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -62,18 +61,14 @@ public class WeeklyReviewJob implements AdvisorJob {
   private final AdvisorNotifier notifier;
   private final JdbcTemplate jdbc;
 
+  /**
+   * 유일한 생성자. judge/assist 클라이언트는 AdvisorAiConfig 의 judgeClient/assistClient 빈을 받는다.
+   * 생성자를 둘(Spring 용·테스트 용) 두면 @Autowired 없는 Spring 은 기본 생성자로 후퇴해 기동이 실패하므로(2026-09-13) 하나만 유지한다.
+   */
   public WeeklyReviewJob(AdvisorProperties properties, ScoreJob scoreJob, SignalIcService icService, WeightSetRepository weightSets,
       LessonService lessonService, AdvisorKpiService kpi, AdviceWriter adviceWriter, PromptInputWriter promptInputs, PromptResources prompts,
-      @Qualifier("judgeChatClient") ChatClient judgeChatClient, @Qualifier("assistChatClient") ChatClient assistChatClient,
+      @Qualifier(MarketJudgeClient.JUDGE_BEAN) MarketJudgeClient judge, @Qualifier(MarketJudgeClient.ASSIST_BEAN) MarketJudgeClient assist,
       AdvisorNotifier notifier, JdbcTemplate jdbc) {
-    this(properties, scoreJob, icService, weightSets, lessonService, kpi, adviceWriter, promptInputs, prompts,
-        new MarketJudgeClient(judgeChatClient, properties.getModel().getJudge()),
-        new MarketJudgeClient(assistChatClient, properties.getModel().getAssist()), notifier, jdbc);
-  }
-
-  WeeklyReviewJob(AdvisorProperties properties, ScoreJob scoreJob, SignalIcService icService, WeightSetRepository weightSets,
-      LessonService lessonService, AdvisorKpiService kpi, AdviceWriter adviceWriter, PromptInputWriter promptInputs, PromptResources prompts,
-      MarketJudgeClient judge, MarketJudgeClient assist, AdvisorNotifier notifier, JdbcTemplate jdbc) {
     this.properties = properties;
     this.scoreJob = scoreJob;
     this.icService = icService;

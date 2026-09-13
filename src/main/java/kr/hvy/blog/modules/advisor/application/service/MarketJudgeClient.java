@@ -16,11 +16,16 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 /**
  * 판단 모델 호출. 시스템 프롬프트는 정적 리소스, 사용자 메시지는 완성된 JSON 문자열, 출력은 strict JSON 스키마(후보 enum) 로 강제한다.
  * <p>
- * Spring 빈이 아니라 ChatClient 를 받아 만드는 얇은 래퍼라 테스트에서 ChatModel 스텁으로 대체할 수 있다. 재시도는 OpenAI SDK 가 담당하고,
- * 여기서 예외가 나면 그날 판단을 건너뛴다(부분 추천 금지).
+ * ChatClient 를 받아 만드는 얇은 래퍼라 테스트에서 ChatModel 스텁으로 직접 생성해 대체할 수 있다. 운영에서는 AdvisorAiConfig 가
+ * judge/assist 두 빈으로 등록하고 잡 생성자가 @Qualifier 로 받는다(잡에 생성자를 둘 두던 방식은 기동 실패, 2026-09-13).
+ * 재시도는 OpenAI SDK 가 담당하고, 여기서 예외가 나면 그날 판단을 건너뛴다(부분 추천 금지).
  */
 @Slf4j
 public class MarketJudgeClient {
+
+  /** AdvisorAiConfig 가 등록하는 빈 이름 — 판단용(judge 모델) / 보조용(assist 모델). 잡 생성자의 @Qualifier 와 같은 상수를 쓴다 */
+  public static final String JUDGE_BEAN = "judgeClient";
+  public static final String ASSIST_BEAN = "assistClient";
 
   /** 호출 1건의 결과: 파싱된 응답 + 원문 + 사용량 */
   public record JudgeResult(AdviceResponse response, String rawText, Usage usage, int reasoningTokens, int cachedTokens, String model,

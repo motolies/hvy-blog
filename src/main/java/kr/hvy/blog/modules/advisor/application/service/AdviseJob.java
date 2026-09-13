@@ -31,7 +31,6 @@ import kr.hvy.blog.modules.advisor.repository.jdbc.PromptInputWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.WeightSetRepository;
 import kr.hvy.blog.modules.stock.domain.model.MarketClock;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -81,18 +80,14 @@ public class AdviseJob implements AdvisorJob {
     }
   }
 
+  /**
+   * 유일한 생성자. 판단 클라이언트는 AdvisorAiConfig 의 judgeClient 빈을 받는다.
+   * 생성자를 둘(Spring 용·테스트 용) 두면 @Autowired 없는 Spring 은 기본 생성자로 후퇴해 기동이 실패하므로(2026-09-13) 하나만 유지한다.
+   */
   public AdviseJob(AdvisorProperties properties, AdvisorGateService gate, SignalIcService icService, MarketFeatureService marketFeatures,
       CandidateScreeningService screening, WeightSetRepository weightSets, AdvicePromptBuilder promptBuilder, PromptResources prompts,
-      @Qualifier("judgeChatClient") ChatClient judgeChatClient, AdviceWriter adviceWriter, PromptInputWriter promptInputs,
+      @Qualifier(MarketJudgeClient.JUDGE_BEAN) MarketJudgeClient judge, AdviceWriter adviceWriter, PromptInputWriter promptInputs,
       LessonRepository lessons, AdvisorNotifier notifier, ObjectProvider<ScoreHook> scoreHook) {
-    this(properties, gate, icService, marketFeatures, screening, weightSets, promptBuilder, prompts,
-        new MarketJudgeClient(judgeChatClient, properties.getModel().getJudge()), adviceWriter, promptInputs, lessons, notifier, scoreHook);
-  }
-
-  AdviseJob(AdvisorProperties properties, AdvisorGateService gate, SignalIcService icService, MarketFeatureService marketFeatures,
-      CandidateScreeningService screening, WeightSetRepository weightSets, AdvicePromptBuilder promptBuilder, PromptResources prompts,
-      MarketJudgeClient judge, AdviceWriter adviceWriter, PromptInputWriter promptInputs, LessonRepository lessons, AdvisorNotifier notifier,
-      ObjectProvider<ScoreHook> scoreHook) {
     this.properties = properties;
     this.gate = gate;
     this.icService = icService;

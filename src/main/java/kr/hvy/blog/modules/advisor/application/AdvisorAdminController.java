@@ -24,7 +24,9 @@ import kr.hvy.blog.modules.advisor.domain.model.LessonRow;
 import kr.hvy.blog.modules.advisor.domain.model.PromptInputRow;
 import kr.hvy.blog.modules.advisor.domain.model.SignalIcRow;
 import kr.hvy.blog.modules.advisor.domain.model.WeightSet;
+import kr.hvy.blog.modules.advisor.domain.model.ChatRow;
 import kr.hvy.blog.modules.advisor.repository.jdbc.AdviceWriter;
+import kr.hvy.blog.modules.advisor.repository.jdbc.ChatWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.IntradayCheckWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.LessonRepository;
 import kr.hvy.blog.modules.advisor.repository.jdbc.PromptInputWriter;
@@ -76,6 +78,7 @@ public class AdvisorAdminController {
   private final SignalIcWriter icWriter;
   private final LessonRepository lessons;
   private final AdvisorProperties properties;
+  private final ChatWriter chatWriter;
 
   // ========== 실행 ==========
 
@@ -211,6 +214,16 @@ public class AdvisorAdminController {
   }
 
   // ========== 교훈 ==========
+
+  // ========== Slack 채팅 봇 ==========
+
+  /**
+   * 최근 채팅 대화(질문·답변·상태·토큰·비용·도구 목록·기준일) — 비용 관찰과 사후 검토용. 최신순.
+   */
+  @GetMapping("/chats")
+  public List<ChatRow> chats(@RequestParam(defaultValue = "50") int limit) {
+    return chatWriter.findRecent(Math.max(1, Math.min(limit, MAX_LIMIT)));
+  }
 
   @GetMapping("/lessons")
   public List<LessonRow> lessons(@RequestParam(required = false) LessonStatus status, @RequestParam(defaultValue = "100") int limit) {

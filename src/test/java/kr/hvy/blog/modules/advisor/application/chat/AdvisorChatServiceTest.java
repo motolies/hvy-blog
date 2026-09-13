@@ -69,6 +69,7 @@ class AdvisorChatServiceTest {
   private AdvisorChatProperties properties;
   private ChatWriter writer;
   private FakeSlack slack;
+  private ChatBudgetGuard budget;
   private ChatAnswerer answerer;
   private AdvisorChatService service;
 
@@ -85,7 +86,9 @@ class AdvisorChatServiceTest {
     when(answererProvider.getIfAvailable()).thenAnswer(inv -> answerer);
     ObjectProvider<TraceBoundary> traceProvider = mock(ObjectProvider.class);
     when(traceProvider.getIfAvailable()).thenReturn(null);
-    service = new AdvisorChatService(properties, writer, slack, answererProvider, traceProvider);
+    budget = mock(ChatBudgetGuard.class);
+    when(budget.check(any())).thenReturn(Optional.empty());
+    service = new AdvisorChatService(properties, writer, slack, budget, answererProvider, traceProvider);
   }
 
   static IncomingQuestion question(String threadTs) {
@@ -161,6 +164,20 @@ class AdvisorChatServiceTest {
     when(writer.insertRunning(any())).thenThrow(new IllegalStateException("db down"));
     service.handle(question(null));
     assertThat(slack.replies).isEmpty();
+  }
+
+  @Test
+  @DisplayName("예산·쿨다운 거부 → SKIPPED 기록 + 사유 한 줄 + ⚠, LLM 은 부르지 않는다")
+  void budgetRefusalSkips() {
+    when(budget.check(any())).thenReturn(Optional.of(new ChatBudgetGuard.Refusal("BUDGET", "오늘 토큰 예산을 다 썼습니다")));
+    answerer = q -> {
+      throw new AssertionError("LLM 이 호출되면 안 된다");
+    };
+    service.handle(question(null));
+    verify(writer).finishSkipped(eq(7L), anyString(), anyLong());
+    verify(writer, never()).finishSuccess(anyLong(), any(), anyLong());
+    assertThat(slack.replies).containsExactly("2.000|오늘 토큰 예산을 다 썼습니다");
+    assertThat(slack.reactions).containsExactly("+eyes", "-eyes", "+warning");
   }
 
   @Test

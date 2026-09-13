@@ -14,7 +14,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 /**
- * 질문 1건의 전체 수명 — 감사 행 RUNNING → 👀 리액션 → 답 생성({@link ChatAnswerer}, 없으면 에코) → 스레드 답글 → 감사 SUCCESS → ✅.
+ * 질문 1건의 전체 수명 — 감사 행 RUNNING → 👀 리액션 → 예산·쿨다운({@link ChatBudgetGuard}, 거부면 SKIPPED + 한 줄 + ⚠) → 답 생성({@link ChatAnswerer}, 없으면 에코) → 스레드 답글 → 감사 SUCCESS → ✅.
  * <p>
  * 어떤 예외도 밖으로 던지지 않는다. 전역 예외 핸들러가 500 + #hvy-error 를 울리는 구조라, 실패는 (a) 스레드에 한 줄 답글, (b) FAILED + 사유,
  * (c) ⚠ 리액션까지만이다. 질문 단위 실패는 별도 Slack 경보를 보내지 않는다 — 질문자가 스레드에서 이미 본다.
@@ -35,14 +35,16 @@ public class AdvisorChatService {
   private final AdvisorChatProperties properties;
   private final ChatWriter chatWriter;
   private final SlackChatGateway slack;
+  private final ChatBudgetGuard budget;
   private final ObjectProvider<ChatAnswerer> answerer;
   private final ObjectProvider<TraceBoundary> traceBoundary;
 
-  public AdvisorChatService(AdvisorChatProperties properties, ChatWriter chatWriter, SlackChatGateway slack, ObjectProvider<ChatAnswerer> answerer,
-      ObjectProvider<TraceBoundary> traceBoundary) {
+  public AdvisorChatService(AdvisorChatProperties properties, ChatWriter chatWriter, SlackChatGateway slack, ChatBudgetGuard budget,
+      ObjectProvider<ChatAnswerer> answerer, ObjectProvider<TraceBoundary> traceBoundary) {
     this.properties = properties;
     this.chatWriter = chatWriter;
     this.slack = slack;
+    this.budget = budget;
     this.answerer = answerer;
     this.traceBoundary = traceBoundary;
   }
@@ -77,6 +79,18 @@ public class AdvisorChatService {
     }
     long chatId = inserted.get();
     slack.addReaction(q.channelId(), q.ts(), REACTION_WORKING);
+    Optional<ChatBudgetGuard.Refusal> refusal = budget.check(q);
+    if (refusal.isPresent()) {
+      log.info("advisor chat 거부({}): chat={}, user={}", refusal.get().code(), chatId, q.userId());
+      try {
+        chatWriter.finishSkipped(chatId, refusal.get().code() + ": " + refusal.get().message(), elapsed(started));
+      } catch (Exception e) {
+        log.error("advisor chat SKIPPED 기록 실패: chat={}, cause={}", chatId, e.toString());
+      }
+      safeReply(q, refusal.get().message());
+      swapReaction(q, REACTION_FAILED);
+      return;
+    }
     try {
       ChatResult result = answer(q);
       List<LayoutBlock> blocks = SlackMarkdown.replyBlocks(result.answer(), contextLine(chatId, result), properties.getMaxBlocks());

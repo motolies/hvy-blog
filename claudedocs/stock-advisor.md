@@ -1,6 +1,6 @@
 # AI 시장 판단(advisor) 운영 문서
 
-- 모듈 `kr.hvy.blog.modules.advisor`, 테이블 `tb_advisor_*` 13개(`db/advisor-schema.sql`, 시드 `db/advisor-seed.sql`; 13번째 `tb_advisor_morning_check` 는 advice-v3), REST `/api/advisor/admin/**`(ROLE_ADMIN)
+- 모듈 `kr.hvy.blog.modules.advisor`, 테이블 `tb_advisor_*` 14개(`db/advisor-schema.sql`, 시드 `db/advisor-seed.sql`; 13번째 `tb_advisor_morning_check` 는 advice-v3, 14번째 `tb_advisor_chat` 은 chat-v1 §11), REST `/api/advisor/admin/**`(ROLE_ADMIN)
 - 작성 2026-09-13. 계획 원문 `~/.claude/plans/elegant-singing-glade.md`. 수집 계층은 `claudedocs/stock-collect.md`.
 - **투자 자문이 아니다.** 개인 실험이며 모든 Slack 메시지에 면책 문구가 고정된다.
 
@@ -88,6 +88,14 @@
 | `advisor.ic.min-n-eff` | 24 | 가중치 세트 갱신 게이트(≈120 영업일). 사전 추정으로 충족 |
 | `advisor.ic.incremental-max-days` | 45 | 증분(ADVISE·WEEKLY_REVIEW·SCORE)이 감당할 최대 공백(캘린더일). 초과분은 계산하지 않고 warnings 에 `IC 공백 …` + 메타 `icGapFrom` 을 남긴다 → `POST /jobs/IC_BACKFILL?baseDate=<icGapFrom>` 로 보충. IC 행이 없는 첫 ADVISE 가 2020 년부터 6년치를 SQL 한 번에 돌던 2026-09-13 결함 방지 |
 | `advisor.shadow.reproducibility-runs` | 3 | 주간 재현성 재실행 횟수(0 이면 끔) |
+| `advisor.chat.enabled` | `${ADVISOR_CHAT_ENABLED:false}` (prod 기본 true) | Slack 채팅 봇(§11). advisor.enabled 가 false 면 무관하게 미등록 |
+| `advisor.chat.app-token` / `channel-id` / `allowed-user-ids` | `${SLACK_APP_TOKEN:}` / `${ADVISOR_CHAT_CHANNEL_ID:}` / `${ADVISOR_CHAT_ALLOWED_USERS:}` | Socket Mode app-level 토큰(xapp-, connections:write) / #hvy-advisor 채널 ID(C…) / 답을 받을 사용자 ID(U…, 쉼표). **하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨)**. bot 토큰은 `slack.token` 재사용 |
+| `advisor.chat.model` / `max-completion-tokens` | `${ADVISOR_CHAT_MODEL:}` / 3000 | 채팅 모델(비면 assist 모델) / 출력 상한 |
+| `advisor.chat.max-calls-per-tool` / `max-total-tool-calls` | 6 / 12 | 질문 1건의 도구 호출 상한(ToolCallingManager). 초과는 오류 응답으로 돌려 모델이 마무리 |
+| `advisor.chat.thread-history-limit` / `max-history-chars` | 30 / 12000 | 스레드 히스토리 메시지 수·문자 상한(루트 보존, 오래된 것부터 제거) |
+| `advisor.chat.tool-row-limit` / `tool-timeout-seconds` / `answer-timeout-seconds` | 50 / 5 / 180 | 도구 행 상한 / 도구 SQL statement_timeout / 질문 1건 소프트 마감(도구가 deadline 오류를 돌려주고 모델이 마무리) |
+| `advisor.chat.daily-token-budget` / `per-user-cooldown-seconds` | 300000 / 20 | 일일 토큰 예산(입력+출력, KST 자정, 0 이면 무제한) / 같은 사용자 최소 간격. 거부는 SKIPPED + 스레드 한 줄 |
+| `advisor.chat.max-blocks` / `disconnect-alert-cooldown-minutes` / `dedup-ttl-minutes` | 20 / 30 / 10 | 답글 블록 상한 / WebSocket 끊김 경보(#hvy-notify) 최소 간격 / event_id 중복 제거 Redis TTL |
 | `scheduler.advisor-{advise,intraday,weekly-review}.enabled` | default false / prod true | 기동 시 평가 |
 
 ## 3. 배포 절차 (처음 1회)
@@ -152,6 +160,8 @@ SELECT stage, status, COUNT(*) FROM tb_advisor_candidate_score WHERE horizon_day
 | 일일 추천 / 아침 점검 / 장중 점검 / 주간 보고 | #hvy-advisor | 없음 |
 | run PARTIAL(가드 제거율 >30%, 섀도·발행 실패, 채점 단계 실패) | #hvy-notify | 없음 |
 | 잡 예외, 스케줄 트리거 거부(설정 누락·이미 실행 중), 마감 초과 DAILY 미완료 | #hvy-error | 있음 |
+| 채팅 봇 WebSocket 끊김/오류(쿨다운 당 1회), Socket Mode 시작 실패 | #hvy-notify | 없음 |
+| 채팅 봇 질문 단위 실패·예산 거부 | (경보 없음 — 스레드 답글 한 줄 + ⚠ 리액션, tb_advisor_chat FAILED/SKIPPED) | — |
 
 대응: 트리거 거부 → 원인 해소 후 `POST /jobs/{jobType}`; 마감 초과 → 수집 복구 후 `POST /jobs/ADVISE?baseDate=YYYY-MM-DD`(같은 날 LIVE 가 이미 있으면 SKIPPED → 필요 시 `DELETE /advices/{id}` 후 재실행).
 
@@ -198,3 +208,65 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - psql 적용 순서(v2~v4 한 번에): `db/stock-schema.sql`(tb_stock_news) → `cat db/stock-derived-rebuild.sql db/stock-derived.sql | psql -1`(breadth MV) → `db/advisor-schema.sql`(13번째 테이블·ALTER 블록) → `db/advisor-seed.sql`.
 - 섹터 채점의 업종 지수 코드(`sector_code` ↔ `tb_stock_index_daily.index_code`) 동일성 — 불일치면 MV 폴백이 자동 적용.
 - 관리자 화면(`/admin/advisor`) 없음. 프론트는 범위 밖.
+
+## 11. Slack 채팅 봇 (chat-v1, 2026-09-13)
+
+`#hvy-advisor` 에 **허용된 사용자**가 새 글이나 댓글로 물으면 봇이 같은 스레드에 답한다. 답은 LLM 이 쓰되 **숫자는 전부 도구가 DB 에서 읽은 값**이고, 도구가 없는 질문은 "해당 데이터가 없다" 고 답한다(임의 SQL 도구 없음 — 룩어헤드·원주가 직접 읽기를 막을 수 없기 때문). 코드는 `modules/advisor/application/chat`(+`chat/tool`), 감사 테이블 `tb_advisor_chat`.
+
+### 11.1 흐름
+
+Socket Mode(bolt-socket-mode + Java-WebSocket, 공개 URL·서명 검증 없음) → `SlackChatRouter` 필터(채널 → 봇 → 사용자 → 자기 자신 → 허용 목록 → 본문 → Redis event_id 중복) → **항상 즉시 ack** → `advisorChatExecutor`(2스레드·큐 10) → `AdvisorChatService`: 감사 RUNNING → 👀 → 예산·쿨다운(`ChatBudgetGuard`) → `AdvisorChatClient`(시스템 프롬프트 `prompts/advisor/chat-system-v1.md` + 스레드 히스토리 + 도구 14종 루프) → mrkdwn 답글(3,000자 분할·메타 context·고정 면책) → SUCCESS → ✅. 실패는 스레드 한 줄 + FAILED + ⚠ 까지이고 경보는 없다(질문자가 스레드에서 본다). 핸들러 없는 subtype 이벤트(수정·삭제·파일)는 자동 ack 로 버린다.
+
+스레드 히스토리는 `conversations.replies` 로 읽어 봇의 일일 판단 메시지는 **Block Kit 을 평문으로 펼쳐** 맥락으로 넣는다(text 는 알림용 요약뿐). 루트 헤더의 기준일을 뽑아 `latestAdvice(baseDate)` 힌트로 준다. `tb_advisor_advice.slack_ts` 저장은 hvy-common 변경(응답 ts 반환)이 필요해 범위 밖.
+
+### 11.2 도구 14종 (`chat/tool`)
+
+| toolkit | 도구 | 원천 |
+|---|---|---|
+| Market | `marketOverview` `marketTrend` `globalLink` | MarketFeatureService · MarketTrendService · GlobalLinkService |
+| Stock | `resolveStock` `stockSnapshot` `priceSeries` `metricTopN` `newsHeadlines` | StockLookupReader(신설 SQL 3개) · DerivedViewRefresher.adjustedCloses · StockNewsWriter |
+| Advice | `latestAdvice` `adviceChecks` `screeningTop` `performanceSummary` | AdviceWriter · Score/Morning/IntradayCheckWriter · CandidateScreeningService · AdvisorKpiService |
+| Calendar | `dataFreshness` `tradingDays` | 지표 MAX(trade_date) · MarketFeatures.dataAsOf · TradingCalendar |
+
+공통(`ToolSupport`): 읽기 전용 트랜잭션 + `SET LOCAL statement_timeout`, 예외는 `{"error":…}` 로(예외가 새면 도구 루프가 죽어 무응답), **기준일은 지표 테이블의 실제 마지막 거래일로 클램프**(미래·미수집 날짜 행은 존재하지 않는다 = 룩어헤드 불변식, `AdvisorChatToolPgTest` 가 14종을 미래 날짜로 검증), 도구 호출 이름·참조 기준일은 `ToolContext` 의 `ChatRequestScope` 에 기록 → `tb_advisor_chat.tool_calls_json`·`data_as_of`. `metricTopN` 의 정렬 컬럼은 `MetricColumn` enum 만 SQL 에 보간된다.
+
+### 11.3 Slack 앱 설정 (수동, 배포 전)
+
+**기존 앱에 Socket Mode 를 얹는다 — 새 앱을 만들면 bot 토큰이 바뀌어 기존 알림 4채널이 끊긴다.**
+1. api.slack.com/apps → 기존 앱 → **Socket Mode** Enable on
+2. Basic Information → App-Level Tokens → Generate, scope `connections:write` 하나만 → `xapp-1-…` 을 `SLACK_APP_TOKEN` (화면을 벗어나면 다시 못 본다)
+3. OAuth & Permissions → Bot Token Scopes: `chat:write`(있음), `channels:history`(#hvy-advisor 가 비공개면 `groups:history`), `reactions:write`
+4. Event Subscriptions → Enable → bot events `message.channels`(비공개면 `message.groups`). Socket Mode 라 Request URL 란은 없다
+5. **Reinstall to Workspace**(스코프 변경 시 필수, bot 토큰 값 유지) → `#hvy-advisor` 에서 `/invite @봇`
+6. 채널 ID(채널 세부정보 맨 아래 `C…`) → `ADVISOR_CHAT_CHANNEL_ID`, 내 사용자 ID(프로필 ⋮ → Copy member ID `U…`) → `ADVISOR_CHAT_ALLOWED_USERS`
+- 넣지 않는 스코프: `app_mentions:read`(멘션 전용 아님), `users:read`(ID 로 관리), `im:history`(DM 범위 밖). `channels:history` 는 초대된 공개 채널의 모든 메시지를 받으므로 **봇을 다른 채널에 초대하지 않는다**(필터 1단계가 방어).
+- 매니페스트에 `features.bot_user.always_online: true` 를 두면 연결이 살아 있는 동안 봇이 온라인(초록 점)으로 보인다 — 연결 상태를 보는 가장 싼 방법.
+
+### 11.4 배포 절차 (순서: psql → env → 재생성 → Slack 앱 → 첫 질문)
+
+1. psql `db/advisor-schema.sql` 재적용(`tb_advisor_chat` 은 `CREATE TABLE IF NOT EXISTS`). 확인 `SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'tb_advisor_%';` → 14
+2. env: `SLACK_APP_TOKEN`, `ADVISOR_CHAT_CHANNEL_ID`, `ADVISOR_CHAT_ALLOWED_USERS`(+ 선택 `ADVISOR_CHAT_MODEL`, `ADVISOR_CHAT_ENABLED` 는 prod 기본 true). 컨테이너는 `docker run` 재생성(`restart` 는 env 미반영)
+3. 기동 로그 `advisor chat 활성: channel=…` 과 `advisor chat Socket Mode 연결 시작`. WARN `advisor chat 설정 누락 [SLACK_APP_TOKEN, …]` 이면 그 env 가 빈 것. Slack 사이드바 봇 초록 점
+4. 첫 질문 5개와 기대 도구(답글 꼬리 `tools:` 와 대조): "삼성전자 최근 흐름 어때?" → resolveStock→stockSnapshot(+priceSeries) · "20일 모멘텀 상위 10개" → metricTopN(ret_20d) · (판단 메시지 댓글) "오늘 판단 근거 다시 설명해줘" → latestAdvice · "코스피 지금 강세장이야?" → marketTrend · "SOX 랑 코스닥 베타 얼마야?" → globalLink
+5. **반증 3개(필수)**: "삼성전자 올해 영업이익 얼마야?" → "해당 데이터가 없습니다"(숫자가 나오면 프롬프트 실패, 운영 불가) · "내일 코스피 오를까?" → 조건부 시나리오(목표가·확률 단정이면 실패) · 비허용 계정 질문 → 무응답
+6. 롤백 `ADVISOR_CHAT_ENABLED=false` + 재생성. Slack 앱 설정은 그대로 둬도 무해.
+
+```sql
+-- 최근 대화
+SELECT chat_id, status, slack_user_id, left(question, 40) q, tool_calls, prompt_tokens, completion_tokens, cost_usd, duration_ms, data_as_of, error_message
+FROM tb_advisor_chat ORDER BY created_at DESC LIMIT 10;
+-- 오늘 토큰·비용 (KST)
+SELECT COUNT(*) n, SUM(prompt_tokens) in_tok, SUM(completion_tokens) out_tok, SUM(cost_usd) usd
+FROM tb_advisor_chat WHERE created_at >= (date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul');
+-- 도구 분포
+SELECT t, COUNT(*) FROM tb_advisor_chat, jsonb_array_elements_text(tool_calls_json) t GROUP BY 1 ORDER BY 2 DESC;
+```
+관리자 `GET /api/advisor/admin/chats?limit=50` 도 같은 내용.
+
+### 11.5 관찰·조정
+
+- `#hvy-error` 에 알림이 오면 봇 경로에서 예외가 샌 것(실패 처리 계약 위반). traceId 는 `advisorChatExecutor` 가 ThreadPoolTaskExecutor 라 자동 부착.
+- 질문당 `prompt_tokens`(히스토리+도구 결과 지배적 → 크면 `tool-row-limit`·`priceSeries` days 축소) · `tool_calls` 평균 3~4 초과면 도구 설명문 모호 · `cached_tokens` 0 지속이면 시스템 프롬프트가 매번 달라지는 것 · `duration_ms` p95 가 180초 근접이면 `max-total-tool-calls` 축소 · `history_messages` 30 상한 발동 여부. 며칠 뒤 `daily-token-budget` 300,000 을 실측으로 교체.
+- Socket Mode 는 끊긴 동안 온 메시지를 Slack 이 재전송하지 않아 **유실**된다(개인 규모라 수용). 👀 리액션이 안 붙으면 봇이 못 받은 것이니 다시 묻는다. SDK 가 자동 재연결.
+- 프롬프트 수정 = `chat-system-v1.md` 교체 + `PromptResources.CHAT_VERSION` bump(`tb_advisor_chat.prompt_version` 으로 전후 분리). 도구 설명문 변경도 같은 규약.
+- 범위 밖·후속: hvy-common `thread_ts`/ts 반환(→ 판단 스레드 자동 후속), 임의 SQL 도구, 사용자별 장기 기억, 스트리밍, DM·다중 채널, 정형 도구 결과 직접 표 렌더링(`SlackWidth`), 👍/👎 리액션 수집.

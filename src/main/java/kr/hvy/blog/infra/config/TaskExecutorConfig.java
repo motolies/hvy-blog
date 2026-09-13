@@ -67,6 +67,27 @@ public class TaskExecutorConfig extends TaskExecutorConfigurer {
     return executor;
   }
 
+  /**
+   * AI 판단(advisor) 전용 실행기.
+   * <p>
+   * 관리자 REST 가 ADVISE·WEEKLY_REVIEW·IC_BACKFILL 같은 장시간 잡을 트리거하면 여기에 제출하고 즉시 202 로 응답한다.
+   * 스케줄 경로는 ShedLock 락을 메서드 반환까지 유지해야 하므로 이 실행기를 쓰지 않고 스케줄러 스레드에서 동기 실행한다.
+   * 단일 스레드라 advisor 잡끼리 직렬화되고(LLM 호출·채점 SQL 이 서로 경합하지 않음), 중복 실행 차단은
+   * tb_advisor_run 의 RUNNING 부분 유니크 인덱스가 담당한다. kisBackfillExecutor 와 분리한 이유는 백필(수 시간)이
+   * 큐를 점유하는 동안 AI 판단이 굶지 않게 하기 위해서다.
+   */
+  @Bean(name = "advisorExecutor", destroyMethod = "shutdown")
+  public ThreadPoolTaskExecutor advisorExecutor() {
+    var executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(1);
+    executor.setMaxPoolSize(1);
+    executor.setQueueCapacity(5);
+    executor.setThreadNamePrefix("advisor-");
+    executor.setWaitForTasksToCompleteOnShutdown(false);
+    executor.initialize();
+    return executor;
+  }
+
   // 스케줄러 강제 지정 (여러 스케줄러/Executor가 있을 때 안전)
   @Bean
   public SchedulingConfigurer schedulingConfigurer(@Qualifier("platformTaskScheduler") TaskScheduler scheduler) {

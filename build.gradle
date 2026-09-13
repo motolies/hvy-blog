@@ -78,6 +78,11 @@ dependencies {
     // html parsing (hot deal scraping)
     implementation 'org.jsoup:jsoup:1.23.2'
 
+    // Spring AI 2.0.x — Spring Boot 4.0/4.1 대응 라인 (2.0.1 GA 2026-08-20, Maven Central). advisor 모듈의 OpenAI ChatClient
+    // 모델 ID·키는 yml(advisor.model.*, spring.ai.openai.api-key) 로만 주입한다
+    implementation platform('org.springframework.ai:spring-ai-bom:2.0.1')
+    implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+
 
     // redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'

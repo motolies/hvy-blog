@@ -31,4 +31,12 @@ public class TestTaskExecutorConfig {
   public TaskExecutor kisBackfillExecutor() {
     return new SyncTaskExecutor();
   }
+
+  /**
+   * AI 판단(advisor) 전용 실행기의 테스트 대체. 운영은 단일 스레드 풀이지만 테스트는 호출 스레드에서 동기 실행한다.
+   */
+  @Bean(name = "advisorExecutor")
+  public TaskExecutor advisorExecutor() {
+    return new SyncTaskExecutor();
+  }
 }

@@ -46,6 +46,13 @@ spring:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
       timeout: 3600
+  # Spring AI 2.0.1 — advisor 모듈(AI 시장 판단)의 OpenAI 연결. 키는 env 로만, 기본값 없음. 모델 ID·재시도는 advisor.model.* 에서 지정.
+  # 자동구성(OpenAiChatAutoConfiguration)은 키가 비면 기동 자체를 막으므로 none 으로 끄고, AdvisorAiConfig 가 advisor.enabled 일 때만 직접 조립한다
+  ai:
+    model:
+      chat: none
+    openai:
+      api-key: ${OPENAI_API_KEY:}
 
 hvy:
   master-code:
@@ -223,6 +230,53 @@ kis:
       - "EQ:NAS:BOTZ"
       - "EQ:AMS:ROBO"
 
+# AI 시장 판단(advisor, 2026-09-13). 임계값은 AdvisorProperties 주석 참조. 피드백 기능은 표본 게이트(lesson.min-picks·ic.min-n-eff)로 잠근다
+advisor:
+  enabled: ${ADVISOR_ENABLED:false}
+  horizon-days: 5                 # 결정 호라이즌(거래일) — 채점·KPI·학습은 이 값 하나만
+  diagnostic-horizons: [1, 20]    # 진단 저장만(학습·KPI 미포함)
+  candidate-limit: 30             # LLM 후보 상한 (≈2,500 토큰)
+  max-per-sector: 4
+  pick-min: 3                     # 가드 후 픽이 이보다 적으면 FAILED(미발행)
+  pick-max: 10
+  advise:
+    deadline: "19:55"             # DAILY 완료 대기 마감(KST). 이후 미완료면 SKIPPED + #hvy-error
+  prompt:
+    version: advice-v1
+    max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
+  scoring:
+    cost-bps: 30                  # 왕복 거래비용 — 보고 전용(학습·IC 는 총수익)
+    band-sigma: 0.5               # 국면 적중 밴드 = 0.5 × σ_5d
+    sigma-lookback-days: 60
+  ic:
+    window-days: 120              # rank-IC 창(영업일), n_eff = 120/5 = 24
+    reference-ic: 0.03
+    prior-n-eff: 24               # 축소 추정 prior
+    min-n-eff: 24                 # 미만이면 가중치 세트 미갱신
+    multiplier-min: 0.5
+    multiplier-max: 2.0
+    backfill-from: "2020-01-01"   # IC 사전 추정 시작일 (유니버스 뷰가 현재 마스터 기준이라 생존편향 — 부호·순위만 신뢰)
+  lesson:
+    active-limit: 8
+    min-picks: 300                # 실적 블록·보정 표·교훈 게이트(누적 픽 수)
+    min-cell-samples: 20
+    min-t-stat: 2.0
+    review-weeks: 4
+    review-picks: 20
+  shadow:
+    quant-top-n: 7                # 정량 top-N 섀도(LLM 없음)
+    nomem-weeks: 8                # 메모리 활성 후 메모리 없는 LLM 호출 병행 기간
+  model:
+    judge: ${ADVISOR_JUDGE_MODEL:}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
+    judge-max-completion-tokens: 8000
+    # judge-temperature: 0.0                  # 추론 모델은 temperature 를 받지 않으므로 기본 미설정
+    assist: ${ADVISOR_ASSIST_MODEL:}          # 채점 요약·교훈용 저가 모델 ID
+    assist-max-completion-tokens: 2000
+  cost:
+    input-per-1m-usd: 0           # 0 이면 비용 미계산. 모델 단가로 채우면 run.cost_usd 에 기록
+    output-per-1m-usd: 0
+  retention-days: 180             # 프롬프트 입력 스냅샷 보존
+
 # scheduler
 scheduler:
   public-ip:
@@ -256,6 +310,19 @@ scheduler:
   stock-weekly:
     lock-name: STOCK-WEEKLY-TEST
     cron-expression: "0 0 3 * * SUN"
+    enabled: false
+  # AI 시장 판단(advisor) 3종 — default 문서는 false(로컬 보호). ADVISE 는 DAILY(18:30) 완료를 5분 간격으로 확인하며 멱등 종료
+  advisor-advise:
+    lock-name: ADVISOR-ADVISE-TEST
+    cron-expression: "0 30/5 19 * * MON-FRI"
+    enabled: false
+  advisor-intraday:
+    lock-name: ADVISOR-INTRADAY-TEST
+    cron-expression: "0 0 12 * * MON-FRI"
+    enabled: false
+  advisor-weekly-review:
+    lock-name: ADVISOR-WEEKLY-REVIEW-TEST
+    cron-expression: "0 0 8 * * SUN"
     enabled: false
 
 cookie:
@@ -319,6 +386,20 @@ scheduler:
   stock-weekly:
     lock-name: STOCK-WEEKLY-PROD
     cron-expression: "0 0 3 * * SUN"
+    enabled: true
+  # AI 시장 판단(advisor, 2026-09-13). 기동 시 평가. advisor.enabled 와 OPENAI_API_KEY·모델 ID 가 없으면 트리거가 거부되고 #hvy-error 로 알린다.
+  # ADVISE 19:30~19:55 5분 간격(DAILY 완료 게이트, 멱등) · INTRADAY 12:00 · WEEKLY_REVIEW 일 08:00(WEEKLY 03:00 종료 후)
+  advisor-advise:
+    lock-name: ADVISOR-ADVISE-PROD
+    cron-expression: "0 30/5 19 * * MON-FRI"
+    enabled: true
+  advisor-intraday:
+    lock-name: ADVISOR-INTRADAY-PROD
+    cron-expression: "0 0 12 * * MON-FRI"
+    enabled: true
+  advisor-weekly-review:
+    lock-name: ADVISOR-WEEKLY-REVIEW-PROD
+    cron-expression: "0 0 8 * * SUN"
     enabled: true
 
 cookie:

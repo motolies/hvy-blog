@@ -313,7 +313,7 @@ advisor:
   # Slack #hvy-advisor 채팅 봇 (chat-v1, 2026-09-13). Socket Mode 수신 — 공개 URL·서명 검증 없음, app-level 토큰 1개.
   # 토큰·채널·허용 사용자 중 하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨). bot 토큰은 slack.token(SLACK_BOT_TOKEN) 재사용
   chat:
-    enabled: ${ADVISOR_CHAT_ENABLED:true}
+    enabled: ${ADVISOR_CHAT_ENABLED:false}
     app-token: ${SLACK_BOT_TOKEN:}                     # xapp-… (Socket Mode, scope connections:write)
     channel-id: ${ADVISOR_CHAT_CHANNEL_ID:C0C1E1XCN8N}            # C… (#hvy-advisor 채널 ID)
     allowed-user-ids: ${ADVISOR_CHAT_ALLOWED_USERS:U06BBRPTRB8}   # U…,U… 쉼표 구분 — 목록 밖 메시지는 조용히 무시

@@ -86,8 +86,14 @@ public class SlackChatRouter {
   Verdict route(IncomingQuestion q, String botUserId) {
     try {
       Verdict verdict = decide(q, properties.getChannelId(), properties.getAllowedUserIds(), botUserId);
-      if (verdict != Verdict.ACCEPT) {
+      if (verdict == Verdict.OTHER_CHANNEL) {
+        // 봇이 알림 채널 여러 곳에 있어 다른 채널 메시지는 상시 들어온다 — 소음이라 DEBUG
         log.debug("Slack 메시지 무시({}): channel={}, user={}, ts={}", verdict, q.channelId(), q.userId(), q.ts());
+        return verdict;
+      }
+      if (verdict != Verdict.ACCEPT) {
+        // 대상 채널 안에서 버려지는 것은 "왜 답이 없나" 의 직접 원인이라 운영 레벨에서 보이게 둔다
+        log.info("Slack 메시지 무시({}): channel={}, user={}, ts={}", verdict, q.channelId(), q.userId(), q.ts());
         return verdict;
       }
       if (!deduplicator.firstSeen(q.eventId())) {

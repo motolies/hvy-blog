@@ -234,19 +234,20 @@ Socket Mode(bolt-socket-mode + Java-WebSocket, 공개 URL·서명 검증 없음)
 
 **기존 앱에 Socket Mode 를 얹는다 — 새 앱을 만들면 bot 토큰이 바뀌어 기존 알림 4채널이 끊긴다.**
 1. api.slack.com/apps → 기존 앱 → **Socket Mode** Enable on
-2. Basic Information → App-Level Tokens → Generate, scope `connections:write` 하나만 → `xapp-1-…` 을 `SLACK_APP_TOKEN` (화면을 벗어나면 다시 못 본다)
-3. OAuth & Permissions → Bot Token Scopes: `chat:write`(있음), `channels:history`(#hvy-advisor 가 비공개면 `groups:history`), `reactions:write`
-4. Event Subscriptions → Enable → bot events `message.channels`(비공개면 `message.groups`). Socket Mode 라 Request URL 란은 없다
+2. Basic Information → App-Level Tokens → Generate, scope `connections:write` 하나만 → `xapp-1-…` 을 `SLACK_APP_TOKEN` (화면을 벗어나면 다시 못 본다). **토큰은 하나만, 운영 서버 `prod.env` 에만 둔다**(아래 "연결은 앱 단위" 참고)
+3. OAuth & Permissions → Bot Token Scopes: `chat:write`(있음), `groups:history`(`#hvy-advisor` 는 **비공개 채널**이다. 공개 채널이면 `channels:history`), `reactions:write`
+4. Event Subscriptions → Enable → bot events `message.groups`(공개 채널이면 `message.channels`). Socket Mode 라 Request URL 란은 없다
 5. **Reinstall to Workspace**(스코프 변경 시 필수, bot 토큰 값 유지) → `#hvy-advisor` 에서 `/invite @봇`
 6. 채널 ID(채널 세부정보 맨 아래 `C…`) → `ADVISOR_CHAT_CHANNEL_ID`, 내 사용자 ID(프로필 ⋮ → Copy member ID `U…`) → `ADVISOR_CHAT_ALLOWED_USERS`
 - 넣지 않는 스코프: `app_mentions:read`(멘션 전용 아님), `users:read`(ID 로 관리), `im:history`(DM 범위 밖). `channels:history` 는 초대된 공개 채널의 모든 메시지를 받으므로 **봇을 다른 채널에 초대하지 않는다**(필터 1단계가 방어).
 - 매니페스트에 `features.bot_user.always_online: true` 를 두면 연결이 살아 있는 동안 봇이 온라인(초록 점)으로 보인다 — 연결 상태를 보는 가장 싼 방법.
+- **Socket Mode 연결은 Slack 앱 단위로 묶인다.** 앱당 최대 10 연결이 허용되고 Slack 은 이벤트를 **열린 연결 중 하나에만** 보낸다. 같은 App-Level Token 으로 다른 프로세스(다른 기기의 로컬 실행 등)가 붙어 있으면 질문이 그쪽으로 새어 blogback 에는 로그 한 줄 없이 무응답이 된다(2026-09-17 실제 발생 — hello `num_connections: 4`). 폰·PC 의 Slack 클라이언트는 이 수에 들지 않는다. 기동 로그 `advisor chat Socket Mode hello: connections=1` 을 확인하고, 2 이상(WARN + 기동 시 `#hvy-notify` 경보)이면 App-Level Token 을 **전부 Revoke → 재발급**해 `prod.env` 에만 넣는다. 옛 연결이 남으면 Socket Mode 토글 Off→On(전 연결에 `link_disabled`)하거나 연결 수명(~5h)을 기다린다. 로컬 `.env` 에는 `SLACK_APP_TOKEN` 을 두지 않는다.
 
 ### 11.4 배포 절차 (순서: psql → env → 재생성 → Slack 앱 → 첫 질문)
 
 1. psql `db/advisor-schema.sql` 재적용(`tb_advisor_chat` 은 `CREATE TABLE IF NOT EXISTS`). 확인 `SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'tb_advisor_%';` → 14
-2. env: `SLACK_APP_TOKEN`, `ADVISOR_CHAT_CHANNEL_ID`, `ADVISOR_CHAT_ALLOWED_USERS`(+ 선택 `ADVISOR_CHAT_MODEL`, `ADVISOR_CHAT_ENABLED` 는 prod 기본 true). 컨테이너는 `docker run` 재생성(`restart` 는 env 미반영)
-3. 기동 로그 `advisor chat 활성: channel=…` 과 `advisor chat Socket Mode 연결 시작`. WARN `advisor chat 설정 누락 [SLACK_APP_TOKEN, …]` 이면 그 env 가 빈 것. Slack 사이드바 봇 초록 점
+2. env(`docker-compose/blog/back/prod.env`): `SLACK_APP_TOKEN`, `ADVISOR_CHAT_CHANNEL_ID`, `ADVISOR_CHAT_ALLOWED_USERS`(+ 선택 `ADVISOR_CHAT_MODEL`, `ADVISOR_CHAT_ENABLED` 는 prod 기본 true). 컨테이너는 `recreate.sh`(compose `up -d --force-recreate`)로 재생성 — `restart` 는 env 미반영
+3. 기동 로그 `advisor chat 활성: channel=…` · `advisor chat Socket Mode 연결 시작` · **`advisor chat Socket Mode hello: connections=1`**. WARN `advisor chat 설정 누락 [SLACK_APP_TOKEN, …]` 이면 그 env 가 빈 것. Slack 사이드바 봇 초록 점
 4. 첫 질문 5개와 기대 도구(답글 꼬리 `tools:` 와 대조): "삼성전자 최근 흐름 어때?" → resolveStock→stockSnapshot(+priceSeries) · "20일 모멘텀 상위 10개" → metricTopN(ret_20d) · (판단 메시지 댓글) "오늘 판단 근거 다시 설명해줘" → latestAdvice · "코스피 지금 강세장이야?" → marketTrend · "SOX 랑 코스닥 베타 얼마야?" → globalLink
 5. **반증 3개(필수)**: "삼성전자 올해 영업이익 얼마야?" → "해당 데이터가 없습니다"(숫자가 나오면 프롬프트 실패, 운영 불가) · "내일 코스피 오를까?" → 조건부 시나리오(목표가·확률 단정이면 실패) · 비허용 계정 질문 → 무응답
 6. 롤백 `ADVISOR_CHAT_ENABLED=false` + 재생성. Slack 앱 설정은 그대로 둬도 무해.
@@ -267,6 +268,7 @@ SELECT t, COUNT(*) FROM tb_advisor_chat, jsonb_array_elements_text(tool_calls_js
 
 - `#hvy-error` 에 알림이 오면 봇 경로에서 예외가 샌 것(실패 처리 계약 위반). traceId 는 `advisorChatExecutor` 가 ThreadPoolTaskExecutor 라 자동 부착.
 - 질문당 `prompt_tokens`(히스토리+도구 결과 지배적 → 크면 `tool-row-limit`·`priceSeries` days 축소) · `tool_calls` 평균 3~4 초과면 도구 설명문 모호 · `cached_tokens` 0 지속이면 시스템 프롬프트가 매번 달라지는 것 · `duration_ms` p95 가 180초 근접이면 `max-total-tool-calls` 축소 · `history_messages` 30 상한 발동 여부. 며칠 뒤 `daily-token-budget` 300,000 을 실측으로 교체.
-- Socket Mode 는 끊긴 동안 온 메시지를 Slack 이 재전송하지 않아 **유실**된다(개인 규모라 수용). 👀 리액션이 안 붙으면 봇이 못 받은 것이니 다시 묻는다. SDK 가 자동 재연결.
+- Socket Mode 는 끊긴 동안 온 메시지를 Slack 이 재전송하지 않아 **유실**된다(개인 규모라 수용). 👀 리액션이 안 붙으면 봇이 못 받은 것이니 다시 묻는다(`reactions:write` 누락이면 WARN `reactions.add 실패` 가 남는다). SDK 가 자동 재연결 — 약 5시간마다 Slack 이 연결을 refresh 시키며 이때 옛 세션의 close 1000 은 INFO 로만 남는다(비정상 코드·error 만 WARN + 경보).
+- **무응답 진단 순서**(Loki `{container="blogback"}`): ① `|= "Socket Mode hello"` 의 `connections` 가 1 인가(2 이상이면 위 "연결은 앱 단위") → ② 질문 뒤 `|= "Socket Mode Request" |= "events_api"` 가 오는가(SDK DEBUG 필요 — 밑줄 패키지라 `SPRING_APPLICATION_JSON={"logging.level.com.slack.api.socket_mode":"DEBUG"}`) → ③ `|= "Unsuccessful Bolt app execution"`(Bolt 미들웨어 거부) → ④ `|= "Slack 메시지 무시"`(라우터 필터, 대상 채널 안의 폐기는 INFO) → ⑤ `tb_advisor_chat`. ①~② 가 막히면 Slack 이 안 보내는 것이라 앱 코드·로그로는 원인이 보이지 않는다.
 - 프롬프트 수정 = `chat-system-v1.md` 교체 + `PromptResources.CHAT_VERSION` bump(`tb_advisor_chat.prompt_version` 으로 전후 분리). 도구 설명문 변경도 같은 규약.
 - 범위 밖·후속: hvy-common `thread_ts`/ts 반환(→ 판단 스레드 자동 후속), 임의 SQL 도구, 사용자별 장기 기억, 스트리밍, DM·다중 채널, 정형 도구 결과 직접 표 렌더링(`SlackWidth`), 👍/👎 리액션 수집.

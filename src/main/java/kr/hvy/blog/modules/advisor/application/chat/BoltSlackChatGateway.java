@@ -44,10 +44,11 @@ public class BoltSlackChatGateway implements SlackChatGateway {
     try {
       ReactionsAddResponse response = client.reactionsAdd(r -> r.channel(channelId).timestamp(ts).name(name));
       if (!response.isOk() && !"already_reacted".equals(response.getError())) {
-        log.debug("reactions.add 실패(무시): {} {}", name, response.getError());
+        // 👀 가 안 붙으면 "봇이 못 받았다" 로 오인하기 쉬워 원인(스코프 누락 등)을 운영 레벨로 남긴다
+        log.warn("reactions.add 실패(무시): {} {}", name, response.getError());
       }
     } catch (Exception e) {
-      log.debug("reactions.add 예외(무시): {} {}", name, e.getMessage());
+      log.warn("reactions.add 예외(무시): {} {}", name, e.getMessage());
     }
   }
 

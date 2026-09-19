@@ -28,6 +28,10 @@ public record ResponsesResponse(
   public static final String ITEM_MESSAGE = "message";
   public static final String ITEM_FUNCTION_CALL = "function_call";
   public static final String CONTENT_OUTPUT_TEXT = "output_text";
+  /** 구조화 출력에서 모델이 스키마 대신 거부를 택한 content 파트 — {@code refusal} 필드에 문구 */
+  public static final String CONTENT_REFUSAL = "refusal";
+  /** incomplete_details.reason 중 출력 상한 도달 */
+  public static final String INCOMPLETE_MAX_OUTPUT_TOKENS = "max_output_tokens";
 
   public ResponsesResponse {
     output = output == null ? List.of() : List.copyOf(output);
@@ -39,6 +43,13 @@ public record ResponsesResponse(
 
   public boolean isIncomplete() {
     return STATUS_INCOMPLETE.equals(status);
+  }
+
+  /**
+   * status=incomplete 의 사유(max_output_tokens·content_filter …). 미완이 아니면 null.
+   */
+  public String incompleteReason() {
+    return incompleteDetails == null ? null : incompleteDetails.reason();
   }
 
   /**

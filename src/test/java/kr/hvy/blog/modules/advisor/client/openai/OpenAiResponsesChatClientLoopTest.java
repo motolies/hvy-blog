@@ -28,7 +28,6 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.model.tool.ToolCallLimitBehavior;
 import org.springframework.ai.model.tool.ToolCallingManager;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import tools.jackson.databind.JsonNode;
@@ -84,7 +83,6 @@ class OpenAiResponsesChatClientLoopTest {
         .build();
     return ChatClient.builder(model, ObservationRegistry.NOOP, null, null,
             ToolCallingAdvisor.builder().toolCallingManager(manager).conversationHistoryEnabled(true))
-        .defaultOptions(OpenAiChatOptions.builder().model("gpt-test").maxCompletionTokens(500).reasoningEffort("low"))
         .build();
   }
 
@@ -93,7 +91,7 @@ class OpenAiResponsesChatClientLoopTest {
   void 도구루프_두라운드() {
     OpenAiResponsesClient client = mock(OpenAiResponsesClient.class);
     when(client.create(any())).thenReturn(body(CALL_SNAPSHOT)).thenReturn(body(FINAL_ANSWER));
-    OpenAiResponsesChatModel model = new OpenAiResponsesChatModel(client, OpenAiChatOptions.builder().model("gpt-test").maxCompletionTokens(500).build(), 12);
+    OpenAiResponsesChatModel model = new OpenAiResponsesChatModel(client, ResponsesChatOptions.builder().model("gpt-test").maxTokens(500).reasoningEffort("low").build(), 12);
     FakeToolkit toolkit = new FakeToolkit();
     ChatRequestScope scope = new ChatRequestScope(Instant.now().plusSeconds(60));
 
@@ -141,7 +139,7 @@ class OpenAiResponsesChatClientLoopTest {
     OpenAiResponsesClient client = mock(OpenAiResponsesClient.class);
     when(client.create(any())).thenReturn(body(CALL_SNAPSHOT)).thenReturn(body(CALL_SNAPSHOT.replace("call_1", "call_2")))
         .thenReturn(body(FINAL_ANSWER));
-    OpenAiResponsesChatModel model = new OpenAiResponsesChatModel(client, OpenAiChatOptions.builder().model("gpt-test").maxCompletionTokens(500).build(), 12);
+    OpenAiResponsesChatModel model = new OpenAiResponsesChatModel(client, ResponsesChatOptions.builder().model("gpt-test").maxTokens(500).reasoningEffort("low").build(), 12);
     FakeToolkit toolkit = new FakeToolkit();
     ChatRequestScope scope = new ChatRequestScope(Instant.now().plusSeconds(60));
 
@@ -168,7 +166,7 @@ class OpenAiResponsesChatClientLoopTest {
     OpenAiResponsesClient client = mock(OpenAiResponsesClient.class);
     when(client.create(any())).thenReturn(body(CALL_SNAPSHOT)).thenReturn(body(CALL_SNAPSHOT.replace("call_1", "call_2")))
         .thenReturn(body(FINAL_ANSWER));
-    OpenAiResponsesChatModel model = new OpenAiResponsesChatModel(client, OpenAiChatOptions.builder().model("gpt-test").maxCompletionTokens(500).build(), 2);
+    OpenAiResponsesChatModel model = new OpenAiResponsesChatModel(client, ResponsesChatOptions.builder().model("gpt-test").maxTokens(500).reasoningEffort("low").build(), 2);
     FakeToolkit toolkit = new FakeToolkit();
 
     chatClient(model, 6, 2).prompt()

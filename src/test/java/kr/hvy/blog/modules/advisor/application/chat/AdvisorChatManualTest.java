@@ -27,6 +27,7 @@ import kr.hvy.blog.modules.advisor.application.service.TradingCalendar;
 import kr.hvy.blog.modules.advisor.client.openai.OpenAiBearerAuthInterceptor;
 import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesChatModel;
 import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesClient;
+import kr.hvy.blog.modules.advisor.client.openai.ResponsesChatOptions;
 import kr.hvy.blog.modules.advisor.repository.jdbc.AdviceWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.IntradayCheckWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter;
@@ -45,7 +46,6 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.ToolCallingAdvisor;
 import org.springframework.ai.model.tool.ToolCallLimitBehavior;
 import org.springframework.ai.model.tool.ToolCallingManager;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -117,16 +117,15 @@ class AdvisorChatManualTest {
         new IntradayCheckWriter(jdbc), new CandidateScreeningService(named, weightSets, properties), weightSets, new AdvisorKpiService(named, properties), properties);
     CalendarToolkit calendar = new CalendarToolkit(support, reader, features, adviceWriter, tradingCalendar);
 
-    // 운영 AdvisorAiConfig.openAiResponsesChatModel 과 같은 조립 — RestClient 만 api_log 인터셉터 없이 인증 인터셉터만 단다
+    // 운영 AdvisorAiConfig.chatResponsesChatModel + chatChatClient 와 같은 조립 — RestClient 만 api_log 인터셉터 없이 인증 인터셉터만 단다(옵션은 모델에만)
     RestClient restClient = RestClient.builder().baseUrl("https://api.openai.com")
         .requestInterceptor(new OpenAiBearerAuthInterceptor(() -> apiKey)).build();
-    OpenAiChatOptions defaults = OpenAiChatOptions.builder().model(model).maxCompletionTokens(chat.getMaxCompletionTokens()).build();
+    ResponsesChatOptions defaults = ResponsesChatOptions.builder().model(model).maxTokens(chat.getMaxCompletionTokens()).build();
     OpenAiResponsesChatModel chatModel = new OpenAiResponsesChatModel(new OpenAiResponsesClient(restClient, 1), defaults, chat.getMaxTotalToolCalls());
     ToolCallingManager manager = ToolCallingManager.builder().maxCallsPerTool(chat.getMaxCallsPerTool()).maxTotalToolCalls(chat.getMaxTotalToolCalls())
         .onLimitExceeded(ToolCallLimitBehavior.RETURN_ERROR_RESPONSE).build();
     ChatClient chatClient = ChatClient.builder(chatModel, io.micrometer.observation.ObservationRegistry.NOOP, null, null,
             ToolCallingAdvisor.builder().toolCallingManager(manager).conversationHistoryEnabled(true))
-        .defaultOptions(OpenAiChatOptions.builder().model(model).maxCompletionTokens(chat.getMaxCompletionTokens()))
         .build();
     SlackChatGateway noSlack = mock(SlackChatGateway.class);
     AdvisorChatClient answerer = new AdvisorChatClient(chatClient, new PromptResources(), chat, properties, new SlackThreadHistory(noSlack, chat),

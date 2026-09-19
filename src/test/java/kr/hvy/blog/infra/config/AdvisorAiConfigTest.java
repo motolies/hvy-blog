@@ -2,24 +2,28 @@ package kr.hvy.blog.infra.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import kr.hvy.blog.modules.advisor.application.service.AdvisorJson;
+import kr.hvy.blog.modules.advisor.client.openai.ResponsesChatOptions;
+import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesTextFormat;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.openai.OpenAiChatOptions;
 
 /**
- * 기본 옵션 헬퍼 — reasoningEffort 는 채팅 봇만, judge/assist(3-인자)는 미설정. ChatClient 의 defaultOptions 병합(combineWith)에서도 유지되는지.
+ * 역할별 모델 기본 옵션 헬퍼 — maxTokens 가 Responses max_output_tokens, reasoningEffort 는 채팅 봇(4-인자)만, temperature 는 non-null 일 때만.
+ * 요청 customizer(MarketJudgeClient 의 textFormat) 를 얹어도 모델 기본값이 살아남는지까지.
  */
-@DisplayName("AdvisorAiConfig.chatOptions - reasoningEffort 오버로드")
+@DisplayName("AdvisorAiConfig.chatOptions - 역할별 기본 옵션")
 class AdvisorAiConfigTest {
 
   @Test
-  @DisplayName("4-인자는 reasoningEffort 를 넣고, 3-인자와 공백은 넣지 않는다")
-  void reasoningEffort_설정() {
-    OpenAiChatOptions chat = AdvisorAiConfig.chatOptions("gpt-chat", 6000, null, "low").build();
+  @DisplayName("4-인자는 reasoningEffort 를 넣고, 3-인자와 공백은 넣지 않는다. temperature 는 null 이면 미설정")
+  void 기본옵션() {
+    ResponsesChatOptions chat = AdvisorAiConfig.chatOptions("gpt-chat", 6000, null, "low").build();
     assertThat(chat.getModel()).isEqualTo("gpt-chat");
-    assertThat(chat.getMaxCompletionTokens()).isEqualTo(6000);
+    assertThat(chat.getMaxTokens()).isEqualTo(6000);
     assertThat(chat.getReasoningEffort()).isEqualTo("low");
     assertThat(chat.getTemperature()).isNull();
+    assertThat(chat.getTextFormat()).isNull();
 
     assertThat(AdvisorAiConfig.chatOptions("gpt-judge", 8000, null).build().getReasoningEffort()).isNull();
     assertThat(AdvisorAiConfig.chatOptions("gpt-chat", 6000, null, "  ").build().getReasoningEffort()).isNull();
@@ -27,15 +31,17 @@ class AdvisorAiConfigTest {
   }
 
   @Test
-  @DisplayName("모델 기본 옵션 위에 ChatClient defaultOptions 를 병합해도 model·reasoningEffort 가 살아남는다")
-  void 병합유지() {
-    OpenAiChatOptions modelDefault = AdvisorAiConfig.chatOptions("gpt-judge", 8000, null).build();
+  @DisplayName("모델 기본 옵션(judge) 위에 model 없는 요청 customizer(textFormat) 를 병합해도 model·maxTokens 가 유지된다")
+  void 요청customizer_병합() {
+    ResponsesChatOptions judge = AdvisorAiConfig.chatOptions("gpt-judge", 8000, null).build();
+    ResponsesTextFormat format = ResponsesTextFormat.strictJsonSchema("AdviceResponse",
+        AdvisorJson.MAPPER.readTree("{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}"));
 
-    OpenAiChatOptions merged = modelDefault.mutate().combineWith(AdvisorAiConfig.chatOptions("gpt-chat", 6000, null, "low")).build();
+    ResponsesChatOptions merged = judge.mutate().combineWith(ResponsesChatOptions.builder().textFormat(format)).build();
 
-    assertThat(merged.getModel()).isEqualTo("gpt-chat");
-    assertThat(merged.getMaxCompletionTokens()).isEqualTo(6000);
-    assertThat(merged.getReasoningEffort()).isEqualTo("low");
-    assertThat(modelDefault.mutate().combineWith(AdvisorAiConfig.chatOptions("gpt-assist", 2000, null)).build().getReasoningEffort()).isNull();
+    assertThat(merged.getModel()).isEqualTo("gpt-judge");
+    assertThat(merged.getMaxTokens()).isEqualTo(8000);
+    assertThat(merged.getTextFormat()).isEqualTo(format);
+    assertThat(merged.getReasoningEffort()).isNull();
   }
 }

@@ -23,10 +23,13 @@ public class JiraSyncScheduler extends AbstractScheduler {
   private final JiraBatchService jiraBatchService;
 
   /**
-   * 10분마다 Jira 이슈 및 워크로그 동기화 실행
+   * Jira 이슈 및 워크로그 동기화 실행 (자동 스케줄 중단됨)
+   * <p>
+   * 자동 실행을 멈추기 위해 {@code @Scheduled} / {@code @SchedulerLock} 두 줄을 주석 처리했다. 되살릴 때는 주석만 해제하면 된다.
+   * 수동 동기화({@code POST /api/jira/admin})는 이 스케줄러를 거치지 않으므로 그대로 동작한다.
    */
-  @Scheduled(cron = "${scheduler.jira.cron-expression:0 */10 * * * ?}", zone = "UTC")
-  @SchedulerLock(name = "${scheduler.jira.lock-name:JIRA-SYNC}", lockAtMostFor = "9m", lockAtLeastFor = "1m")
+  // @Scheduled(cron = "${scheduler.jira.cron-expression:0 */10 * * * ?}", zone = "UTC")
+  // @SchedulerLock(name = "${scheduler.jira.lock-name:JIRA-SYNC}", lockAtMostFor = "9m", lockAtLeastFor = "1m")
   public void syncJiraData() {
     proceedScheduler("JIRA-ISSUE-COLLECTION")
         .accept(this::jiraIssueCollection);

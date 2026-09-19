@@ -62,9 +62,10 @@
 | 키 | 기본 | 뜻 |
 |---|---|---|
 | `advisor.enabled` | `${ADVISOR_ENABLED:false}` | false 면 ChatClient·잡·컨트롤러 전부 미등록 |
-| `spring.ai.openai.api-key` | `${OPENAI_API_KEY:}` | 키. `spring.ai.model.chat=none` 으로 자동구성은 꺼져 있고 `AdvisorAiConfig` 가 직접 조립 |
+| `spring.ai.openai.api-key` | `${OPENAI_API_KEY:}` | 키. Spring AI 자동구성은 없다(OpenAI 스타터·SDK 미포함, §12) — `AdvisorProperties` 가 이 키를 Environment 로 읽고 `AdvisorAiConfig` 가 Responses 모델 3개를 직접 조립 |
 | `advisor.model.judge` / `assist` | `${ADVISOR_JUDGE_MODEL:}` / `${ADVISOR_ASSIST_MODEL:}` | 판단용 / 보조용 모델 ID. **코드에 박지 않는다**. 추론 모델이면 temperature 미설정 |
-| `advisor.model.judge-max-completion-tokens` | 8000 | 추론 토큰 포함 출력 상한 (비용 손잡이) |
+| `advisor.model.judge-max-completion-tokens` / `assist-max-completion-tokens` | 8000 / 2000 (yml 20000 / 10000) | Responses `max_output_tokens`(추론 토큰 포함, 비용 손잡이). 잘리면 잡 FAILED `"max_output_tokens 에서 잘렸습니다"` — 상한을 올린다 |
+| `advisor.model.max-retries` / `timeout-seconds` | 3 / 120 | `OpenAiResponsesClient` 재시도(429·408·409·5xx·네트워크, Retry-After ≤30s) / `openAiRestClient` 응답 타임아웃. 세 모델 공통 |
 | `advisor.cost.*` | 0 | 100만 토큰당 USD. 채우면 run.cost_usd 계산 |
 | `advisor.prompt.version` | `advice-v5` | 프롬프트 버전(표기용 — 실제 로드는 `PromptResources.ADVICE_VERSION`·파일명 `prompts/advisor/advice-system-v5.md`). 파일을 고치면 둘을 같이 올린다 |
 | `advisor.markets` | `[KOSPI]` | 스크리닝·rank-IC 유니버스 시장(`MarketType` 코드). 빈 목록·오타는 기동 실패. **바꾸면 `IC_BACKFILL`(baseDate 없이) 재실행**으로 IC 재기준화(§1.4) |
@@ -201,7 +202,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 ## 10. 미실측·잔여
 
 - `KisIndexPriceManualTest`: 지수 현재가 TR ID 실측(틀리면 rt_cd≠0, 장중 점검 INDEX 실패로 기록).
-- `AdvisorOpenAiManualTest`: strict 스키마(nullable enum 포함, **v2 의 2단계 중첩 trendOutlook**) 수용 여부·토큰·지연. 프롬프트 v2 로 `promptChars` 가 v1 보다 약 1,500자 늘어난다(시장 trend 블록 2행 + dataAsOf + window).
+- `AdvisorOpenAiManualTest`: **Responses `text.format`(json_schema, strict)** 이 strict 스키마(nullable enum 포함, **v2 의 2단계 중첩 trendOutlook**)를 수용하는지·토큰·지연. Chat Completions 로 실측했던 2026-09-13 결과는 API 가 바뀌어 다시 확인해야 한다(§12). 프롬프트 v2 로 `promptChars` 가 v1 보다 약 1,500자 늘어난다(시장 trend 블록 2행 + dataAsOf + window).
 - 추세 임계 실측: §3 의 분포 SQL 을 psql 로 돌려 yml `advisor.trend.*` 를 조정한다. breadth 성분은 MV 가 생긴 뒤에야 과거 분포를 볼 수 있다.
 - `KisNewsTitleManualTest`: 경로·TR ID·응답 필드는 2026-09-13 운영 실측으로 확정(rt_cd=0, 40행 파싱). 남은 실측은 **공백 필터로 최신 기사가 오는지·`tr_cont=M` 연속조회 여부·페이지당 건수·하루 건수·종목 태그 비율**(변형 BLANK/LEGACY/BLANK_TIME 비교). 페이지당 건수 × `max-pages` 가 밤사이 건수보다 적으면 `scheduler.stock-news` cron 을 24시간(`0 5/30 * * * MON-FRI`)으로 넓힌다 — 순회는 "현재부터 과거로" 라 놓친 기사는 나중에 되찾지 못한다.
 - `KisOverseasSymbolManualTest`(미작성): VIX·미국 10년물 심볼을 KIS 가 주는지. 주면 yml `kis.overseas.symbols` 추가만.
@@ -219,11 +220,11 @@ Socket Mode(bolt-socket-mode + Java-WebSocket, 공개 URL·서명 검증 없음)
 
 스레드 히스토리는 `conversations.replies` 로 읽어 봇의 일일 판단 메시지는 **Block Kit 을 평문으로 펼쳐** 맥락으로 넣는다(text 는 알림용 요약뿐). 루트 헤더의 기준일을 뽑아 `latestAdvice(baseDate)` 힌트로 준다. `tb_advisor_advice.slack_ts` 저장은 hvy-common 변경(응답 ts 반환)이 필요해 범위 밖.
 
-**LLM 호출 경로(2026-09-19, Responses API).** GPT-5.4 이상은 Chat Completions 에서 도구 호출 시 `reasoning_effort=none` 만 허용해(`400: Function tools with reasoning_effort are not supported … use /v1/responses`) 도구 14종을 붙이는 채팅만 죽었다(judge/assist 는 도구가 없어 무관). Spring AI 2.0.1 에는 Responses 용 ChatModel 이 없어 `modules/advisor/client/openai/OpenAiResponsesChatModel`(커스텀 `ChatModel`, `call`+`getOptions` 만 구현, **도구는 실행하지 않음** — 루프는 그대로 `ToolCallingAdvisor`) 을 `chatChatClient` 에 끼웠다. `ChatClient`·`ToolCallingManager` 상한·`.tools(툴킷 4종)`·`ToolContext`·`AdvisorChatClient` 는 무변경.
-- 무상태 세션: `store=false` + `include=[reasoning.encrypted_content]`, 응답 `output` 원문(reasoning 암호화 블롭·function_call)을 `AssistantMessage` 메타데이터(`openai.responses.output`)에 실어 다음 라운드 `input` 에 `status` 만 빼고 되돌려 보낸다. `ToolResponseMessage` → `function_call_output(call_id)`.
+**LLM 호출 경로(2026-09-19, Responses API).** GPT-5.4 이상은 Chat Completions 에서 도구 호출 시 `reasoning_effort=none` 만 허용해(`400: Function tools with reasoning_effort are not supported … use /v1/responses`) 도구 14종을 붙이는 채팅만 죽었다(judge/assist 는 도구가 없어 무관). Spring AI 2.0.1 에는 Responses 용 ChatModel 이 없어 `modules/advisor/client/openai/OpenAiResponsesChatModel`(커스텀 `ChatModel`, `call`+`getOptions` 만 구현, **도구는 실행하지 않음** — 루프는 그대로 `ToolCallingAdvisor`) 을 `chatChatClient` 에 끼웠다. `ChatClient`·`ToolCallingManager` 상한·`.tools(툴킷 4종)`·`ToolContext`·`AdvisorChatClient` 는 무변경. 같은 날 judge/assist 도 이 모델로 옮겨 SDK 를 걷어냈다(§12).
+- 무상태 세션: `store=false` + (도구가 있을 때만) `include=[reasoning.encrypted_content]`, 응답 `output` 원문(reasoning 암호화 블롭·function_call)을 `AssistantMessage` 메타데이터(`openai.responses.output`)에 실어 다음 라운드 `input` 에 `status` 만 빼고 되돌려 보낸다. `ToolResponseMessage` → `function_call_output(call_id)`.
 - HTTP 는 `openAiRestClient`(`RestClientConfig`, `RestClientConfigurer.restClient` 헬퍼) → **호출 1건 = `tb_api_log` 1행**(요청·응답 전문, traceId, 소요, 본문 1 MiB 상한, 60일 보존). 질문 1건에 1+도구 호출 수 행(≤13). 재시도(429·408·409·5xx·네트워크, Retry-After ≤30s, 지수 백오프, `advisor.model.max-retries`)는 `OpenAiResponsesClient` 가 직접 하므로 재시도도 각각 1행. `Authorization` 은 `OpenAiBearerAuthInterceptor` 가 로그 인터셉터 **뒤에서 헤더 사본에만** 넣어 `request_header` 에 키가 남지 않는다(인터셉터 순서 계약, `OpenAiBearerAuthInterceptorTest`). 로컬 `default` 프로필은 `ApiLogService` 가 없어 콘솔 전문 출력만.
-- 도구 스키마는 Spring AI 생성 `inputSchema` 에서 루트 `$schema` 만 제거, `strict=false`(optional 파라미터가 `required` 에 없어 strict 규칙과 안 맞음). 도구 결과가 `max-total-tool-calls` 이상 쌓이면 `tool_choice=none` 으로 답을 강제(상한 초과 뒤 무한 루프 방지). `status=incomplete(max_output_tokens)` 는 WARN + 있는 텍스트만, `failed` 는 예외 → Slack 실패 한 줄. 추론 토큰은 Spring AI 의 라운드 합산이 native usage 를 버리므로 메타데이터 누적값(`openai.responses.usage.cumulative`)으로 `tb_advisor_chat.reasoning_tokens` 에 넣는다(캐시 토큰은 `cacheReadInputTokens` 슬롯으로 합산).
-- 후속: judge/assist 도 같은 모델로 옮기면(`text.format` json_schema 매핑 추가) OpenAI SDK·`advisorChatModel` 빈을 걷어낼 수 있다. strict 스키마(모든 속성 required + nullable)·hvy-common `ApiLogInterceptor` 헤더 마스킹은 별도.
+- 도구 스키마는 Spring AI 생성 `inputSchema` 에서 루트 `$schema` 만 제거, `strict=false`(optional 파라미터가 `required` 에 없어 strict 규칙과 안 맞음). 도구 결과가 `max-total-tool-calls` 이상 쌓이면 `tool_choice=none` 으로 답을 강제(상한 초과 뒤 무한 루프 방지). `status=incomplete(max_output_tokens)` 는 WARN + 있는 텍스트만(finishReason `LENGTH`, 다른 사유는 `INCOMPLETE`), `refusal` 파트만 오면 거부 문구가 답으로(`REFUSAL`), `failed` 는 예외 → Slack 실패 한 줄. 추론 토큰은 Spring AI 의 라운드 합산이 native usage 를 버리므로 메타데이터 누적값(`openai.responses.usage.cumulative`)으로 `tb_advisor_chat.reasoning_tokens` 에 넣는다(캐시 토큰은 `cacheReadInputTokens` 슬롯으로 합산).
+- 후속: 도구 strict 스키마(모든 속성 required + nullable)·hvy-common `ApiLogInterceptor` 헤더 마스킹은 별도.
 
 ### 11.2 도구 14종 (`chat/tool`)
 
@@ -282,3 +283,13 @@ FROM tb_api_log WHERE request_uri LIKE '%/v1/responses%' ORDER BY created_at DES
 - **무응답 진단 순서**(Loki `{container="blogback"}`): ① `|= "Socket Mode hello"` 의 `connections` 가 1 인가(2 이상이면 위 "연결은 앱 단위") → ② 질문 뒤 `|= "Socket Mode Request" |= "events_api"` 가 오는가(SDK DEBUG 필요 — 밑줄 패키지라 `SPRING_APPLICATION_JSON={"logging.level.com.slack.api.socket_mode":"DEBUG"}`) → ③ `|= "Unsuccessful Bolt app execution"`(Bolt 미들웨어 거부) → ④ `|= "Slack 메시지 무시"`(라우터 필터, 대상 채널 안의 폐기는 INFO) → ⑤ `tb_advisor_chat`. ①~② 가 막히면 Slack 이 안 보내는 것이라 앱 코드·로그로는 원인이 보이지 않는다.
 - 프롬프트 수정 = `chat-system-v1.md` 교체 + `PromptResources.CHAT_VERSION` bump(`tb_advisor_chat.prompt_version` 으로 전후 분리). 도구 설명문 변경도 같은 규약.
 - 범위 밖·후속: hvy-common `thread_ts`/ts 반환(→ 판단 스레드 자동 후속), 임의 SQL 도구, 사용자별 장기 기억, 스트리밍, DM·다중 채널, 정형 도구 결과 직접 표 렌더링(`SlackWidth`), 👍/👎 리액션 수집.
+
+## 12. OpenAI 호출 경로 통합 — Responses API 전부, SDK 없음 (2026-09-19)
+
+judge/assist 도 채팅 봇과 같은 `OpenAiResponsesChatModel` 로 옮겼다. advisor 의 OpenAI 호출은 이제 **전부 `POST /v1/responses` + `openAiRestClient`** 라 `tb_api_log` 에 남고(`SELECT … FROM tb_api_log WHERE url LIKE '%/v1/responses%'`), `spring-ai-starter-model-openai`·`spring-ai-openai`·공식 SDK(`openai-java-core`)·그 전이(Jackson 2 databind·kotlin-reflect·Boot restclient/webclient 스타터·Spring AI 자동구성)는 의존성에서 빠졌다. build.gradle 은 `spring-ai-client-chat` 만 남는다(ChatClient·ToolCallingAdvisor·`@Tool`). `okhttp`/`kotlin-stdlib` 은 Slack SDK 전이로 남는다.
+
+- **구조화 출력**: `ResponsesChatOptions.textFormat` → 요청 `text.format = {type: json_schema, name: 응답 레코드 클래스명(AdviceResponse·LessonProposalResponse), strict: true, schema}`. 이름 규칙(`^[a-zA-Z0-9_-]{1,64}$`)·객체 스키마는 `ResponsesTextFormat` 생성 시 검증. 스키마 자체(`AdviceSchemaFactory`·`LessonSchemaFactory`, 모든 속성 required + additionalProperties=false + 후보 enum 주입)는 무변경.
+- **옵션 타입**: Spring AI `OpenAiChatOptions` 대신 자체 `ResponsesChatOptions`(코어 `DefaultToolCallingChatOptions` 상속 + reasoning.effort·tool_choice·parallel_tool_calls·text.format). `maxTokens` 가 `max_output_tokens`(yml 키 `*-max-completion-tokens` 는 env 호환을 위해 이름 유지). 도구가 없으면 `tools`·`tool_choice`·`parallel_tool_calls`·`include` 를 보내지 않는다(judge 의 큰 추론 블롭이 api_log 본문을 부풀리지 않게).
+- **ChatModel 3빈(judge/assist/chat) + HTTP 클라이언트 1빈** — `AdvisorAiConfig.JUDGE_MODEL/ASSIST_MODEL/CHAT_MODEL`. 이유: Spring AI 2.0.1 ChatClient 는 요청 옵션을 "**ChatModel 기본 옵션** + 요청 customizer" 로 만들고, `ChatClient.Builder.defaultOptions(...)` 는 그 customizer 일 뿐이라 요청의 `.options(...)` 가 **통째로 교체**한다. 이전 구조(ChatModel 1개 공유 + ChatClient defaultOptions 로 judge/assist 분리)에서는 `MarketJudgeClient` 가 responseFormat 을 `.options()` 로 넘길 때 assist 의 model·상한이 버려져 **교훈 제안(WEEKLY_REVIEW, assist 빈)도 judge 모델·judge 상한으로 나갔다**(증상: `tb_advisor_run.model` 이 judge). 기본 옵션을 역할별 모델에 두면 어떤 customizer 를 얹어도 base 가 산다. 회귀 방어: `ResponsesChatOptionsTest`(병합 계약)·`MarketJudgeClientTest`(가짜 HTTP 위 진짜 모델로 요청 캡처)·`AdvisorContextBootTest.WithApiKey`(컨텍스트에서 judge/assist 빈을 실제 호출해 model·max_output_tokens 대조).
+- **완료 신호**: `MarketJudgeClient` 는 JSON 파싱 전에 finishReason 을 본다 — `LENGTH`(max_output_tokens 절단) → "상한 확인" 예외, `INCOMPLETE`(content_filter 등, 사유는 응답 메타 `openai.responses.incompleteReason`) → 사유 포함 예외, `REFUSAL` → 거부 문구 포함 예외. 전부 잡 FAILED(부분 추천 금지). 채팅 경로는 같은 신호를 텍스트로 사용자에게 보인다.
+- **배포 후 확인**: 첫 ADVISE 뒤 `tb_api_log` 에 `/v1/responses` 행(judge 1건, 뉴스 on 이면 섀도 포함 2~3건), `tb_advisor_advice.model` = judge 모델. 첫 WEEKLY_REVIEW 뒤 `tb_advisor_run.model` 이 **assist 모델**로 찍히는지(REPRO 가 켜져 있으면 마지막 호출인 judge 로 덮이므로 `tb_advisor_prompt_input.options_json.model` 로 본다). `AdvisorOpenAiManualTest` 로 strict 중첩 스키마 수용 실측(§10).

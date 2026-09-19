@@ -28,7 +28,8 @@ import org.springframework.stereotype.Component;
  * 채팅 답변자 — 정적 시스템 프롬프트 + 스레드 히스토리 + 질문을 도구 14종과 함께 ChatClient 에 보내고 결과·사용량·도구 호출 목록을 {@link ChatResult} 로 돌려준다.
  * <p>
  * {@code MarketJudgeClient} 를 재사용하지 않는 이유: 그쪽은 strict JSON 스키마 단발 호출 계약이고 여기는 자유 텍스트 + 대화 + 도구 루프다.
- * ChatModel 도 다르다 — 채팅은 Responses API 모델({@code OpenAiResponsesChatModel}, 2026-09-19) 이고 judge/assist 는 Chat Completions 모델이다.
+ * ChatModel 은 셋 다 Responses API 모델({@code OpenAiResponsesChatModel}, 2026-09-19)이지만 역할별 인스턴스가 다르다 — 채팅 모델은 도구 상한·reasoning.effort 를
+ * 기본 옵션으로 갖고(AdvisorAiConfig.CHAT_MODEL), 이 클래스는 {@code .options()} 를 부르지 않으므로 그 기본 옵션이 그대로 요청에 실린다.
  * 사용자 메시지는 {@code .user(String)} 으로 넣는다 — 템플릿 렌더러가 {@code {}} 를 변수로 해석하므로 질문에 중괄호가 있어도 터지지 않게(AdvicePromptBuilder 와 같은 이유).
  */
 @Slf4j

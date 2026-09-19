@@ -327,16 +327,16 @@ public class AdvisorProperties {
   @Data
   public static class Model {
 
-    /** OpenAI SDK 재시도 횟수(429·5xx·타임아웃). 소진되면 그날 판단을 건너뛴다(부분 추천 금지) */
+    /** OpenAiResponsesClient 재시도 횟수(429·408·409·5xx·네트워크, Retry-After ≤30s). 소진되면 그날 판단을 건너뛴다(부분 추천 금지) */
     private int maxRetries = 3;
 
-    /** 호출 1건 타임아웃(초). 추론 모델은 수십 초가 걸릴 수 있다 */
+    /** 호출 1건 응답 타임아웃(초, openAiRestClient). 추론 모델은 수십 초가 걸릴 수 있다 */
     private int timeoutSeconds = 120;
 
     /** 판단용 상위 모델 ID (env ADVISOR_JUDGE_MODEL) */
     private String judge;
 
-    /** 판단 모델 출력 상한(추론 토큰 포함) */
+    /** 판단 모델 출력 상한 = Responses max_output_tokens(추론 토큰 포함). 잘리면 MarketJudgeClient 가 LENGTH 로 예외 */
     private int judgeMaxCompletionTokens = 8_000;
 
     /** 판단 모델 temperature. 추론 모델은 받지 않으므로 null 이면 설정하지 않는다 */
@@ -345,6 +345,7 @@ public class AdvisorProperties {
     /** 채점 요약·교훈 생성용 저가 모델 ID (env ADVISOR_ASSIST_MODEL) */
     private String assist;
 
+    /** 보조 모델 출력 상한 = Responses max_output_tokens(추론 토큰 포함) */
     private int assistMaxCompletionTokens = 2_000;
 
     private Double assistTemperature;

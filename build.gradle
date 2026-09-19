@@ -78,10 +78,12 @@ dependencies {
     // html parsing (hot deal scraping)
     implementation 'org.jsoup:jsoup:1.23.2'
 
-    // Spring AI 2.0.x — Spring Boot 4.0/4.1 대응 라인 (2.0.1 GA 2026-08-20, Maven Central). advisor 모듈의 OpenAI ChatClient
+    // Spring AI 2.0.x — Spring Boot 4.0/4.1 대응 라인 (2.0.1 GA 2026-08-20, Maven Central). advisor 모듈의 ChatClient·ToolCallingAdvisor·@Tool 만 쓴다.
+    // OpenAI 는 커스텀 Responses API 모델(modules/advisor/client/openai, openAiRestClient → tb_api_log)로 부르므로 spring-ai-openai·공식 SDK(openai-java-core)·
+    // 자동구성 스타터는 넣지 않는다(2026-09-19). 스타터가 끌어오던 Boot restclient/webclient 스타터도 함께 빠지지만 RestClient 는 spring-web 정적 빌더로만 조립한다.
     // 모델 ID·키는 yml(advisor.model.*, spring.ai.openai.api-key) 로만 주입한다
     implementation platform('org.springframework.ai:spring-ai-bom:2.0.1')
-    implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+    implementation 'org.springframework.ai:spring-ai-client-chat'
 
     // Slack Socket Mode 수신(advisor 채팅 봇, 2026-09-13) — bolt 코어(1.50.0)는 hvy-common 이 api 로 이미 제공하므로 어댑터만 더한다.
     // bolt-socket-mode 의 pom 은 javax.websocket-api·Tyrus·Java-WebSocket 을 전부 provided 로 두므로 WebSocket 구현은 여기서 하나만 고른다:

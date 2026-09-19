@@ -66,7 +66,8 @@ public class RestClientConfig extends RestClientConfigurer {
   }
 
   /**
-   * OpenAI Responses API(advisor 채팅 봇) 전용 RestClient. 호출 1건이 그대로 tb_api_log 1행이 된다(전송 재시도 off·본문 상한 1 MiB).
+   * OpenAI Responses API(advisor judge/assist/채팅 봇 전부) 전용 RestClient. 호출 1건이 그대로 tb_api_log 1행이 된다(전송 재시도 off·본문 상한 1 MiB).
+   * 공식 SDK 는 쓰지 않으므로 advisor 의 모든 OpenAI 호출이 이 클라이언트를 지난다(2026-09-19).
    * <p>
    * 인증 인터셉터는 <b>커스텀 인터셉터 목록</b>으로 넘긴다 — 헬퍼가 api_log 인터셉터를 먼저, 커스텀을 뒤에 붙이므로 Bearer 키는 api_log 인터셉터가
    * 저장하는 원본 헤더에 들어가지 않는다({@link OpenAiBearerAuthInterceptor} 참고). defaultHeader 로 넣으면 키가 request_header 에 남는다.

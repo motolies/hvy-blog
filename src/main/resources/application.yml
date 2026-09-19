@@ -46,11 +46,10 @@ spring:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
       timeout: 3600
-  # Spring AI 2.0.1 — advisor 모듈(AI 시장 판단)의 OpenAI 연결. 키는 env 로만, 기본값 없음. 모델 ID·재시도는 advisor.model.* 에서 지정.
-  # 자동구성(OpenAiChatAutoConfiguration)은 키가 비면 기동 자체를 막으므로 none 으로 끄고, AdvisorAiConfig 가 advisor.enabled 일 때만 직접 조립한다
+  # advisor 모듈(AI 시장 판단)의 OpenAI 키. 키는 env 로만, 기본값 없음. 모델 ID·재시도·타임아웃은 advisor.model.* 에서 지정.
+  # Spring AI 자동구성은 없다(OpenAI 스타터 미포함, 2026-09-19) — 이 키는 AdvisorProperties 가 Environment 로 직접 읽고, AdvisorAiConfig 가
+  # advisor.enabled 일 때만 Responses API 모델을 직접 조립한다. 키가 비어도 기동은 되고 잡 실행 시 거부된다
   ai:
-    model:
-      chat: none
     openai:
       api-key: ${OPENAI_API_KEY:}
 
@@ -302,18 +301,19 @@ advisor:
     nonews-weeks: 8               # 뉴스가 실린 첫 판단부터 뉴스 없는 LLM 호출(LLM_NONEWS) 병행 기간 — 뉴스 가치 = LIVE − NONEWS
   model:
     judge: ${ADVISOR_JUDGE_MODEL:gpt-5.6-sol}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
-    judge-max-completion-tokens: ${ADVISOR_JUDGE_MAX_TOKEN:20000}
+    judge-max-completion-tokens: ${ADVISOR_JUDGE_MAX_TOKEN:20000}   # Responses max_output_tokens(추론 토큰 포함). 잘리면 잡 FAILED("max_output_tokens 에서 잘렸습니다")
     # judge-temperature: 0.0                  # 추론 모델은 temperature 를 받지 않으므로 기본 미설정
     assist: ${ADVISOR_ASSIST_MODEL:gpt-5.6-terra}          # 채점 요약·교훈용 저가 모델 ID
-    assist-max-completion-tokens: ${ADVISOR_ASSIST_MAX_TOKEN:10000}
+    assist-max-completion-tokens: ${ADVISOR_ASSIST_MAX_TOKEN:10000}  # Responses max_output_tokens
+    # max-retries: 3 / timeout-seconds: 120   # OpenAiResponsesClient 재시도(429·408·409·5xx·네트워크) / openAiRestClient 응답 타임아웃
   cost:
     input-per-1m-usd: 0           # 0 이면 비용 미계산. 모델 단가로 채우면 run.cost_usd 에 기록
     output-per-1m-usd: 0
   retention-days: 180             # 프롬프트 입력 스냅샷 보존
   # Slack #hvy-advisor 채팅 봇 (chat-v1, 2026-09-13). Socket Mode 수신 — 공개 URL·서명 검증 없음, app-level 토큰 1개.
   # 토큰·채널·허용 사용자 중 하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨). bot 토큰은 slack.token(SLACK_BOT_TOKEN) 재사용
-  # LLM 호출은 OpenAI Responses API(/v1/responses, 2026-09-19 — GPT-5.4+ 는 Chat Completions 에서 도구+추론 불가) 를 openAiRestClient 로 부르며
-  # 호출 1건마다 tb_api_log 에 요청·응답 전문이 남는다(질문 1건 ≤ 1+도구 호출 수 행, 본문 1 MiB 상한, Authorization 미기록)
+  # LLM 호출은 judge/assist 와 같은 OpenAI Responses API(/v1/responses) 모델을 openAiRestClient 로 부르며(2026-09-19 — GPT-5.4+ 는 Chat Completions 에서
+  # 도구+추론 불가) 호출 1건마다 tb_api_log 에 요청·응답 전문이 남는다(질문 1건 ≤ 1+도구 호출 수 행, 본문 1 MiB 상한, Authorization 미기록)
   chat:
     enabled: ${ADVISOR_CHAT_ENABLED:false}
     app-token: ${SLACK_APP_TOKEN:}                     # xapp-… (Socket Mode, scope connections:write)

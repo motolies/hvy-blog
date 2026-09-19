@@ -3,6 +3,7 @@ package kr.hvy.blog.modules.advisor.application.chat;
 import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -50,8 +51,14 @@ public class AdvisorChatProperties {
   /** temperature. 추론 모델은 받지 않으므로 null 이면 설정하지 않는다 */
   private Double temperature;
 
-  /** 출력 상한(추론 토큰 포함) */
-  private int maxCompletionTokens = 3_000;
+  /**
+   * Responses API 의 reasoning.effort (none/minimal/low/medium/high/xhigh/max). 비면 보내지 않는다 = OpenAI 서버 기본값.
+   * 값은 검증 없이 그대로 전달한다 — 목록이 자주 늘어나고(xhigh·max), 틀리면 OpenAI 400 이 Slack 실패 한 줄에 그대로 보인다
+   */
+  private String reasoningEffort;
+
+  /** 출력 상한 = Responses max_output_tokens. 추론 토큰이 같이 소모되므로 넉넉히 둔다 */
+  private int maxCompletionTokens = 6_000;
 
   /** 도구별 호출 상한(ToolCallingManager.maxCallsPerTool) */
   private int maxCallsPerTool = 6;
@@ -94,6 +101,14 @@ public class AdvisorChatProperties {
    */
   public String botToken() {
     return StringUtils.defaultString(environment.getProperty(SLACK_BOT_TOKEN_PROPERTY));
+  }
+
+  /**
+   * 정규화한 reasoning effort(trim·소문자). 비어 있으면 null = 요청에 넣지 않는다.
+   */
+  public String reasoningEffortOrNull() {
+    String value = StringUtils.trimToNull(reasoningEffort);
+    return value == null ? null : value.toLowerCase(Locale.ROOT);
   }
 
   /**
@@ -148,8 +163,9 @@ public class AdvisorChatProperties {
       log.warn("advisor chat 설정 누락 {} — 기동은 계속하되 Socket Mode 연결을 열지 않습니다", missing);
       return;
     }
-    log.info("advisor chat 활성: channel={}, allowedUsers={}명, model={}, budget={}tok/일, tools≤{}회, history≤{}건/{}자",
+    log.info("advisor chat 활성: channel={}, allowedUsers={}명, model={}, reasoning={}, maxOutput={}, budget={}tok/일, tools≤{}회, history≤{}건/{}자",
         channelId, allowedUserIds.size(), StringUtils.defaultIfBlank(model, advisor.getModel().getAssist() + "(assist)"),
+        StringUtils.defaultIfBlank(reasoningEffortOrNull(), "(서버 기본)"), maxCompletionTokens,
         dailyTokenBudget, maxTotalToolCalls, threadHistoryLimit, maxHistoryChars);
   }
 }

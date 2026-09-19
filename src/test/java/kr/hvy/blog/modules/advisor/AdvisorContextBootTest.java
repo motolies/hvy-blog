@@ -10,12 +10,14 @@ import kr.hvy.blog.modules.advisor.application.service.AdviseJob;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorOrchestrator;
 import kr.hvy.blog.modules.advisor.application.service.MarketJudgeClient;
 import kr.hvy.blog.modules.advisor.application.service.WeeklyReviewJob;
+import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesChatModel;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.web.client.RestClient;
 
 /**
  * advisor.enabled=true 로 컨텍스트가 뜨는지 검증한다.
@@ -67,6 +69,8 @@ class AdvisorContextBootTest {
       assertAdvisorBeansWired(context);
       assertThat(context.getBean(SlackChatRouter.class)).isNotNull();
       assertThat(context.getBean(AdvisorChatClient.class)).as("도구 루프 답변자(chatChatClient 빈 + toolkit 4종)").isNotNull();
+      assertThat(context.getBean(OpenAiResponsesChatModel.class)).as("채팅용 Responses API ChatModel(2026-09-19)").isNotNull();
+      assertThat(context.getBean("openAiRestClient", RestClient.class)).as("api_log 적재 RestClient").isNotNull();
       SlackSocketModeRunner runner = context.getBean(SlackSocketModeRunner.class);
       assertThat(runner.isAutoStartup()).isFalse();
       assertThat(runner.isRunning()).isFalse();

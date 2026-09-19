@@ -2,7 +2,10 @@ package kr.hvy.blog.infra.config;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
+import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.client.openai.OpenAiBearerAuthInterceptor;
 import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
 import kr.hvy.blog.modules.hotdeal.client.BrowserProperties;
 import kr.hvy.blog.modules.jira.client.JiraProperties;
@@ -34,6 +37,16 @@ public class RestClientConfig extends RestClientConfigurer {
    */
   private static final int BROWSERLESS_MAX_LOG_BODY_BYTES = 1024 * 1024;
 
+  private static final String OPENAI_BASE_URL = "https://api.openai.com";
+  /** 연결 수립 타임아웃(초). 응답 타임아웃은 advisor.model.timeout-seconds(추론 모델은 수십 초) */
+  private static final int OPENAI_CONNECT_TIMEOUT_SECONDS = 10;
+  /**
+   * api_log 에 저장할 OpenAI 요청/응답 본문 상한. 도구 루프는 라운드마다 전체 입력(시스템 프롬프트·스레드 히스토리·도구 결과)을 재전송하므로 상한을 둔다
+   */
+  private static final int OPENAI_MAX_LOG_BODY_BYTES = 1024 * 1024;
+  private static final int OPENAI_MAX_TOTAL_CONNECTIONS = 100;
+  private static final int OPENAI_MAX_CONNECTIONS_PER_ROUTE = 20;
+
   private final ApiLogInterceptor apiLogInterceptor;
 
 
@@ -50,6 +63,20 @@ public class RestClientConfig extends RestClientConfigurer {
   @Bean("claudeRestClient")
   public RestClient claudeRestClient() {
     return restClient(10, 60, "https://api.anthropic.com");
+  }
+
+  /**
+   * OpenAI Responses API(advisor 채팅 봇) 전용 RestClient. 호출 1건이 그대로 tb_api_log 1행이 된다(전송 재시도 off·본문 상한 1 MiB).
+   * <p>
+   * 인증 인터셉터는 <b>커스텀 인터셉터 목록</b>으로 넘긴다 — 헬퍼가 api_log 인터셉터를 먼저, 커스텀을 뒤에 붙이므로 Bearer 키는 api_log 인터셉터가
+   * 저장하는 원본 헤더에 들어가지 않는다({@link OpenAiBearerAuthInterceptor} 참고). defaultHeader 로 넣으면 키가 request_header 에 남는다.
+   * 키는 호출 시점에 {@link AdvisorProperties#openAiApiKey()} 로 읽는다.
+   */
+  @Bean("openAiRestClient")
+  public RestClient openAiRestClient(AdvisorProperties advisorProperties) {
+    return restClient(OPENAI_MAX_TOTAL_CONNECTIONS, OPENAI_MAX_CONNECTIONS_PER_ROUTE, OPENAI_CONNECT_TIMEOUT_SECONDS,
+        advisorProperties.getModel().getTimeoutSeconds(), OPENAI_BASE_URL,
+        List.of(new OpenAiBearerAuthInterceptor(advisorProperties::openAiApiKey)), OPENAI_MAX_LOG_BODY_BYTES);
   }
 
   /**

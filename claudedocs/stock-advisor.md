@@ -90,7 +90,7 @@
 | `advisor.shadow.reproducibility-runs` | 3 | 주간 재현성 재실행 횟수(0 이면 끔) |
 | `advisor.chat.enabled` | `${ADVISOR_CHAT_ENABLED:false}` (prod 기본 true) | Slack 채팅 봇(§11). advisor.enabled 가 false 면 무관하게 미등록 |
 | `advisor.chat.app-token` / `channel-id` / `allowed-user-ids` | `${SLACK_APP_TOKEN:}` / `${ADVISOR_CHAT_CHANNEL_ID:}` / `${ADVISOR_CHAT_ALLOWED_USERS:}` | Socket Mode app-level 토큰(xapp-, connections:write) / #hvy-advisor 채널 ID(C…) / 답을 받을 사용자 ID(U…, 쉼표). **하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨)**. bot 토큰은 `slack.token` 재사용 |
-| `advisor.chat.model` / `max-completion-tokens` | `${ADVISOR_CHAT_MODEL:}` / 3000 | 채팅 모델(비면 assist 모델) / 출력 상한 |
+| `advisor.chat.model` / `reasoning-effort` / `max-completion-tokens` | `${ADVISOR_CHAT_MODEL:}` / `${ADVISOR_CHAT_REASONING_EFFORT:}` / 6000 | 채팅 모델(비면 assist 모델) / Responses `reasoning.effort`(none·minimal·low·medium·high·xhigh·max, **비면 미전송 = OpenAI 서버 기본**) / Responses `max_output_tokens`(추론 토큰이 같이 소모되므로 3000→6000, 2026-09-19) |
 | `advisor.chat.max-calls-per-tool` / `max-total-tool-calls` | 6 / 12 | 질문 1건의 도구 호출 상한(ToolCallingManager). 초과는 오류 응답으로 돌려 모델이 마무리 |
 | `advisor.chat.thread-history-limit` / `max-history-chars` | 30 / 12000 | 스레드 히스토리 메시지 수·문자 상한(루트 보존, 오래된 것부터 제거) |
 | `advisor.chat.tool-row-limit` / `tool-timeout-seconds` / `answer-timeout-seconds` | 50 / 5 / 180 | 도구 행 상한 / 도구 SQL statement_timeout / 질문 1건 소프트 마감(도구가 deadline 오류를 돌려주고 모델이 마무리) |
@@ -219,6 +219,12 @@ Socket Mode(bolt-socket-mode + Java-WebSocket, 공개 URL·서명 검증 없음)
 
 스레드 히스토리는 `conversations.replies` 로 읽어 봇의 일일 판단 메시지는 **Block Kit 을 평문으로 펼쳐** 맥락으로 넣는다(text 는 알림용 요약뿐). 루트 헤더의 기준일을 뽑아 `latestAdvice(baseDate)` 힌트로 준다. `tb_advisor_advice.slack_ts` 저장은 hvy-common 변경(응답 ts 반환)이 필요해 범위 밖.
 
+**LLM 호출 경로(2026-09-19, Responses API).** GPT-5.4 이상은 Chat Completions 에서 도구 호출 시 `reasoning_effort=none` 만 허용해(`400: Function tools with reasoning_effort are not supported … use /v1/responses`) 도구 14종을 붙이는 채팅만 죽었다(judge/assist 는 도구가 없어 무관). Spring AI 2.0.1 에는 Responses 용 ChatModel 이 없어 `modules/advisor/client/openai/OpenAiResponsesChatModel`(커스텀 `ChatModel`, `call`+`getOptions` 만 구현, **도구는 실행하지 않음** — 루프는 그대로 `ToolCallingAdvisor`) 을 `chatChatClient` 에 끼웠다. `ChatClient`·`ToolCallingManager` 상한·`.tools(툴킷 4종)`·`ToolContext`·`AdvisorChatClient` 는 무변경.
+- 무상태 세션: `store=false` + `include=[reasoning.encrypted_content]`, 응답 `output` 원문(reasoning 암호화 블롭·function_call)을 `AssistantMessage` 메타데이터(`openai.responses.output`)에 실어 다음 라운드 `input` 에 `status` 만 빼고 되돌려 보낸다. `ToolResponseMessage` → `function_call_output(call_id)`.
+- HTTP 는 `openAiRestClient`(`RestClientConfig`, `RestClientConfigurer.restClient` 헬퍼) → **호출 1건 = `tb_api_log` 1행**(요청·응답 전문, traceId, 소요, 본문 1 MiB 상한, 60일 보존). 질문 1건에 1+도구 호출 수 행(≤13). 재시도(429·408·409·5xx·네트워크, Retry-After ≤30s, 지수 백오프, `advisor.model.max-retries`)는 `OpenAiResponsesClient` 가 직접 하므로 재시도도 각각 1행. `Authorization` 은 `OpenAiBearerAuthInterceptor` 가 로그 인터셉터 **뒤에서 헤더 사본에만** 넣어 `request_header` 에 키가 남지 않는다(인터셉터 순서 계약, `OpenAiBearerAuthInterceptorTest`). 로컬 `default` 프로필은 `ApiLogService` 가 없어 콘솔 전문 출력만.
+- 도구 스키마는 Spring AI 생성 `inputSchema` 에서 루트 `$schema` 만 제거, `strict=false`(optional 파라미터가 `required` 에 없어 strict 규칙과 안 맞음). 도구 결과가 `max-total-tool-calls` 이상 쌓이면 `tool_choice=none` 으로 답을 강제(상한 초과 뒤 무한 루프 방지). `status=incomplete(max_output_tokens)` 는 WARN + 있는 텍스트만, `failed` 는 예외 → Slack 실패 한 줄. 추론 토큰은 Spring AI 의 라운드 합산이 native usage 를 버리므로 메타데이터 누적값(`openai.responses.usage.cumulative`)으로 `tb_advisor_chat.reasoning_tokens` 에 넣는다(캐시 토큰은 `cacheReadInputTokens` 슬롯으로 합산).
+- 후속: judge/assist 도 같은 모델로 옮기면(`text.format` json_schema 매핑 추가) OpenAI SDK·`advisorChatModel` 빈을 걷어낼 수 있다. strict 스키마(모든 속성 required + nullable)·hvy-common `ApiLogInterceptor` 헤더 마스킹은 별도.
+
 ### 11.2 도구 14종 (`chat/tool`)
 
 | toolkit | 도구 | 원천 |
@@ -246,7 +252,7 @@ Socket Mode(bolt-socket-mode + Java-WebSocket, 공개 URL·서명 검증 없음)
 ### 11.4 배포 절차 (순서: psql → env → 재생성 → Slack 앱 → 첫 질문)
 
 1. psql `db/advisor-schema.sql` 재적용(`tb_advisor_chat` 은 `CREATE TABLE IF NOT EXISTS`). 확인 `SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'tb_advisor_%';` → 14
-2. env(`docker-compose/blog/back/prod.env`): `SLACK_APP_TOKEN`, `ADVISOR_CHAT_CHANNEL_ID`, `ADVISOR_CHAT_ALLOWED_USERS`(+ 선택 `ADVISOR_CHAT_MODEL`, `ADVISOR_CHAT_ENABLED` 는 prod 기본 true). 컨테이너는 `recreate.sh`(compose `up -d --force-recreate`)로 재생성 — `restart` 는 env 미반영
+2. env(`docker-compose/blog/back/prod.env`): `SLACK_APP_TOKEN`, `ADVISOR_CHAT_CHANNEL_ID`, `ADVISOR_CHAT_ALLOWED_USERS`(+ 선택 `ADVISOR_CHAT_MODEL`, `ADVISOR_CHAT_REASONING_EFFORT`(비면 서버 기본), `ADVISOR_CHAT_ENABLED` 는 prod 기본 true). 컨테이너는 `recreate.sh`(compose `up -d --force-recreate`)로 재생성 — `restart` 는 env 미반영
 3. 기동 로그 `advisor chat 활성: channel=…` · `advisor chat Socket Mode 연결 시작` · **`advisor chat Socket Mode hello: connections=1`**. WARN `advisor chat 설정 누락 [SLACK_APP_TOKEN, …]` 이면 그 env 가 빈 것. Slack 사이드바 봇 초록 점
 4. 첫 질문 5개와 기대 도구(답글 꼬리 `tools:` 와 대조): "삼성전자 최근 흐름 어때?" → resolveStock→stockSnapshot(+priceSeries) · "20일 모멘텀 상위 10개" → metricTopN(ret_20d) · (판단 메시지 댓글) "오늘 판단 근거 다시 설명해줘" → latestAdvice · "코스피 지금 강세장이야?" → marketTrend · "SOX 랑 코스닥 베타 얼마야?" → globalLink
 5. **반증 3개(필수)**: "삼성전자 올해 영업이익 얼마야?" → "해당 데이터가 없습니다"(숫자가 나오면 프롬프트 실패, 운영 불가) · "내일 코스피 오를까?" → 조건부 시나리오(목표가·확률 단정이면 실패) · 비허용 계정 질문 → 무응답
@@ -261,8 +267,12 @@ SELECT COUNT(*) n, SUM(prompt_tokens) in_tok, SUM(completion_tokens) out_tok, SU
 FROM tb_advisor_chat WHERE created_at >= (date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul');
 -- 도구 분포
 SELECT t, COUNT(*) FROM tb_advisor_chat, jsonb_array_elements_text(tool_calls_json) t GROUP BY 1 ORDER BY 2 DESC;
+-- LLM 호출 전문 (Responses API, 질문 1건 = 1+도구 호출 수 행). trace_id 로 tb_advisor_chat 와 같은 요청을 잇는다. key_leaked 는 항상 false 여야 한다
+SELECT created_at, response_status, process_time, length(request_body) req, length(response_body) res, trace_id,
+       position('Authorization' in request_header) > 0 AS key_leaked
+FROM tb_api_log WHERE request_uri LIKE '%/v1/responses%' ORDER BY created_at DESC LIMIT 20;
 ```
-관리자 `GET /api/advisor/admin/chats?limit=50` 도 같은 내용.
+관리자 `GET /api/advisor/admin/chats?limit=50` 도 같은 내용. 모델에게 무엇을 보냈고 도구가 무엇을 돌려줬는지는 `/admin` API 로그 화면에서 `/v1/responses` 행의 `request_body`(instructions·히스토리·function_call_output)·`response_body`(function_call 인자·답)로 본다.
 
 ### 11.5 관찰·조정
 

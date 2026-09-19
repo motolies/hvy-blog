@@ -312,6 +312,8 @@ advisor:
   retention-days: 180             # 프롬프트 입력 스냅샷 보존
   # Slack #hvy-advisor 채팅 봇 (chat-v1, 2026-09-13). Socket Mode 수신 — 공개 URL·서명 검증 없음, app-level 토큰 1개.
   # 토큰·채널·허용 사용자 중 하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨). bot 토큰은 slack.token(SLACK_BOT_TOKEN) 재사용
+  # LLM 호출은 OpenAI Responses API(/v1/responses, 2026-09-19 — GPT-5.4+ 는 Chat Completions 에서 도구+추론 불가) 를 openAiRestClient 로 부르며
+  # 호출 1건마다 tb_api_log 에 요청·응답 전문이 남는다(질문 1건 ≤ 1+도구 호출 수 행, 본문 1 MiB 상한, Authorization 미기록)
   chat:
     enabled: ${ADVISOR_CHAT_ENABLED:false}
     app-token: ${SLACK_APP_TOKEN:}                     # xapp-… (Socket Mode, scope connections:write)
@@ -319,7 +321,8 @@ advisor:
     allowed-user-ids: ${ADVISOR_CHAT_ALLOWED_USERS:U06BBRPTRB8}   # U…,U… 쉼표 구분 — 목록 밖 메시지는 조용히 무시
     model: ${ADVISOR_CHAT_MODEL:}                      # 비면 advisor.model.assist
     # temperature:                                     # 추론 모델은 받지 않으므로 기본 미설정
-    max-completion-tokens: 3000
+    reasoning-effort: ${ADVISOR_CHAT_REASONING_EFFORT:}   # Responses reasoning.effort (none/minimal/low/medium/high/xhigh/max). 비면 미전송 = 서버 기본
+    max-completion-tokens: 6000                        # Responses max_output_tokens. 추론 토큰이 같이 소모되므로 3000 → 6000
     max-calls-per-tool: 6                              # ToolCallingManager 도구별 호출 상한
     max-total-tool-calls: 12                           # 질문 1건 도구 호출 총합 상한
     thread-history-limit: 30                           # conversations.replies limit

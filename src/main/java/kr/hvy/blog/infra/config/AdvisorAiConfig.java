@@ -10,6 +10,8 @@ import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.chat.AdvisorChatClient;
 import kr.hvy.blog.modules.advisor.application.chat.AdvisorChatProperties;
 import kr.hvy.blog.modules.advisor.application.service.MarketJudgeClient;
+import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesChatModel;
+import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesClient;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.ToolCallingAdvisor;
@@ -23,9 +25,14 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.client.RestClient;
 
 /**
- * advisor 모듈의 OpenAI ChatModel 1개 + ChatClient 3종(judge 판단용 / assist 보조용 / chat Slack 채팅 봇용) + 그 위의 MarketJudgeClient 2종.
+ * advisor 모듈의 OpenAI ChatModel 2개(judge/assist 가 공유하는 Chat Completions 모델, chat 전용 Responses 모델) + ChatClient 3종(judge 판단용 /
+ * assist 보조용 / chat Slack 채팅 봇용) + 그 위의 MarketJudgeClient 2종.
+ * <p>
+ * 채팅 봇만 Responses API 다 — GPT-5.4 이상은 Chat Completions 에서 도구 호출 시 reasoning_effort=none 만 허용해 도구 14종을 붙이는 채팅이 400 으로
+ * 죽었다(2026-09-19). judge/assist 는 도구가 없어 그대로 두고, Responses 모델은 openAiRestClient(tb_api_log 적재) 위에서 돈다.
  * <p>
  * Spring AI 2.0 의 OpenAI 자동구성(OpenAiChatAutoConfiguration)은 키가 비어 있으면 기동 자체를 막으므로 yml 에서
  * {@code spring.ai.model.chat=none} 으로 끄고, {@code advisor.enabled=true} 일 때만 여기서 직접 조립한다(로컬·테스트는 키 없이 기동).
@@ -104,14 +111,30 @@ public class AdvisorAiConfig {
   }
 
   /**
+   * Slack 채팅 봇용 Responses API ChatModel. HTTP 는 openAiRestClient(api_log 적재·전송 재시도 off)이고 재시도는 클라이언트가 advisor.model.max-retries 만큼 직접 한다.
+   * 기본 옵션은 judge/assist 와 같은 {@link OpenAiChatOptions} 라 아래 chatChatClient 의 defaultOptions 병합·.tools()·.toolContext() 배선이 그대로 동작한다.
+   * 도구 결과가 max-total-tool-calls 이상 쌓이면 tool_choice=none 으로 답을 강제한다(상한 초과 뒤 무한 루프 방지).
+   */
+  @Bean
+  public OpenAiResponsesChatModel openAiResponsesChatModel(@Qualifier("openAiRestClient") RestClient openAiRestClient, AdvisorProperties properties,
+      AdvisorChatProperties chat) {
+    String model = StringUtils.defaultIfBlank(chat.getModel(), properties.getModel().getAssist());
+    OpenAiResponsesClient client = new OpenAiResponsesClient(openAiRestClient, properties.getModel().getMaxRetries());
+    return new OpenAiResponsesChatModel(client,
+        chatOptions(model, chat.getMaxCompletionTokens(), chat.getTemperature(), chat.reasoningEffortOrNull()).build(),
+        Math.max(1, chat.getMaxTotalToolCalls()));
+  }
+
+  /**
    * Slack 채팅 봇용 ChatClient (chat-v1, 2026-09-13) — 자유 텍스트 + 스레드 히스토리 + 도구 루프. 모델은 advisor.chat.model, 비면 assist 모델.
+   * 2026-09-19 부터 Responses API 모델 위에서 돈다(위 openAiResponsesChatModel).
    * <p>
    * Spring AI 2.0 에는 반복 횟수 옵션이 없고 ToolCallingManager 의 도구별·총합 호출 상한(기본 40/150 은 Slack 질문 하나에 과함)으로 건다.
    * 상한 초과는 RETURN_ERROR_RESPONSE — THROW 면 예외가 되어 사용자가 아무 답도 못 받지만, 오류 ToolResponse 로 돌려주면 모델이 "지금까지 얻은 값으로
    * 답한다" 로 마무리한다. DefaultChatClient 가 ToolCallingAdvisor 를 자동 등록하므로 커스텀 매니저는 5-인자 builder 오버로드로 넘긴다(중복 advisor 금지).
    */
   @Bean(AdvisorChatClient.CHAT_BEAN)
-  public ChatClient chatChatClient(OpenAiChatModel advisorChatModel, AdvisorProperties properties, AdvisorChatProperties chat,
+  public ChatClient chatChatClient(OpenAiResponsesChatModel openAiResponsesChatModel, AdvisorProperties properties, AdvisorChatProperties chat,
       ObjectProvider<ObservationRegistry> observationRegistry) {
     ToolCallingManager manager = ToolCallingManager.builder()
         .maxCallsPerTool(Math.max(1, chat.getMaxCallsPerTool()))
@@ -120,9 +143,9 @@ public class AdvisorAiConfig {
         .build();
     String model = StringUtils.defaultIfBlank(chat.getModel(), properties.getModel().getAssist());
     ObservationRegistry observations = observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP);
-    return ChatClient.builder(advisorChatModel, observations, null, null,
+    return ChatClient.builder(openAiResponsesChatModel, observations, null, null,
             ToolCallingAdvisor.builder().toolCallingManager(manager).conversationHistoryEnabled(true))
-        .defaultOptions(chatOptions(model, chat.getMaxCompletionTokens(), chat.getTemperature()))
+        .defaultOptions(chatOptions(model, chat.getMaxCompletionTokens(), chat.getTemperature(), chat.reasoningEffortOrNull()))
         .build();
   }
 
@@ -148,11 +171,22 @@ public class AdvisorAiConfig {
    * 모델별 기본 옵션 빌더. temperature 는 null 이 아닐 때만 넣는다(추론 모델은 temperature 를 거부한다).
    */
   static OpenAiChatOptions.Builder chatOptions(String model, int maxCompletionTokens, Double temperature) {
+    return chatOptions(model, maxCompletionTokens, temperature, null);
+  }
+
+  /**
+   * reasoningEffort 까지 받는 오버로드(채팅 봇용). null·공백이면 넣지 않는다 — Responses 모델은 미전송 = OpenAI 서버 기본값.
+   * ChatClient 의 defaultOptions 병합(combineWith)은 non-null 값만 덮으므로 여기서 안 넣은 값은 모델 기본 옵션이 산다.
+   */
+  static OpenAiChatOptions.Builder chatOptions(String model, int maxCompletionTokens, Double temperature, String reasoningEffort) {
     OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
         .model(model)
         .maxCompletionTokens(maxCompletionTokens);
     if (temperature != null) {
       builder.temperature(temperature);
+    }
+    if (StringUtils.isNotBlank(reasoningEffort)) {
+      builder.reasoningEffort(reasoningEffort);
     }
     return builder;
   }

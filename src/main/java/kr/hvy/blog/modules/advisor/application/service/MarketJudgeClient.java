@@ -4,6 +4,7 @@ import com.openai.models.completions.CompletionUsage;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.client.llm.AdviceResponse;
+import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesUsage;
 import kr.hvy.blog.modules.advisor.domain.model.PromptPayload;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -92,22 +93,34 @@ public class MarketJudgeClient {
   }
 
   /**
-   * OpenAI native usage 의 추론 토큰 (없으면 0).
+   * OpenAI native usage 의 추론 토큰 (없으면 0). Chat Completions(SDK CompletionUsage)와 Responses(ResponsesUsage) 둘 다 읽는다.
    */
   public static int reasoningTokens(Usage usage) {
-    if (usage != null && usage.getNativeUsage() instanceof CompletionUsage native_) {
+    if (usage == null) {
+      return 0;
+    }
+    if (usage.getNativeUsage() instanceof CompletionUsage native_) {
       return native_.completionTokensDetails().flatMap(CompletionUsage.CompletionTokensDetails::reasoningTokens).map(Long::intValue).orElse(0);
+    }
+    if (usage.getNativeUsage() instanceof ResponsesUsage responses) {
+      return responses.reasoningTokens();
     }
     return 0;
   }
 
   /**
-   * OpenAI native usage 의 캐시 적중 입력 토큰 (없으면 0).
+   * OpenAI native usage 의 캐시 적중 입력 토큰 (없으면 0). native 가 없으면 Spring AI 가 라운드 합산해 주는 cacheReadInputTokens 로 대신한다.
    */
   public static int cachedTokens(Usage usage) {
-    if (usage != null && usage.getNativeUsage() instanceof CompletionUsage native_) {
+    if (usage == null) {
+      return 0;
+    }
+    if (usage.getNativeUsage() instanceof CompletionUsage native_) {
       return native_.promptTokensDetails().flatMap(CompletionUsage.PromptTokensDetails::cachedTokens).map(Long::intValue).orElse(0);
     }
-    return 0;
+    if (usage.getNativeUsage() instanceof ResponsesUsage responses) {
+      return responses.cachedTokens();
+    }
+    return usage.getCacheReadInputTokens() == null ? 0 : usage.getCacheReadInputTokens().intValue();
   }
 }

@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.chat.tool.AdviceToolkit;
 import kr.hvy.blog.modules.advisor.application.chat.tool.CalendarToolkit;
@@ -12,6 +13,8 @@ import kr.hvy.blog.modules.advisor.application.chat.tool.MarketToolkit;
 import kr.hvy.blog.modules.advisor.application.chat.tool.StockToolkit;
 import kr.hvy.blog.modules.advisor.application.service.MarketJudgeClient;
 import kr.hvy.blog.modules.advisor.application.service.PromptResources;
+import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesChatModel;
+import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesUsage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
@@ -24,7 +27,8 @@ import org.springframework.stereotype.Component;
 /**
  * 채팅 답변자 — 정적 시스템 프롬프트 + 스레드 히스토리 + 질문을 도구 14종과 함께 ChatClient 에 보내고 결과·사용량·도구 호출 목록을 {@link ChatResult} 로 돌려준다.
  * <p>
- * {@code MarketJudgeClient} 를 재사용하지 않는 이유: 그쪽은 strict JSON 스키마 단발 호출 계약이고 여기는 자유 텍스트 + 대화 + 도구 루프다. ChatModel 은 공유한다.
+ * {@code MarketJudgeClient} 를 재사용하지 않는 이유: 그쪽은 strict JSON 스키마 단발 호출 계약이고 여기는 자유 텍스트 + 대화 + 도구 루프다.
+ * ChatModel 도 다르다 — 채팅은 Responses API 모델({@code OpenAiResponsesChatModel}, 2026-09-19) 이고 judge/assist 는 Chat Completions 모델이다.
  * 사용자 메시지는 {@code .user(String)} 으로 넣는다 — 템플릿 렌더러가 {@code {}} 를 변수로 해석하므로 질문에 중괄호가 있어도 터지지 않게(AdvicePromptBuilder 와 같은 이유).
  */
 @Slf4j
@@ -85,9 +89,13 @@ public class AdvisorChatClient implements ChatAnswerer {
     int prompt = usage == null || usage.getPromptTokens() == null ? 0 : usage.getPromptTokens();
     int completion = usage == null || usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens();
     String model = metadata == null || metadata.getModel() == null || metadata.getModel().isBlank() ? resolvedModel() : metadata.getModel();
+    // 도구 루프가 여러 라운드면 Spring AI 의 usage 합산이 native usage 를 버리므로, Responses 모델이 메타데이터로 나른 이 턴 누적값을 우선 쓴다
+    Optional<ResponsesUsage> responsesUsage = OpenAiResponsesChatModel.cumulativeUsage(response);
+    int reasoning = responsesUsage.map(ResponsesUsage::reasoningTokens).orElseGet(() -> MarketJudgeClient.reasoningTokens(usage));
+    int cached = responsesUsage.map(ResponsesUsage::cachedTokens).orElseGet(() -> MarketJudgeClient.cachedTokens(usage));
     List<String> calls = scope.calls();
-    log.info("advisor chat LLM: model={}, history={}, tools={}, in={}, out={}, {}ms", model, history.messages().size(), calls, prompt, completion,
-        System.currentTimeMillis() - started);
+    log.info("advisor chat LLM: model={}, history={}, tools={}, in={}, out={}, reasoning={}, cached={}, {}ms", model, history.messages().size(), calls,
+        prompt, completion, reasoning, cached, System.currentTimeMillis() - started);
     return ChatResult.builder()
         .answer(text)
         .model(model)
@@ -96,8 +104,8 @@ public class AdvisorChatClient implements ChatAnswerer {
         .toolCalls(calls)
         .promptTokens(prompt)
         .completionTokens(completion)
-        .reasoningTokens(MarketJudgeClient.reasoningTokens(usage))
-        .cachedTokens(MarketJudgeClient.cachedTokens(usage))
+        .reasoningTokens(reasoning)
+        .cachedTokens(cached)
         .costUsd(cost(prompt, completion))
         .dataAsOf(scope.earliestAsOf().orElse(null))
         .build();

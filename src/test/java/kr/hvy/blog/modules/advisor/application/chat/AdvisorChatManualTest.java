@@ -6,12 +6,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.openai.client.OpenAIClientImpl;
-import com.openai.core.ClientOptions;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.time.DayOfWeek;
-import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
@@ -27,6 +24,9 @@ import kr.hvy.blog.modules.advisor.application.service.MarketFeatureService;
 import kr.hvy.blog.modules.advisor.application.service.MarketTrendService;
 import kr.hvy.blog.modules.advisor.application.service.PromptResources;
 import kr.hvy.blog.modules.advisor.application.service.TradingCalendar;
+import kr.hvy.blog.modules.advisor.client.openai.OpenAiBearerAuthInterceptor;
+import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesChatModel;
+import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesClient;
 import kr.hvy.blog.modules.advisor.repository.jdbc.AdviceWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.IntradayCheckWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter;
@@ -45,9 +45,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.ToolCallingAdvisor;
 import org.springframework.ai.model.tool.ToolCallLimitBehavior;
 import org.springframework.ai.model.tool.ToolCallingManager;
-import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.openai.http.okhttp.SpringAiOpenAiHttpClient;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -55,14 +53,16 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.mock.env.MockEnvironment;
+import org.springframework.web.client.RestClient;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * 실계정 수동 실측 — 실제 OpenAI 모델이 도구 14종을 골라 부르고(ToolContext 주입·호출 상한·오류 JSON 포함) 한국어 답을 내는지 본다.
- * 데이터는 PG 컨테이너의 합성 세트(종목0~종목39, T00~T39)라 답의 내용보다 <b>도구 선택·기준일 명시·날조 거부</b>를 눈으로 확인한다.
+ * 실계정 수동 실측 — 실제 OpenAI 모델이 Responses API(/v1/responses, 2026-09-19)로 도구 14종을 골라 부르고(ToolContext 주입·호출 상한·오류 JSON 포함)
+ * 한국어 답을 내는지 본다. 데이터는 PG 컨테이너의 합성 세트(종목0~종목39, T00~T39)라 답의 내용보다 <b>도구 선택·기준일 명시·날조 거부</b>를 눈으로 확인한다.
+ * HTTP 는 운영과 달리 api_log 인터셉터 없는 맨 RestClient(인증 인터셉터만)라 DB 없이 돈다.
  * <pre>OPENAI_API_KEY=... ADVISOR_CHAT_MODEL=... DOCKER_HOST=... ./gradlew test --tests "kr.hvy.blog.modules.advisor.application.chat.AdvisorChatManualTest"</pre>
  */
 @Testcontainers
@@ -117,12 +117,11 @@ class AdvisorChatManualTest {
         new IntradayCheckWriter(jdbc), new CandidateScreeningService(named, weightSets, properties), weightSets, new AdvisorKpiService(named, properties), properties);
     CalendarToolkit calendar = new CalendarToolkit(support, reader, features, adviceWriter, tradingCalendar);
 
-    ClientOptions options = ClientOptions.builder()
-        .httpClient(SpringAiOpenAiHttpClient.builder().timeout(Duration.ofSeconds(120)).build())
-        .apiKey(apiKey).timeout(Duration.ofSeconds(120)).maxRetries(1).build();
-    OpenAIClientImpl client = new OpenAIClientImpl(options);
-    OpenAiChatModel chatModel = OpenAiChatModel.builder().openAiClient(client).openAiClientAsync(client.async())
-        .options(OpenAiChatOptions.builder().model(model).maxCompletionTokens(chat.getMaxCompletionTokens()).build()).build();
+    // 운영 AdvisorAiConfig.openAiResponsesChatModel 과 같은 조립 — RestClient 만 api_log 인터셉터 없이 인증 인터셉터만 단다
+    RestClient restClient = RestClient.builder().baseUrl("https://api.openai.com")
+        .requestInterceptor(new OpenAiBearerAuthInterceptor(() -> apiKey)).build();
+    OpenAiChatOptions defaults = OpenAiChatOptions.builder().model(model).maxCompletionTokens(chat.getMaxCompletionTokens()).build();
+    OpenAiResponsesChatModel chatModel = new OpenAiResponsesChatModel(new OpenAiResponsesClient(restClient, 1), defaults, chat.getMaxTotalToolCalls());
     ToolCallingManager manager = ToolCallingManager.builder().maxCallsPerTool(chat.getMaxCallsPerTool()).maxTotalToolCalls(chat.getMaxTotalToolCalls())
         .onLimitExceeded(ToolCallLimitBehavior.RETURN_ERROR_RESPONSE).build();
     ChatClient chatClient = ChatClient.builder(chatModel, io.micrometer.observation.ObservationRegistry.NOOP, null, null,

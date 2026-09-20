@@ -7,9 +7,11 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.dto.AdviceDetailResponse;
+import kr.hvy.blog.modules.advisor.application.dto.AdvisorGateResponse;
 import kr.hvy.blog.modules.advisor.application.dto.AdvisorRunResponse;
 import kr.hvy.blog.modules.advisor.application.dto.ScoreSummaryResponse;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorAlreadyRunningException;
+import kr.hvy.blog.modules.advisor.application.service.AdvisorGateService;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorKpiService;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorOrchestrator;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorRequestException;
@@ -17,6 +19,7 @@ import kr.hvy.blog.modules.advisor.application.service.AdvisorRunService;
 import kr.hvy.blog.modules.advisor.application.service.SignalWeightMath;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
+import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorTriggerType;
 import kr.hvy.blog.modules.advisor.domain.code.LessonStatus;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
@@ -49,6 +52,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * AI 시장 판단 관리자 Controller (/api/advisor/admin). SecurityConfig 의 {@code /api/{module}/admin/**} 규칙으로 ROLE_ADMIN 이 강제된다.
@@ -68,6 +72,7 @@ public class AdvisorAdminController {
 
   private final AdvisorOrchestrator orchestrator;
   private final AdvisorRunService runService;
+  private final AdvisorGateService gate;
   private final AdviceWriter adviceWriter;
   private final ScoreWriter scoreWriter;
   private final IntradayCheckWriter intradayChecks;
@@ -94,9 +99,26 @@ public class AdvisorAdminController {
     return ResponseEntity.status(result.async() ? HttpStatus.ACCEPTED : HttpStatus.OK).body(AdvisorRunResponse.from(result.run()));
   }
 
+  /**
+   * 최근 run 목록. 조건은 전부 선택이며 기간은 startedAt 기준 KST 날짜 {@code [from, to]} 양끝 포함, 최신순 (stock 과 동형).
+   */
   @GetMapping("/runs")
-  public List<AdvisorRunResponse> runs(@RequestParam(required = false) AdvisorJobType jobType, @RequestParam(defaultValue = "50") int limit) {
-    return runService.findRecent(jobType, clamp(limit)).stream().map(AdvisorRunResponse::from).toList();
+  public List<AdvisorRunResponse> runs(@RequestParam(required = false) AdvisorJobType jobType,
+      @RequestParam(required = false) AdvisorStatus status,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(defaultValue = "50") int limit) {
+    return runService.search(jobType, status, from, to, clamp(limit)).stream().map(AdvisorRunResponse::from).toList();
+  }
+
+  /**
+   * 오늘(또는 baseDate) ADVISE 가 돌 수 있는지와 그 사유 — 스케줄러·AdviseJob 이 쓰는 판정과 같은 {@link AdvisorGateService#decide(LocalDate)}.
+   * 관리자 화면이 "왜 판단이 안 나왔나(휴장일·DAILY 미완·마감)" 를 보이고, 수동 ADVISE 실행 전 SKIPPED 예고에 쓴다. 부작용 없음.
+   */
+  @GetMapping("/gate")
+  public AdvisorGateResponse gate(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate baseDate) {
+    LocalDate date = baseDate == null ? MarketClock.today() : baseDate;
+    return AdvisorGateResponse.from(date, gate.decide(date));
   }
 
   @GetMapping("/runs/{runId}")
@@ -261,6 +283,17 @@ public class AdvisorAdminController {
   @ExceptionHandler(NoSuchElementException.class)
   public ResponseEntity<ApiResponse<Void>> handleNotFound(NoSuchElementException ex) {
     return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.<Void>builder().status(ApiResponseStatus.FAIL).message(ex.getMessage()).build());
+  }
+
+  /**
+   * 쿼리 파라미터 형식 오류(enum 밖의 status·ISO 가 아닌 날짜 등) → 400 (stock 과 동형).
+   * 전역 핸들러로 가면 ProblemDetail 이 {@code ApiResponse SUCCESS} 로 감싸져 프론트가 message 를 못 읽는다.
+   */
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+    String message = String.format("파라미터 형식 오류: %s=%s", ex.getName(), ex.getValue());
+    log.info("advisor 요청 거부: {}", message);
+    return ResponseEntity.badRequest().body(ApiResponse.<Void>builder().status(ApiResponseStatus.FAIL).message(message).build());
   }
 
   private int clamp(int limit) {

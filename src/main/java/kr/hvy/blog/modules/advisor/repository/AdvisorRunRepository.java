@@ -7,17 +7,16 @@ import java.util.Optional;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
 import kr.hvy.blog.modules.advisor.domain.entity.AdvisorRun;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface AdvisorRunRepository extends JpaRepository<AdvisorRun, Long> {
-
-  List<AdvisorRun> findAllByOrderByStartedAtDesc(Pageable pageable);
-
-  List<AdvisorRun> findAllByJobTypeOrderByStartedAtDesc(AdvisorJobType jobType, Pageable pageable);
+/**
+ * advisor run 저장소. 관리자 목록 필터는 StockCollectRunRepository 와 같은 이유로 {@link JpaSpecificationExecutor} 를 쓴다(2026-09-20).
+ */
+public interface AdvisorRunRepository extends JpaRepository<AdvisorRun, Long>, JpaSpecificationExecutor<AdvisorRun> {
 
   Optional<AdvisorRun> findFirstByJobTypeAndStatus(AdvisorJobType jobType, AdvisorStatus status);
 

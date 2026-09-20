@@ -9,14 +9,18 @@ import kr.hvy.blog.modules.stock.domain.code.CollectStatus;
 import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface StockCollectRunRepository extends JpaRepository<StockCollectRun, Long> {
+/**
+ * 수집 run 저장소. 관리자 목록 필터(jobType·status·기간)는 {@link JpaSpecificationExecutor} 로 조합한다 —
+ * {@code @Convert} enum 컬럼에 JPQL {@code :p IS NULL OR …} 을 걸면 PG 가 바인딩 타입을 거부하는데 H2 는 통과시켜 테스트가 못 잡는다(2026-09-20).
+ */
+public interface StockCollectRunRepository extends JpaRepository<StockCollectRun, Long>, JpaSpecificationExecutor<StockCollectRun> {
 
-  List<StockCollectRun> findAllByOrderByStartedAtDesc(Pageable pageable);
-
+  /** 잡별 최근 run (advisor ScoreJob 이 최근 WEEKLY 완료 여부를 보는 데 쓴다) */
   List<StockCollectRun> findAllByJobTypeOrderByStartedAtDesc(CollectJobType jobType, Pageable pageable);
 
   Optional<StockCollectRun> findFirstByJobTypeAndStatus(CollectJobType jobType, CollectStatus status);

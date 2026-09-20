@@ -1,7 +1,9 @@
 package kr.hvy.blog.modules.stock.application;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import kr.hvy.blog.modules.stock.application.dto.BackfillRequest;
 import kr.hvy.blog.modules.stock.application.dto.CollectCheckpointResponse;
 import kr.hvy.blog.modules.stock.application.dto.CollectRunResponse;
@@ -14,11 +16,13 @@ import kr.hvy.blog.modules.stock.client.KisTokenManager;
 import kr.hvy.blog.modules.stock.client.KisTokenStatus;
 import kr.hvy.blog.modules.stock.domain.code.CheckpointStatus;
 import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
+import kr.hvy.blog.modules.stock.domain.code.CollectStatus;
 import kr.hvy.blog.modules.stock.domain.code.TriggerType;
 import kr.hvy.common.aop.advice.dto.ApiResponse;
 import kr.hvy.common.core.code.ApiResponseStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -29,13 +33,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * 주식 수집 관리자 Controller (/api/stock/admin/collect).
  * <p>
  * SecurityConfig 의 {@code /api/{module}/admin/**} 규칙으로 ROLE_ADMIN 인가가 강제된다.
  * 수집 잡은 외부 API 호출과 대량 쓰기를 유발하므로 인증 없이 열지 않는다.
- * 중복 실행(409)·요청 오류(400)는 조작 실수라 컨트롤러 안에서 처리해 전역 핸들러의 Slack 알림을 피한다.
+ * 중복 실행(409)·요청 오류(400)·없는 run(404)은 조작 실수라 컨트롤러 안에서 처리해 전역 핸들러의 Slack 알림을 피한다.
  */
 @Slf4j
 @RestController
@@ -75,11 +80,16 @@ public class StockCollectAdminController {
 
   // ========== 실행 이력 ==========
 
-  /** 최근 run 목록 (jobType 미지정 시 전체) */
+  /**
+   * 최근 run 목록. 조건은 전부 선택(미지정 시 전체)이며 기간은 startedAt 기준 KST 날짜 {@code [from, to]} 양끝 포함, 최신순.
+   */
   @GetMapping("/runs")
   public List<CollectRunResponse> runs(@RequestParam(required = false) CollectJobType jobType,
+      @RequestParam(required = false) CollectStatus status,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
       @RequestParam(defaultValue = "50") int limit) {
-    return collectRunService.findRecent(jobType, clamp(limit)).stream()
+    return collectRunService.search(jobType, status, from, to, clamp(limit)).stream()
         .map(CollectRunResponse::from)
         .toList();
   }
@@ -151,6 +161,33 @@ public class StockCollectAdminController {
     return ResponseEntity.badRequest().body(ApiResponse.<Void>builder()
         .status(ApiResponseStatus.FAIL)
         .message(ex.getMessage())
+        .build());
+  }
+
+  /**
+   * 없는 run 조회·취소 → 404. 관리자 화면의 {@code ?run=} 딥링크가 지워진 run 을 가리키는 흔한 경우라
+   * 전역 핸들러(500 + Slack)로 보내지 않는다 (AdvisorAdminController 와 동형, 2026-09-20).
+   */
+  @ExceptionHandler(NoSuchElementException.class)
+  public ResponseEntity<ApiResponse<Void>> handleNotFound(NoSuchElementException ex) {
+    log.info("요청 대상 없음: {}", ex.getMessage());
+    return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.<Void>builder()
+        .status(ApiResponseStatus.FAIL)
+        .message(ex.getMessage())
+        .build());
+  }
+
+  /**
+   * 쿼리 파라미터 형식 오류(enum 밖의 status·ISO 가 아닌 날짜 등) → 400.
+   * 전역 {@code ResponseEntityExceptionHandler} 로 가면 ProblemDetail 이 {@code ApiResponse SUCCESS} 로 감싸져 프론트가 message 를 못 읽는다.
+   */
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+    String message = String.format("파라미터 형식 오류: %s=%s", ex.getName(), ex.getValue());
+    log.info("수집 요청 거부: {}", message);
+    return ResponseEntity.badRequest().body(ApiResponse.<Void>builder()
+        .status(ApiResponseStatus.FAIL)
+        .message(message)
         .build());
   }
 

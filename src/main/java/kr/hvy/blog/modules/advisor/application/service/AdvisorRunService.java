@@ -1,8 +1,10 @@
 package kr.hvy.blog.modules.advisor.application.service;
 
+import jakarta.persistence.criteria.Predicate;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -12,9 +14,12 @@ import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorTriggerType;
 import kr.hvy.blog.modules.advisor.domain.entity.AdvisorRun;
 import kr.hvy.blog.modules.advisor.repository.AdvisorRunRepository;
+import kr.hvy.blog.modules.stock.domain.model.MarketClock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -119,12 +124,37 @@ public class AdvisorRunService {
         "재기동으로 중단된 실행 (기동 시 RUNNING 전부 정리)");
   }
 
+  /**
+   * 관리자 화면 run 목록 검색 (CollectRunService.search 와 같은 구조). null 조건은 Predicate 를 만들지 않고,
+   * 기간은 {@code startedAt} 기준 KST 날짜 경계 {@code [from 00:00, to+1일 00:00)}, 최신순 {@code limit} 건.
+   * 같은 시각에 시작한 run 은 runId 내림차순으로 순서를 고정한다.
+   */
   @Transactional(readOnly = true)
-  public List<AdvisorRun> findRecent(AdvisorJobType jobType, int limit) {
-    PageRequest page = PageRequest.of(0, limit);
-    return jobType == null
-        ? repository.findAllByOrderByStartedAtDesc(page)
-        : repository.findAllByJobTypeOrderByStartedAtDesc(jobType, page);
+  public List<AdvisorRun> search(AdvisorJobType jobType, AdvisorStatus status, LocalDate from, LocalDate to, int limit) {
+    Specification<AdvisorRun> spec = (root, query, cb) -> {
+      List<Predicate> predicates = new ArrayList<>();
+      if (jobType != null) {
+        predicates.add(cb.equal(root.get("jobType"), jobType));
+      }
+      if (status != null) {
+        predicates.add(cb.equal(root.get("status"), status));
+      }
+      if (from != null) {
+        predicates.add(cb.greaterThanOrEqualTo(root.<Instant>get("startedAt"), startOfDayKst(from)));
+      }
+      if (to != null) {
+        predicates.add(cb.lessThan(root.<Instant>get("startedAt"), startOfDayKst(to.plusDays(1))));
+      }
+      return predicates.isEmpty() ? cb.conjunction() : cb.and(predicates.toArray(Predicate[]::new));
+    };
+    return repository.findAll(spec, PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "startedAt", "runId"))).getContent();
+  }
+
+  /**
+   * KST 날짜의 00:00 을 Instant 로 바꾼다.
+   */
+  private static Instant startOfDayKst(LocalDate date) {
+    return date.atStartOfDay(MarketClock.KST).toInstant();
   }
 
   @Transactional(readOnly = true)

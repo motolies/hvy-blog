@@ -1,8 +1,10 @@
 package kr.hvy.blog.modules.stock.application.service;
 
+import jakarta.persistence.criteria.Predicate;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -11,10 +13,13 @@ import kr.hvy.blog.modules.stock.domain.code.CollectJobType;
 import kr.hvy.blog.modules.stock.domain.code.CollectStatus;
 import kr.hvy.blog.modules.stock.domain.code.TriggerType;
 import kr.hvy.blog.modules.stock.domain.entity.StockCollectRun;
+import kr.hvy.blog.modules.stock.domain.model.MarketClock;
 import kr.hvy.blog.modules.stock.repository.StockCollectRunRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -135,12 +140,38 @@ public class CollectRunService {
         now.minus(olderThan).plusSeconds(olderThan.isZero() ? 1 : 0), now, message);
   }
 
+  /**
+   * 관리자 화면 run 목록 검색. 조건은 전부 선택이며 null 인 조건은 Predicate 를 만들지 않는다
+   * (JPQL {@code :p IS NULL OR …} 은 {@code @Convert} enum 컬럼에서 PG 만 바인딩 타입을 거부해 H2 테스트가 못 잡는 결함이 된다).
+   * 기간은 {@code startedAt} 기준 KST 날짜 경계 {@code [from 00:00, to+1일 00:00)} 이고, 최신순 {@code limit} 건이다.
+   * 같은 시각에 시작한 run 은 runId 내림차순으로 순서를 고정한다(페이지 어댑터가 결정적이어야 한다).
+   */
   @Transactional(readOnly = true)
-  public List<StockCollectRun> findRecent(CollectJobType jobType, int limit) {
-    PageRequest page = PageRequest.of(0, limit);
-    return jobType == null
-        ? repository.findAllByOrderByStartedAtDesc(page)
-        : repository.findAllByJobTypeOrderByStartedAtDesc(jobType, page);
+  public List<StockCollectRun> search(CollectJobType jobType, CollectStatus status, LocalDate from, LocalDate to, int limit) {
+    Specification<StockCollectRun> spec = (root, query, cb) -> {
+      List<Predicate> predicates = new ArrayList<>();
+      if (jobType != null) {
+        predicates.add(cb.equal(root.get("jobType"), jobType));
+      }
+      if (status != null) {
+        predicates.add(cb.equal(root.get("status"), status));
+      }
+      if (from != null) {
+        predicates.add(cb.greaterThanOrEqualTo(root.<Instant>get("startedAt"), startOfDayKst(from)));
+      }
+      if (to != null) {
+        predicates.add(cb.lessThan(root.<Instant>get("startedAt"), startOfDayKst(to.plusDays(1))));
+      }
+      return predicates.isEmpty() ? cb.conjunction() : cb.and(predicates.toArray(Predicate[]::new));
+    };
+    return repository.findAll(spec, PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "startedAt", "runId"))).getContent();
+  }
+
+  /**
+   * KST 날짜의 00:00 을 Instant 로 바꾼다 (DB·JVM 은 UTC 지만 운영자가 보는 날짜 경계는 KST).
+   */
+  private static Instant startOfDayKst(LocalDate date) {
+    return date.atStartOfDay(MarketClock.KST).toInstant();
   }
 
   @Transactional(readOnly = true)

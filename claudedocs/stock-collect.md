@@ -240,3 +240,29 @@ H2 로는 `ON CONFLICT`·부분 유니크·MV 가 검증되지 않으므로 PG �
 - 실시간 웹소켓·Python 분석 환경은 범위 밖(계획대로). `KisMarketDataPort` 가 확장 경계.
 - 연속조회 페이지네이터는 상한 도달을 `PageResult.truncated` 로 돌려주고 스스로 WARN 하지 않는다(2026-09-12). 의도된 창(휴장일·투자자)과 잘림(예탁원)을 호출부만 구분할 수 있기 때문. 예탁원은 잘리면 기간 분할, `KsdInfoPage.repeated` 는 연속조회 미지원 신호.
 - **미구현 점검(2026-09-13, 스케줄러 활성화 전 전수 대조)**: 잡 구현체 21개 = `CollectJobType` 21개, TODO·스텁·빈 구현 0건, `KisProperties` 미사용 필드 0건. 진짜 미구현은 **국내 섹터↔미국 참조 사슬 1건** — `stock-seed.sql` 의 `tb_stock_global_sector_map` 은 `tb_stock_sector_map` 에 `source='CUSTOM'` 행(SEMICON·AI_DC 등 커스텀 섹터 소속)이 있어야 의미가 있는데 그 행을 만드는 코드·API·`SectorMapRow` 상수가 없고 글로벌 맵을 읽는 코드도 없다(소속 원천을 THEME→CUSTOM 매핑표로 둘지 수기 API 로 둘지 결정 필요). 계획이 범위 밖으로 둔 것: 분봉, 실시간 웹소켓, VIX·WTI·미국 10년물. 기능 영향 없는 위생: `CorporateActionMapper.mapOne` 의 switch 문(식으로 바꾸면 완전성 검사), `CorporateActionSource.MANUAL` 데드 상수(`AdjustFactorService` 는 KSD 만 조회), 소비자 없는 `vw_stock_market_calendar`·`vw_stock_universe_daily`. 통계·재무·ETF NAV·시장별 투자자·해외·THEME·마스터 이력은 외부 분석용 원천으로 저장만 하며 파생 지표 원천은 6개(일봉·계수·투자자·밸류·지수·KRX 섹터)다.
+
+## 13. 관리자 화면 (blog-nextjs `/admin/quant`, 2026-09-20)
+
+Slack·psql·curl 로만 하던 운영을 화면으로 옮긴다. 화면은 **기존 관리자 REST(§3)를 그대로 호출**하고, 백엔드는 연결 고리 3건만 추가했다(아래 "신설 엔드포인트").
+
+| 화면 | 경로 | 내용 |
+|---|---|---|
+| 운영 현황 | `/admin/quant` | 오늘 파이프라인(DAILY `steps[]` 스트립) · 실행 중/최근 실패 · AI 판단 게이트 · 스케줄러 "지금 실행" · KIS 토큰 |
+| 수집 | `/admin/quant/collect` | 실행 이력(필터·상세·취소·재실행·실패 단계 재실행) · 수동 실행(`BackfillRequest` 폼) · 체크포인트(attemptCount) |
+| AI 판단 | `/admin/quant/advisor` | 실행 이력 · 판단 이력 · KPI · 가중치·교훈 (stock-advisor.md §13) |
+
+**스케줄러 "지금 실행" ↔ 잡 매핑** (`GET /api/stats/admin/health` 의 `schedulers[].manualTrigger`, 정본 `SchedulerCatalog`): stock-master → `MASTER` 뒤 `HOLIDAY` 순차, stock-daily → `DAILY`, stock-overseas → `OVERSEAS_DAILY`, stock-macro → `MACRO`, stock-eventfeed am/pm → `NEWS`(같은 잡이라 한 버튼), stock-weekly → `WEEKLY`. body 없이 `POST /{jobType}` 하므로 스케줄러와 같은 인자(오늘 기준)다. `enabled=false` 인 스케줄러(2026-09-20 현재 macro·eventfeed)도 잡은 수동 실행할 수 있다 — 오케스트레이터는 스케줄러와 무관하다. 스케줄러 본문이 부르는 잡을 바꾸면 `SchedulerCatalog` 의 매핑도 같이 바꾼다(`SchedulerCatalogManualTriggerTest` 는 enum 존재만 검증한다).
+
+**재시도의 의미** — 별도 API 가 없다:
+- **같은 `jobType` 재POST = 체크포인트 이어받기.** `tb_stock_collect_checkpoint` 커서부터 재개하고, `resetCheckpoint=true` 면 처음부터. attempt 5 초과 종목은 reset 없이는 영구 제외(§9).
+- **종료 run "재실행"**: run `metadata` 의 startDate/endDate/tickerFrom/tickerTo/indexCodes/force 를 복원해 같은 잡을 POST 한다. `tickers` 는 metadata 에 20개까지만 남으므로(`BackfillRequest.toMetadata`) 그보다 많으면 수동 실행 탭에서 다시 지정한다. DAILY 는 `MarketClock.today()` 기준으로 돌기 때문에 어제 실패한 DAILY 를 오늘 재실행하면 오늘 기준 증분이다.
+- **실패 단계 재실행**: §9 "단계 결손 알림 대응" 의 단계→잡 표를 따른다. INDEX·PRICE·CA_HINT 는 개별 재실행 대상이 아니다(다음 DAILY 자동 복구, 2일 이상 결손만 `POST /reload`). VALUATION 은 당일 한정.
+- **취소**: `POST /runs/{id}/cancel` — 협조적, 다음 종목/단계 경계에서 멈추고 저장된 데이터는 남는다.
+
+**신설 엔드포인트(2026-09-20, 전부 additive — 구 프론트와 호환)**
+- `GET /runs?jobType=&status=&from=&to=&limit=` — `status`(`CollectStatus`)·기간(ISO date, `startedAt` 기준 **KST 날짜 양끝 포함**) 선택 필터. JPA `Specification` 조합이라 null 조건은 SQL 에 나타나지 않는다(`@Convert` enum 에 JPQL `:p IS NULL OR …` 을 걸면 PG 만 바인딩 타입을 거부하고 H2 는 통과시켜 테스트가 못 잡는다).
+- `GET /runs/{runId}` · `POST /runs/{runId}/cancel` 의 없는 run 은 **404 + `ApiResponse FAIL`**(컨트롤러 지역 핸들러, Slack 미발송). 이전엔 전역 핸들러로 가서 500 + `#hvy-error` 였다.
+- `GET /api/stats/admin/health` → `schedulers[].manualTrigger{module: STOCK|ADVISOR, jobTypes[]}`. 수동 실행 대상이 아닌 잡(공인 IP·핫딜·로그 정리·Jira·Claude)은 null.
+- `GET /api/advisor/admin/gate?baseDate=` — ADVISE 게이트 판정(stock-advisor.md §13).
+
+검증: `StockCollectAdminRunsFilterIntegrationTest`(H2, KST 경계·404)·`SchedulerCatalogManualTriggerTest`. 배포 후 prod health 응답에 `manualTrigger` 가 실리는지, 기존 `/admin` 대시보드 스케줄러 표가 그대로 렌더되는지, `#hvy-error` 에 새 400/404 알림이 늘지 않는지 24시간 관찰.

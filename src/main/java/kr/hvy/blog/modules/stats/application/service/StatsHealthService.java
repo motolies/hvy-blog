@@ -93,6 +93,7 @@ public class StatsHealthService {
         .expectedIntervalSeconds(expectedSeconds)
         .secondsSinceLockedAt(sinceSeconds)
         .state(resolveState(job, lock, now, expectedSeconds, sinceSeconds))
+        .manualTrigger(job.manualTrigger())
         .build();
   }
 

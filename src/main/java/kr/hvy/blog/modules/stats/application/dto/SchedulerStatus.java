@@ -20,4 +20,6 @@ public class SchedulerStatus {
   Long expectedIntervalSeconds;
   Long secondsSinceLockedAt;
   SchedulerHealthState state;
+  /** 이 스케줄러가 부르는 잡을 수동 실행할 때 쓸 모듈·잡 목록. 수동 실행이 없는 잡(핫딜·Jira 등)은 null (2026-09-20, additive) */
+  ManualTrigger manualTrigger;
 }

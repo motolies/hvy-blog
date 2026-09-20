@@ -15,7 +15,9 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 /**
- * 뉴스 제목 저장·조회 (tb_stock_news). 같은 (source, title_hash, published_at) 은 무시한다(재전송·연속조회 겹침).
+ * 뉴스 제목 저장·조회 (tb_stock_news). 같은 (source, title_hash, published_at) 또는 같은 (source, serial_no) 는 무시한다 —
+ * GDELT 는 같은 기사를 다른 seendate 로 재보고하므로 URL 해시(serial_no) 유니크가 두 번째 방어선이다. 유니크가 둘이라 ON CONFLICT 는 타깃 없이 쓴다
+ * (타깃을 지정하면 다른 쪽 위반이 예외로 튄다).
  */
 @Repository
 @RequiredArgsConstructor
@@ -26,7 +28,7 @@ public class StockNewsWriter {
   private static final String UPSERT_SQL = """
       INSERT INTO tb_stock_news (source, provider_code, serial_no, published_at, title, title_hash, category_code, origin, tickers, collected_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-      ON CONFLICT (source, title_hash, published_at) DO NOTHING
+      ON CONFLICT DO NOTHING
       """;
 
   private static final String COLUMNS = "news_id, source, provider_code, serial_no, published_at, title, title_hash, category_code, origin, tickers";
@@ -47,15 +49,6 @@ public class StockNewsWriter {
   public List<NewsItem> findPublishedBetween(Instant from, Instant until, int limit) {
     return jdbc.query("SELECT " + COLUMNS + " FROM tb_stock_news WHERE published_at > ? AND published_at <= ? ORDER BY published_at DESC, news_id DESC LIMIT ?",
         MAPPER, OffsetDateTime.ofInstant(from, ZoneOffset.UTC), OffsetDateTime.ofInstant(until, ZoneOffset.UTC), limit);
-  }
-
-  /**
-   * 가장 최근 작성 시각 (증분 수집의 하한). 없으면 null.
-   */
-  public Instant latestPublishedAt(String source) {
-    OffsetDateTime latest = jdbc.query("SELECT MAX(published_at) AS m FROM tb_stock_news WHERE source = ?", rs -> rs.next() ? rs.getObject("m", OffsetDateTime.class) : null,
-        source);
-    return latest == null ? null : latest.toInstant();
   }
 
   private static void bind(PreparedStatement ps, NewsItem row) throws SQLException {

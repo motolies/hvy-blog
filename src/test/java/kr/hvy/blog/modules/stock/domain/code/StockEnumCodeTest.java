@@ -30,7 +30,7 @@ class StockEnumCodeTest {
   /** 규약 대상 enum 전체 (새 enum 을 추가하면 여기에도 넣는다 — 스캔 테스트가 누락을 알려준다) */
   private static final List<Class<? extends Enum<?>>> ENUMS = List.of(
       CollectJobType.class, CollectStatus.class, TriggerType.class, CheckpointStatus.class, MarketType.class,
-      CorporateActionType.class, CorporateActionSource.class,
+      CorporateActionType.class, CorporateActionSource.class, MacroSeries.class, MacroSource.class, TimelineMode.class,
       FinancialKind.class, KsdInfoKind.class, MasterFileLayout.class, DateWindowPaginator.Termination.class);
 
   @Test

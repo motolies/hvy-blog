@@ -16,7 +16,6 @@ import kr.hvy.blog.modules.stock.client.dto.KisIndexChartResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisIndexPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisMarketInvestorResponse;
-import kr.hvy.blog.modules.stock.client.dto.KisNewsTitleResponse;
 import kr.hvy.blog.modules.stock.client.dto.KsdInfoPage;
 import kr.hvy.blog.modules.stock.client.dto.KisPriceResponse;
 import kr.hvy.blog.modules.stock.client.dto.KisStockInfoResponse;
@@ -121,14 +120,4 @@ public interface KisMarketDataPort {
    * 시장별 투자자매매동향(일별): 기준일 기준 (FHPTJ04040000, 연속조회 없음). 호출당 일수는 실측 항목.
    */
   List<KisMarketInvestorResponse.Row> fetchMarketInvestorDaily(MarketType market, LocalDate baseDate, KisCallContext context);
-
-  /**
-   * 국내주식 종합 시황/공시(제목): 최신순 제목 목록 (kis.news.*, 연속조회 tr_cont). 제목·작성 시각·관련 종목코드만 온다.
-   * 요청 필터(제공사·시장·정렬·날짜·시각·일련번호)는 KIS 공식 확인 스크립트(chk_news_title.py)처럼 전부 공백이 기본이다 — 2026-09-13 운영에서
-   * 제공사 0·시장 00·정렬 01·날짜/시각=지금 을 보냈더니 열흘 넘게 오래된 40행만 돌아와 수집이 0건이었다.
-   *
-   * @param ticker   종목코드 (null·빈 문자열이면 전체 시황)
-   * @param maxPages 연속조회 페이지 상한
-   */
-  List<KisNewsTitleResponse.Row> fetchNewsTitles(String ticker, int maxPages, KisCallContext context);
 }

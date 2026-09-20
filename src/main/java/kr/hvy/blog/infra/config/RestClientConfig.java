@@ -18,7 +18,9 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import kr.hvy.blog.modules.stock.client.GdeltProperties;
 import kr.hvy.blog.modules.stock.client.KisProperties;
+import kr.hvy.blog.modules.stock.client.MacroProperties;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -46,6 +48,10 @@ public class RestClientConfig extends RestClientConfigurer {
   private static final int OPENAI_MAX_LOG_BODY_BYTES = 1024 * 1024;
   private static final int OPENAI_MAX_TOTAL_CONNECTIONS = 100;
   private static final int OPENAI_MAX_CONNECTIONS_PER_ROUTE = 20;
+  /** 거시 CSV 응답의 api_log 본문 상한 (CBOE 전체 이력 파일이 500KB 라 머리만 남긴다) */
+  private static final int MACRO_MAX_LOG_BODY_BYTES = 8 * 1024;
+  /** GDELT JSON 응답의 api_log 본문 상한 */
+  private static final int GDELT_MAX_LOG_BODY_BYTES = 64 * 1024;
 
   private final ApiLogInterceptor apiLogInterceptor;
 
@@ -78,6 +84,23 @@ public class RestClientConfig extends RestClientConfigurer {
     return restClient(OPENAI_MAX_TOTAL_CONNECTIONS, OPENAI_MAX_CONNECTIONS_PER_ROUTE, OPENAI_CONNECT_TIMEOUT_SECONDS,
         advisorProperties.getModel().getTimeoutSeconds(), OPENAI_BASE_URL,
         List.of(new OpenAiBearerAuthInterceptor(advisorProperties::openAiApiKey)), OPENAI_MAX_LOG_BODY_BYTES);
+  }
+
+  /**
+   * 거시 지표 공개 CSV(CBOE·재무부) 전용 RestClient. baseUrl 없음(시리즈마다 절대 URL). CBOE 전체 이력 CSV 가 500KB 안팎이라 api_log 본문은 8KB 로 자른다
+   * (호출 1건 = 1행은 유지 — 원천 형식 변경을 사후에 볼 수 있게).
+   */
+  @Bean("macroRestClient")
+  public RestClient macroRestClient(MacroProperties macroProperties) {
+    return restClient(macroProperties.getConnectTimeoutSeconds(), macroProperties.getTimeoutSeconds(), null, MACRO_MAX_LOG_BODY_BYTES);
+  }
+
+  /**
+   * GDELT DOC 2.0 API 전용 RestClient. 응답 JSON 은 수 KB~수십 KB 라 api_log 본문 상한 64KB. 스로틀·429 재시도는 GdeltDocAdapter 가 한다.
+   */
+  @Bean("gdeltRestClient")
+  public RestClient gdeltRestClient(GdeltProperties gdeltProperties) {
+    return restClient(gdeltProperties.getConnectTimeoutSeconds(), gdeltProperties.getTimeoutSeconds(), null, GDELT_MAX_LOG_BODY_BYTES);
   }
 
   /**

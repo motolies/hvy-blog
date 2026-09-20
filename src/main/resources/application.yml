@@ -196,14 +196,6 @@ kis:
     work-mem: 512MB           # MV REFRESH 세션 정렬 메모리. 서버 기본 4MB 면 mv_stock_daily_metric 이 100분 초과(2026-09-08 실측). 서버 메모리에 맞춰 조정
     concurrently: false       # 야간 DAILY·백필은 읽는 쪽이 없어 일반 REFRESH (CONCURRENTLY 는 전체 대조로 2배 이상 느림). 낮 수동 실행 중 조회를 막지 않으려면 true
     max-parallel-workers: 0   # REFRESH 세션 병렬 워커. Docker 기본 /dev/shm 64MB 에서 병렬 해시 조인이 'could not resize shared memory segment' 로 실패(2026-09-08). 컨테이너 shm_size 1GB+ 이후 2~4 로
-  news:                       # 종합 시황/공시(제목) [국내주식-141]. 경로·TR ID·응답 필드는 2026-09-13 운영 실측으로 확정(rt_cd=0, 40행 파싱)
-    path: /uapi/domestic-stock/v1/quotations/news-title
-    tr-id: FHKST01011800
-    provider-code: ""         # 뉴스 제공 업체. KIS 공식 확인 스크립트(chk_news_title.py)처럼 공백 = 전체. '0' 을 보내면 열흘 넘게 오래된 행만 돌아온다(2026-09-13, 수집 0건)
-    market-cls-code: ""       # 공백 = 전체
-    sort-code: ""             # 공백 = 최신순. 날짜·시각·일련번호는 어댑터가 항상 공백으로 보낸다
-    max-pages: 5              # 수집 1회당 연속조회 페이지 상한(응답 헤더 tr_cont=M 인 동안 같은 파라미터로 재호출)
-    lookback-hours: 48        # 이보다 오래된 기사(작성 시각)는 저장하지 않는다. run 메타 newest/oldest 로 받은 구간을 볼 수 있으니 조사용으로 늘릴 필요 없음(임시면 env KIS_NEWS_LOOKBACKHOURS)
   overseas:
     # "구분:거래소:심볼" — N 지수, X 환율(FHKST03030100), EQ 개별주·ETF(HHDFS76240000, NAS/NYS/AMS). 스펙 §4.4 매핑
     symbols:
@@ -237,6 +229,40 @@ kis:
       - "EQ:NAS:BOTZ"
       - "EQ:AMS:ROBO"
 
+# 거시 위험 지표(2026-09-20) — KIS 가 주지 않는 VIX·미국 국채 수익률을 키 없는 공개 CSV 로 받는다. 라이브 원천 = 백필 원천(게시 지연이 같아야 룩어헤드가 안 된다).
+# CBOE 는 마감 후 당일, 재무부는 15:30~17:00 ET 게시라 KST 06:35 수집에서 T-1 이 잡힌다(겨울 CBOE 지연은 08:35 재실행이 보충).
+# FRED 는 익영업일 게시(T-2)·Stooq 는 JS 봇 검증이라 제외(2026-09-20 실측). 달러는 kis.overseas 의 FX@KRW 가 있어 넣지 않는다.
+macro:
+  timeout-seconds: 30
+  lookback-days: 10           # 증분이 다시 받는 최근 캘린더일(정정·지연 게시 흡수)
+  backfill-from: "2015-01-01"
+  available-lag-days: 1       # 관측일 다음 날부터 "알 수 있었던" 값으로 본다(available_from). 특징 SQL 은 available_from <= 기준일 AND obs_date < 기준일
+  series:                     # "시리즈:원천:URL". 재무부 URL 의 {year} 는 연도로 치환
+    - "VIX:CBOE:https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"
+    - "UST10Y:TREASURY:https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve&field_tdr_date_value={year}&page&_format=csv"
+    - "UST2Y:TREASURY:https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve&field_tdr_date_value={year}&page&_format=csv"
+
+# 사건 피드(GDELT DOC 2.0, 2026-09-20) — 테마별 기사량·톤 시계열(완결 UTC 일자, 이력 2017~) + 라이브 헤드라인(tb_stock_news source=GDELT).
+# 서버가 요청 간격 5초 미만이면 429 를 내므로 호출 간격 6초·429 백오프가 필수. 원 건수는 특징에 쓰지 않는다(소스 커버리지 성장이 추세를 만든다).
+gdelt:
+  base-url: https://api.gdeltproject.org/api/v2/doc/doc
+  timeout-seconds: 40
+  max-records: 60             # artlist 테마당 헤드라인 상한
+  timeline-days: 30           # 증분 1회가 다시 받는 시계열 일수(LIVE 행은 덮어쓰지 않으므로 무해)
+  backfill-chunk-days: 90
+  window-hours: 36            # 헤드라인 창 — advisor 판단 창과 같게
+  min-interval-ms: 6000
+  max-retries: 3
+  retry-backoff-ms: 30000
+  user-agent: "hvy-blog-advisor/1.0"
+  themes:                     # "코드:표시명:쿼리" — 코드는 10자 이내 대문자·숫자·밑줄(tb_stock_news.provider_code 폭). 쿼리는 DOC API 문법 그대로
+    - 'KR_GEO:한반도·북한:("North Korea" OR "Korean Peninsula") sourcelang:english'
+    - 'KR_GEO_KO:한반도·북한(국내):(북한 OR 도발 OR 미사일) sourcelang:korean'
+    - 'US_CN_TRD:미중 무역·관세:(tariff OR "trade war" OR "export control") sourcelang:english'
+    - 'WAR:중동·러시아 전쟁:(Ukraine OR "Middle East" OR Israel OR Iran) sourcelang:english'
+    - 'SEMI_REG:반도체 규제:(semiconductor AND (sanction OR "export control" OR chip)) sourcelang:english'
+    - 'FIN_STRESS:금융 스트레스:("credit crunch" OR "bank failure" OR "liquidity crisis") sourcelang:english'
+
 # AI 시장 판단(advisor, 2026-09-13). 임계값은 AdvisorProperties 주석 참조. 피드백 기능은 표본 게이트(lesson.min-picks·ic.min-n-eff)로 잠근다
 advisor:
   enabled: ${ADVISOR_ENABLED:false}
@@ -252,7 +278,7 @@ advisor:
   prompt:
     version: advice-v5            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문 (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
-  news:                           # 뉴스 입력(advice-v4). tb_stock_news(scheduler.stock-news) 가 쌓여 있어야 하고 KisNewsTitleManualTest 실측 뒤 켠다
+  news:                           # 뉴스 입력(advice-v4). tb_stock_news(scheduler.stock-eventfeed, GDELT 헤드라인) 가 쌓여 있어야 한다. 주입 시점은 계획 Phase 1d(구조화 사건)에서 결정
     enabled: ${NEWS_ENABLED:false}
     window-hours: 36              # 판단 시각부터 거슬러 올라가는 창 (전일 마감 후 기사 포함)
     market-limit: 12              # 시장 헤드라인 상한
@@ -366,9 +392,15 @@ scheduler:
     lock-name: STOCK-OVERSEAS-TEST
     cron-expression: "0 30 6 * * TUE-SAT"
     enabled: false
-  stock-news:                     # 종합 시황/공시 제목 30분 주기(08:05~19:35). advisor 19:30 판단의 뉴스 입력 (advisor.news.enabled 와 별개로 쌓아 둔다)
-    lock-name: STOCK-NEWS-TEST
-    cron-expression: "0 5/30 8-19 * * MON-FRI"
+  stock-macro:                    # 거시 위험 지표(VIX·미국 국채) 공개 CSV 증분. 화~토 06:35·08:35 (겨울 CBOE 게시 지연 보충)
+    lock-name: STOCK-MACRO-TEST
+    cron-expression: "0 35 6,8 * * TUE-SAT"
+    enabled: false
+  stock-eventfeed:                # 사건 피드(GDELT) — 아침은 완결된 어제 UTC 시계열, 저녁은 19:30 판단 직전 헤드라인. 한 클래스·두 cron·두 락
+    lock-name-am: STOCK-EVENTFEED-AM-TEST
+    lock-name-pm: STOCK-EVENTFEED-PM-TEST
+    cron-am: "0 40 6 * * TUE-SAT"
+    cron-pm: "0 20 19 * * MON-FRI"
     enabled: false
   stock-weekly:
     lock-name: STOCK-WEEKLY-TEST
@@ -455,10 +487,16 @@ scheduler:
     lock-name: STOCK-OVERSEAS-PROD
     cron-expression: "0 30 6 * * TUE-SAT"
     enabled: true
-  stock-news:
-    lock-name: STOCK-NEWS-PROD
-    cron-expression: "0 5/30 8-19 * * MON-FRI"
-    enabled: false                # KisNewsTitleManualTest 로 TR ID·필드 실측 뒤 켠다 (advisor.news.enabled 와 함께)
+  stock-macro:
+    lock-name: STOCK-MACRO-PROD
+    cron-expression: "0 35 6,8 * * TUE-SAT"
+    enabled: false                # MacroSourceManualTest 로 게시 시각(T-1 확보) 실측 뒤 true (2026-09-20)
+  stock-eventfeed:
+    lock-name-am: STOCK-EVENTFEED-AM-PROD
+    lock-name-pm: STOCK-EVENTFEED-PM-PROD
+    cron-am: "0 40 6 * * TUE-SAT"
+    cron-pm: "0 20 19 * * MON-FRI"
+    enabled: false                # GdeltDocManualTest 로 3모드 응답·429 빈도 실측 뒤 true (2026-09-20)
   stock-weekly:
     lock-name: STOCK-WEEKLY-PROD
     cron-expression: "0 0 3 * * SUN"

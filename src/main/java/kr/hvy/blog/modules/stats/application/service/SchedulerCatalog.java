@@ -59,8 +59,13 @@ public class SchedulerCatalog {
           "scheduler.stock-daily.cron-expression", List.of("0 30 18 * * MON-FRI"), "scheduler.stock-daily.enabled", "Asia/Seoul"),
       new Definition("scheduler.stock-overseas.lock-name", "해외 지표 증분 수집",
           "scheduler.stock-overseas.cron-expression", List.of("0 30 6 * * TUE-SAT"), "scheduler.stock-overseas.enabled", "Asia/Seoul"),
-      new Definition("scheduler.stock-news.lock-name", "뉴스 제목 수집",
-          "scheduler.stock-news.cron-expression", List.of("0 5/30 8-19 * * MON-FRI"), "scheduler.stock-news.enabled", "Asia/Seoul"),
+      new Definition("scheduler.stock-macro.lock-name", "거시 위험 지표 수집(VIX·미국 국채)",
+          "scheduler.stock-macro.cron-expression", List.of("0 35 6,8 * * TUE-SAT"), "scheduler.stock-macro.enabled", "Asia/Seoul"),
+      // 사건 피드(GDELT)는 한 클래스가 아침·저녁 두 cron 을 돌리므로 락도 둘, on/off 키는 하나
+      new Definition("scheduler.stock-eventfeed.lock-name-am", "사건 피드 수집(아침 시계열)",
+          "scheduler.stock-eventfeed.cron-am", List.of("0 40 6 * * TUE-SAT"), "scheduler.stock-eventfeed.enabled", "Asia/Seoul"),
+      new Definition("scheduler.stock-eventfeed.lock-name-pm", "사건 피드 수집(저녁 헤드라인)",
+          "scheduler.stock-eventfeed.cron-pm", List.of("0 20 19 * * MON-FRI"), "scheduler.stock-eventfeed.enabled", "Asia/Seoul"),
       new Definition("scheduler.stock-weekly.lock-name", "주식 주간 수집(기업행사·계수·재무)",
           "scheduler.stock-weekly.cron-expression", List.of("0 0 3 * * SUN"), "scheduler.stock-weekly.enabled", "Asia/Seoul"),
       // AI 시장 판단(advisor) 3종 (2026-09-13). ADVISE 는 실제 cron 이 19:30~19:55 5분 간격 6회라 expectedInterval 이 5분으로 잡혀 STALE 오판이

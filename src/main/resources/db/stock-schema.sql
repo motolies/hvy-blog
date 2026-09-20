@@ -876,9 +876,10 @@ CREATE INDEX IF NOT EXISTS idx_stock_daily_metric_date
     ON tb_stock_daily_metric (trade_date);
 
 -- =============================================
--- 뉴스 제목 (종합 시황/공시, advisor 판단 근거 입력, 2026-09-13). 본문은 저장하지 않는다.
--- 룩어헤드 방어는 수집 시각이 아니라 published_at(기사 작성 시각) 기준이며, 판단 시각 이후 기사는 프롬프트에 들어가지 않는다.
+-- 뉴스·사건 헤드라인 (advisor 판단 근거 입력, 2026-09-13). 본문은 저장하지 않는다.
+-- 룩어헤드 방어는 수집 시각이 아니라 published_at(기사 작성·관측 시각) 기준이며, 판단 시각 이후 기사는 프롬프트에 들어가지 않는다.
 -- 조회 패턴이 "기간 + 후보 종목 ∩ tickers" 하나뿐이라 조인 테이블 대신 배열 + GIN 이다.
+-- 원천은 source 로 구분한다 — 2026-09-20 KIS 종합 시황/공시 제목 수집을 제거하고 GDELT 헤드라인(테마별, 종목 태그 없음)으로 바꿨다.
 -- =============================================
 CREATE TABLE IF NOT EXISTS tb_stock_news
 (
@@ -896,18 +897,78 @@ CREATE TABLE IF NOT EXISTS tb_stock_news
     CONSTRAINT uk_stock_news UNIQUE (source, title_hash, published_at)
 );
 
-COMMENT ON TABLE  tb_stock_news               IS '뉴스·공시 제목 (KIS 종합 시황/공시). advisor 판단 근거 입력, 제목만 저장·본문 없음';
+COMMENT ON TABLE  tb_stock_news               IS '뉴스·사건 헤드라인. advisor 판단 근거 입력, 제목만 저장·본문 없음. source 로 원천 구분 (GDELT; KIS 는 2026-09-20 제거)';
 COMMENT ON COLUMN tb_stock_news.news_id       IS '식별자';
-COMMENT ON COLUMN tb_stock_news.source        IS '출처: KIS';
-COMMENT ON COLUMN tb_stock_news.provider_code IS '뉴스 제공 업체 코드 (news_ofer_entp_code)';
-COMMENT ON COLUMN tb_stock_news.serial_no     IS '제공사 일련번호 (cntt_usiq_srno)';
-COMMENT ON COLUMN tb_stock_news.published_at  IS '기사 작성 시각 (data_dt + data_tm, KST → timestamptz). 룩어헤드 방어 기준';
+COMMENT ON COLUMN tb_stock_news.source        IS '출처: GDELT (과거 행은 KIS)';
+COMMENT ON COLUMN tb_stock_news.provider_code IS 'GDELT: 테마 코드 (gdelt.themes, 10자 이내). KIS: 제공 업체 코드';
+COMMENT ON COLUMN tb_stock_news.serial_no     IS 'GDELT: sha256(url) 앞 40자 — 같은 기사의 재보고(다른 seendate) 를 접는 키. KIS: 제공사 일련번호';
+COMMENT ON COLUMN tb_stock_news.published_at  IS '기사 작성·관측 시각 (GDELT seendate UTC / KIS data_dt+data_tm KST). 룩어헤드 방어 기준';
 COMMENT ON COLUMN tb_stock_news.title         IS '제목 (500자 절단)';
 COMMENT ON COLUMN tb_stock_news.title_hash    IS 'sha256(공백·구두점을 지운 제목) — 재전송·공백 차이 중복 제거 키';
-COMMENT ON COLUMN tb_stock_news.category_code IS '뉴스 대구분 (news_lrdv_code)';
-COMMENT ON COLUMN tb_stock_news.origin        IS '자료원 (dorg)';
-COMMENT ON COLUMN tb_stock_news.tickers       IS '관련 종목코드 iscd1~5 중 6자리만 (KIS 가 태깅)';
+COMMENT ON COLUMN tb_stock_news.category_code IS 'GDELT: 기사 언어. KIS: 뉴스 대구분';
+COMMENT ON COLUMN tb_stock_news.origin        IS 'GDELT: 매체 도메인. KIS: 자료원';
+COMMENT ON COLUMN tb_stock_news.tickers       IS '관련 종목코드 (GDELT 는 태그가 없어 빈 배열 → 시장 헤드라인)';
 COMMENT ON COLUMN tb_stock_news.collected_at  IS '수집 시각';
 
 CREATE INDEX IF NOT EXISTS idx_stock_news_published ON tb_stock_news (published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stock_news_tickers ON tb_stock_news USING GIN (tickers);
+-- 같은 기사가 다른 관측 시각으로 재보고되는 원천(GDELT) 을 위한 두 번째 유니크. 일련번호가 없는 행은 제외 (2026-09-20)
+CREATE UNIQUE INDEX IF NOT EXISTS uk_stock_news_serial ON tb_stock_news (source, serial_no) WHERE serial_no IS NOT NULL;
+
+-- =============================================
+-- 거시 위험 지표 일별 값 (2026-09-20). KIS 가 주지 않는 VIX·미국 국채 수익률을 키 없는 공개 CSV(CBOE·재무부) 에서 받는다.
+-- 라이브 원천 = 백필 원천 불변식: 게시 지연이 같아야 백테스트가 라이브와 같은 정보 집합을 본다.
+-- 특징 SQL 은 available_from <= 기준일 AND obs_date < 기준일 둘 다 건다. observed_at 은 최초 수신 시각이며 정정에도 갱신하지 않는다(룩어헤드 감사).
+-- =============================================
+CREATE TABLE IF NOT EXISTS tb_stock_macro_daily
+(
+    series_code    VARCHAR(20)    NOT NULL,
+    obs_date       DATE           NOT NULL,
+    value          NUMERIC(18,6)  NOT NULL,
+    source         VARCHAR(20)    NOT NULL,
+    available_from DATE           NOT NULL,
+    observed_at    TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
+    collected_at   TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_stock_macro_daily PRIMARY KEY (series_code, obs_date)
+);
+
+COMMENT ON TABLE  tb_stock_macro_daily                IS '거시 위험 지표 일별 값 (VIX·미국 국채 수익률). 공개 CSV 원천, 백필·증분 공용';
+COMMENT ON COLUMN tb_stock_macro_daily.series_code    IS '시리즈 코드 (MacroSeries: VIX | UST10Y | UST2Y)';
+COMMENT ON COLUMN tb_stock_macro_daily.obs_date       IS '현지 관측일 (미국 영업일)';
+COMMENT ON COLUMN tb_stock_macro_daily.value          IS '값 (VIX 지수 종가, 국채는 % 수익률)';
+COMMENT ON COLUMN tb_stock_macro_daily.source         IS '원천 (MacroSource: CBOE | TREASURY)';
+COMMENT ON COLUMN tb_stock_macro_daily.available_from IS '이 값을 알 수 있었던 최초 날짜 = obs_date + macro.available-lag-days. 특징 SQL 의 룩어헤드 상한';
+COMMENT ON COLUMN tb_stock_macro_daily.observed_at    IS '우리가 이 값을 처음 받은 시각. 정정(재수집)에도 갱신하지 않는다';
+COMMENT ON COLUMN tb_stock_macro_daily.collected_at   IS '마지막 수집 시각';
+
+CREATE INDEX IF NOT EXISTS idx_stock_macro_daily_date ON tb_stock_macro_daily (obs_date);
+
+-- =============================================
+-- 사건 스트레스 시계열 (GDELT DOC 2.0, 2026-09-20). 테마별 일별 기사량 비율·평균 톤. obs_date 는 완결된 UTC 일자만(오늘은 저장하지 않는다).
+-- LIVE 행은 그날 실제로 받은 값이며 재계산으로 덮어쓰지 않는다(당시 알 수 있었던 값 보존). BACKFILL 은 이력 재구성이라 덮어쓰기 허용.
+-- 원 건수(article_vol)는 감사용이고 특징은 vol_ratio·avg_tone 의 250일 z·백분위만 쓴다 — 소스 커버리지 성장이 원 건수에 추세를 만든다.
+-- =============================================
+CREATE TABLE IF NOT EXISTS tb_stock_event_timeline
+(
+    theme_code   VARCHAR(20)      NOT NULL,
+    obs_date     DATE             NOT NULL,
+    source       VARCHAR(20)      NOT NULL DEFAULT 'LIVE',
+    article_vol  BIGINT                    DEFAULT NULL,
+    total_vol    BIGINT                    DEFAULT NULL,
+    vol_ratio    DOUBLE PRECISION          DEFAULT NULL,
+    avg_tone     DOUBLE PRECISION          DEFAULT NULL,
+    collected_at TIMESTAMPTZ(6)   NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_stock_event_timeline PRIMARY KEY (theme_code, obs_date, source)
+);
+
+COMMENT ON TABLE  tb_stock_event_timeline              IS 'GDELT 테마별 일별 사건 스트레스 (기사량 비율·평균 톤). LIVE 는 불변, BACKFILL 은 재구성 허용';
+COMMENT ON COLUMN tb_stock_event_timeline.theme_code   IS '테마 코드 (yml gdelt.themes)';
+COMMENT ON COLUMN tb_stock_event_timeline.obs_date     IS '완결된 UTC 일자';
+COMMENT ON COLUMN tb_stock_event_timeline.source       IS 'LIVE 운영 수집(덮어쓰지 않음) | BACKFILL 이력 재구성';
+COMMENT ON COLUMN tb_stock_event_timeline.article_vol  IS '테마 기사 수 (감사용, 특징 아님)';
+COMMENT ON COLUMN tb_stock_event_timeline.total_vol    IS '같은 날 전체 모니터 기사 수';
+COMMENT ON COLUMN tb_stock_event_timeline.vol_ratio    IS 'article_vol / total_vol — 특징 원천';
+COMMENT ON COLUMN tb_stock_event_timeline.avg_tone     IS '기사 수 가중 평균 톤 (음수일수록 부정) — 특징 원천';
+COMMENT ON COLUMN tb_stock_event_timeline.collected_at IS '수집 시각';
+
+CREATE INDEX IF NOT EXISTS idx_stock_event_timeline_date ON tb_stock_event_timeline (obs_date);

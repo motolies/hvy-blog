@@ -64,8 +64,21 @@ class StockNewsPgTest {
     assertThat(window.get(1).tickers()).containsExactly("005930", "000660");
     assertThat(window.get(1).titleHash()).isEqualTo(NewsItem.hashTitle("삼성전자, HBM4 양산"));
     assertThat(window.getFirst().tickers()).isEmpty();
-    assertThat(writer.latestPublishedAt("KIS")).isEqualTo(until.plusSeconds(1));
-    assertThat(writer.latestPublishedAt("OTHER")).isNull();
+  }
+
+  @Test
+  @DisplayName("같은 (source, serial_no) 는 관측 시각이 달라도 한 번만 들어간다 — GDELT 가 같은 기사를 다른 seendate 로 재보고하는 경우 (2026-09-20)")
+  void serialNoDedupesReports() {
+    Instant first = Instant.parse("2026-09-19T01:00:00Z");
+    NewsItem a = NewsItem.builder().source("GDELT").providerCode("KR_GEO").serialNo("abc123").publishedAt(first).title("North Korea fires missile")
+        .titleHash(NewsItem.hashTitle("North Korea fires missile")).categoryCode("English").origin("reuters.com").tickers(List.of()).build();
+    NewsItem again = a.toBuilder().publishedAt(first.plusSeconds(3600)).title("North Korea fires missile - update")
+        .titleHash(NewsItem.hashTitle("North Korea fires missile - update")).build();
+    NewsItem noSerial = a.toBuilder().serialNo(null).publishedAt(first.plusSeconds(7200)).title("다른 기사")
+        .titleHash(NewsItem.hashTitle("다른 기사")).build();
+    assertThat(writer.upsert(List.of(a, again, noSerial))).as("serial_no 중복 1건은 무시, serial_no 없는 행은 통과").isEqualTo(2);
+    assertThat(writer.findPublishedBetween(first.minusSeconds(1), first.plusSeconds(10_000), 10)).extracting(NewsItem::title)
+        .containsExactly("다른 기사", "North Korea fires missile");
   }
 
   private static NewsItem item(Instant at, String title, List<String> tickers) {

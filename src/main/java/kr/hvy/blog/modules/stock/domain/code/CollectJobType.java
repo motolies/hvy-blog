@@ -32,8 +32,10 @@ public enum CollectJobType implements EnumCode<String> {
   DAILY("DAILY", "일일 증분 수집", true),
   WEEKLY("WEEKLY", "주간 수집", true),
   OVERSEAS_DAILY("OVERSEAS_DAILY", "해외 일일 증분", true),
-  /** 종합 시황/공시 제목 수집 (30분 주기, advisor 뉴스 입력) */
-  NEWS("NEWS", "뉴스 제목 수집", false),
+  /** 거시 위험 지표(VIX·미국 국채 수익률) 수집 — 공개 CSV, 백필은 startDate 로 같은 잡 (2026-09-20) */
+  MACRO("MACRO", "거시 위험 지표 수집", true),
+  /** 사건 피드(GDELT) 수집 — 테마별 기사량·톤 시계열 + 라이브 헤드라인. KIS 뉴스 제목 수집은 2026-09-20 제거 */
+  NEWS("NEWS", "사건 피드·헤드라인 수집", true),
   RELOAD("RELOAD", "부분 재적재", true);
 
   private final String code;

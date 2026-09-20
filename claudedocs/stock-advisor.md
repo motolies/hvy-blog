@@ -30,11 +30,11 @@
 
 `MarketRegimeCode`(RISK_ON/NEUTRAL/RISK_OFF, 5거래일 위험 선호)와 `MarketTrendCode`(중기 추세)는 **다른 축**이다 — 강세장 안의 단기 위험 회피가 실재하므로 합치지 않는다. 시장 breadth 는 새 MV `mv_stock_market_breadth_daily`(stock 모듈, DAILY DERIVED 가 갱신)에서 온다. 교훈 condition 에 `trend` 키가 추가됐고(lesson-v2) 이 조건은 규칙이 기준일에 확정한 **오늘** 값으로 판정한다(`regime` 조건은 여전히 어제 LIVE 국면).
 
-### 1.3 뉴스 입력 (advice-v4, 2026-09-13) — 기본 off
+### 1.3 뉴스·사건 입력 (advice-v4, 2026-09-13 · 원천 교체 2026-09-20) — advisor 주입은 기본 off
 
-비정형 입력은 LLM 의 진짜 우위이지만 **백테스트가 불가능**하므로(KIS 제목 API 는 실시간 조회) 가치는 섀도로만 잰다.
+비정형 입력은 LLM 의 진짜 우위이지만 **백테스트가 불가능**하므로(헤드라인은 실시간 조회) 가치는 섀도로만 잰다. **2026-09-20 KIS 종합 시황/공시 제목 수집을 제거**했다("내용이 별로 없다" 는 사용자 결정) — 헤드라인 원천은 GDELT(§1.5)이고 `tb_stock_news`·`NewsFeatureService`·`citedNews`·NONEWS 섀도는 source 무관이라 그대로 쓴다. GDELT 헤드라인은 종목 태그가 없어 전부 **시장 헤드라인 슬롯**으로 들어간다(`byTicker` 는 비어 있다). 운영 DB 의 KIS 행은 `DELETE FROM tb_stock_news WHERE source = 'KIS'` 로 지운다(남겨도 무해하나 36h 창의 시장 슬롯을 먹는다).
 
-- 수집(stock 모듈, `NEWS` 잡, `scheduler.stock-news` 평일 08:05~19:35 30분): KIS 종합 시황/공시(제목) 전체 피드를 최신순으로 받아(응답 헤더 `tr_cont=M` 인 동안 같은 파라미터로 재호출, 공식 예제와 동일) `tb_stock_news` 에 넣는다. 제목·작성 시각·관련 종목코드(iscd1~5)만 있고 본문은 없다. 중복 키 = (source, 정규화 제목 sha256, published_at). **경로·TR ID `FHKST01011800`·응답 필드는 2026-09-13 운영 실측으로 확정. 요청 필터(제공사·시장·정렬·날짜·시각·일련번호)는 KIS 공식 확인 스크립트(`chk_news_title.py`)처럼 전부 공백으로 보낸다 — 제공사 `0`·정렬 `01`·날짜/시각=지금 을 보냈던 첫 운영 실행은 열흘 넘게 오래된 40행만 받아 0건이었다.** run 메타 `fetched → candidates → inserted`(+`skippedOld`·`unparsed`)와 받은 행의 작성 시각 경계 `newest/oldest` 로 깔때기를 본다. 받았는데 전부 못 쓰면 WARN. "실시간" 은 하루 1회 19:30 판단에 가치가 없어 30분이면 충분하다.
+- 수집(stock 모듈, `NEWS` 잡 = `GdeltCollectJob`, `scheduler.stock-eventfeed` 화~토 06:40·평일 19:20): §1.5. 제목·관측 시각(seendate UTC)·매체 도메인·언어만 있고 본문·종목 태그는 없다. 중복 키 = (source, 정규화 제목 sha256, published_at) + (source, url 해시 `serial_no`) — 같은 기사를 다른 seendate 로 재보고하는 GDELT 특성.
 - 주입(advisor, `advisor.news.enabled`): `NewsFeatureService` 가 판단 시각(= min(now, 기준일 `cutoff` 20:00 KST) — 사후 재실행에서도 미래 기사가 새지 않게) 이전 `window-hours`(36) 창에서 시장 헤드라인 ≤12·후보 종목별 ≤3·전체 ≤40 을 골라 `N1…` id 를 붙인다. 프롬프트 `news{asOf, windowHours, columns, market[[id,time,title]], byTicker{tkr:[…]}}` 는 candidates 뒤에 실리고 **news 전용 자 상한(7,000)** 을 넘으면 후보별 → 시장 순으로 먼저 줄인다(뉴스가 후보를 밀어내지 않는다). 룩어헤드 방어는 수집 시각이 아니라 **작성 시각(published_at ≤ 판단 시각)** 이다.
 - 출력·가드: 픽마다 `citedNews`(그날 id enum 주입) — 입력에 없던 id 는 인용만 제거(`unknownNews`), 다른 종목에만 태깅된 기사 인용은 제거(`newsMismatch`), 픽은 버리지 않는다. `tb_advisor_advice.news_ids`, `tb_advisor_pick.cited_news` 에 저장. 주간 재현성 재실행은 동결 페이로드의 news id 도 스키마 enum 에 넣는다. Slack 에는 제목 원문을 싣지 않는다(재배포 우려) — thesis 안 요약만.
 - 섀도 `LLM_NONEWS`: 뉴스가 실린 첫 LIVE 판단부터 `advisor.shadow.nonews-weeks`(8) 동안 뉴스 블록만 뺀 같은 입력(메모리는 LIVE 와 같음)으로 한 번 더 판단. 요인 분리 — LIVE=뉴스+메모리, LLM_NOMEM=뉴스 있음·메모리 없음, LLM_NONEWS=메모리 있음·뉴스 없음. **뉴스 가치 = LIVE − LLM_NONEWS** 를 `GET /scores/summary` 변형 표에서 8주 뒤 se 와 함께 본다(se 안이면 뉴스 off). 호출 수는 메모리 전 2/일, 후 3/일.
@@ -48,6 +48,21 @@
 - **그대로인 것**: 시장 국면 `kospiDir/kosdaqDir`·추세 전망 `trendOutlook.kosdaq`·KOSDAQ 추세 라벨·채점(지수·breadth MV 기준, strict 스키마와 맞물림), 섹터 지표(`mv_stock_sector_daily` 양시장 전체 — 프롬프트에 "후보 없는 섹터를 주도 섹터로 고르지 말라" 명시), 픽 벤치마크(후보의 `bench_index_code`, KOSPI → 0001), QUANT_TOPN·"후보군 대비" KPI(같은 후보 목록).
 - **프롬프트 v5**: 1행 범위(시장 판단은 양지수, 픽은 KOSPI), candidates 가 KOSPI 만임을 명시, thesis **300자**/risk **150자** + 구조(근거 특징 2~3개 → 해석 → 적용 구간 기대 흐름 / 리스크 = 틀리게 만들 조건 + 첫 신호). 가드 400/300·DB 600 은 그대로. 출력 토큰이 늘어난다(관찰 항목).
 - **전환 절차(배포 후 1회)**: 저장된 IC 행은 양시장 기준이므로 `POST /api/advisor/admin/jobs/IC_BACKFILL`(baseDate 없이) 로 덮어쓴다(`SignalIcWriter.upsert` 가 (signal_code, trade_date) 키로 교체, BACKFILL 세트 새로 활성화). 증분은 `maxTradeDate()+1` 부터만 계산하므로 **자동으로 재기준화되지 않는다**. 전환일(2026-09-1x, 첫 v5 LIVE run) 을 기록해 둘 것 — 이전 LIVE 픽·교훈 셀·"후보군 대비" 90일 창은 양시장 후보와 섞인다(run 7회 시점이라 실질 영향 없음). 후보가 `pick-min`(3) 아래로 떨어지면 ADVISE 가 FAILED 이므로 첫 주 `metadata.cut` 을 본다.
+
+### 1.5 거시 위험 지표·사건 피드 수집 (2026-09-20, stock 모듈) — advisor 주입은 뒤 단계에서
+
+계획 `~/.claude/plans/moto-planner-agent-pasted-content-id-39-crystalline-rivest.md` 의 Phase 1a. KIS 가 주지 않는 VIX·미국 국채 수익률과 국제 사건 스트레스를 **키 없는 공개 원천**에서 받는다. 아직 프롬프트에는 넣지 않는다 — 시장 시계열은 라이브 섀도(8주 n_eff≈8)로 가치를 잴 수 없어 2015~ 이력 검정(Phase 1b: 규칙 국면 기저선 `REGIME_RULE`)이 먼저다.
+
+| 잡 | 원천 | 테이블 | 스케줄(`scheduler.*`) | 창·백필 |
+|---|---|---|---|---|
+| `MACRO`(`MacroCollectJob`) | CBOE 일별 지수 CSV(`VIX`, 1990~) · 미국 재무부 일별 수익률 CSV(`UST10Y`·`UST2Y`, 연도별 파일, URL 의 `{year}`) — yml `macro.series` "시리즈:원천:URL" | `tb_stock_macro_daily(series_code, obs_date, value, source, available_from, observed_at)` | `stock-macro` 화~토 06:35·08:35 | 최근 `macro.lookback-days`(10) upsert. 백필 `POST /api/stock/admin/collect/MACRO {"startDate":"2015-01-01"}` |
+| `NEWS`(`GdeltCollectJob`) | GDELT DOC 2.0 API — yml `gdelt.themes` "코드:표시명:쿼리" 6개(KR_GEO·KR_GEO_KO·US_CN_TRD·WAR·SEMI_REG·FIN_STRESS) | 시계열 `tb_stock_event_timeline(theme_code, obs_date, source LIVE\|BACKFILL, article_vol, total_vol, vol_ratio, avg_tone)` + 헤드라인 `tb_stock_news(source='GDELT')` | `stock-eventfeed` 화~토 06:40(`cron-am`)·평일 19:20(`cron-pm`) | 시계열 최근 `gdelt.timeline-days`(30) 완결 UTC 일자, 헤드라인 최근 `window-hours`(36). 백필 `{"startDate":"2017-01-01"}` 은 시계열만(source=BACKFILL, 90일 청크) |
+
+- **관측 가능 시각(룩어헤드)**: 거시는 `available_from = obs_date + macro.available-lag-days(1)` 이고 특징 SQL 은 반드시 `available_from <= 기준일 AND obs_date < 기준일` 둘 다 건다. `observed_at` 은 최초 수신 시각이라 정정에도 갱신하지 않는다. GDELT 시계열은 완결된 UTC 일자만 저장하고(오늘 UTC 제외) **LIVE 행은 재수집이 덮어쓰지 않는다**(BACKFILL 만 갱신) — 당시 알 수 있었던 값 보존. 헤드라인은 `published_at = seendate` 로 기존 창 규칙 그대로.
+- **라이브 원천 = 백필 원천**: 시리즈당 URL 하나. FRED(`VIXCLS`·`DGS10`)는 익영업일 게시라 T-2 가 되고 Stooq 는 JS 봇 검증 페이지를 돌려줘(2026-09-20 실측) 둘 다 제외했다. 달러지수는 `kis.overseas` 의 `FX@KRW` 가 있어 넣지 않는다. WTI 는 키 없는 안정 원천이 없어 보류. `KisOverseasSymbolManualTest`(미작성)로 KIS 가 VIX·10년물 심볼을 주면 어댑터 대신 `kis.overseas.symbols` 1줄이지만 저장 위치는 그대로 `tb_stock_macro_daily`.
+- **GDELT 제약**: 요청 간격 5초 미만이면 429("one every 5 seconds") — 어댑터가 호출 사이 6초를 강제하고 429 는 30초 백오프 3회(2026-09-20 첫 실측은 60초 간격에서도 429 가 섞였다 — 초기 연속 호출 페널티로 추정, `GdeltDocManualTest` 로 재확인). 30일 창·6테마·3모드 = 18호출 ≈ 2분. `timelinetone` 은 짧은 창에서 **시간 단위** 버킷으로 오므로 잡이 UTC 일자로 묶는다(기사량 합, 전체량 합, 기사 수 가중 톤). 원 건수(`article_vol`)는 감사용이고 특징은 `vol_ratio`·`avg_tone` 의 250일 z·백분위만 쓴다. 테마 코드는 10자 이내(`tb_stock_news.provider_code` 폭).
+- run 메타: MACRO `series{VIX:{fetched,rows,latest,lagDays}}` — 06:35 실행에서 `lagDays` 가 1 이면 T-1 확보, 2 면 게시 지연(08:35 가 보충). NEWS `themes{code:{timelineRows,articlesFetched,articlesInserted|error}}`. 시리즈·테마 단위로 실패를 격리하고 run 은 PARTIAL(`CollectNotifier` 규칙 그대로). 본문 0바이트·헤더 변경은 조용한 0행이 아니라 실패다.
+- 실측(스케줄 on 전, 키 불필요): `MACRO_PROBE=true ./gradlew test --tests "*MacroSourceManualTest"`(형식·lagDays), `GDELT_PROBE=true ./gradlew test --tests "*GdeltDocManualTest"`(30일 창 버킷 해상도·volraw 의 norm·artlist 필드·429 빈도). 통과하면 prod `scheduler.stock-macro.enabled`·`scheduler.stock-eventfeed.enabled` 를 true 로 재기동.
 
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
@@ -77,11 +92,12 @@
 | `advisor.morning.link-pairs` | `0001:SPX, 0001:SOX, 1001:COMP, 1001:SOX` | β·상관 쌍. 지수별 첫 쌍이 아침 점검 예상 갭의 주 심볼 |
 | `advisor.morning.link-window-days` / `sigma-multiple` / `max-us-lag-days` | 60 / 1.0 / 4 | β 창(국내 거래일) / 아침 판정 임계 배수(× σ_1d) / 미국 데이터 허용 지연(캘린더일, 초과면 SKIPPED) |
 | `scheduler.advisor-morning-check.enabled` | default false / prod true | 07:30 MON-FRI, 기동 시 평가 |
-| `advisor.news.enabled` | false | 뉴스 입력 on/off. 켜면 news 블록·citedNews·LLM_NONEWS 섀도가 함께 켜진다. 선행: `scheduler.stock-news` 로 `tb_stock_news` 가 쌓여 있어야 함 |
+| `advisor.news.enabled` | false | 뉴스 입력 on/off. 켜면 news 블록·citedNews·LLM_NONEWS 섀도가 함께 켜진다. 선행: `scheduler.stock-eventfeed` 로 `tb_stock_news`(source=GDELT) 가 쌓여 있어야 함 |
 | `advisor.news.window-hours` / `market-limit` / `per-ticker-limit` / `total-limit` / `max-chars` / `title-chars` / `cutoff` | 36 / 12 / 3 / 40 / 7000 / 120 / 20:00 | 창·상한·news 블록 자 상한·판단 마감(사후 재실행 룩어헤드 상한) |
 | `advisor.shadow.nonews-weeks` | 8 | 뉴스 없는 섀도 병행 기간 |
-| `kis.news.*` | path·tr-id `FHKST01011800`·provider/market/sort 공백·max-pages 5·lookback-hours 48 | 수집 API 파라미터. 필터 공백 = 전체(공식 예제와 동일), 값을 채우면 오래된 구간이 온다. 소급 창을 임시로 늘릴 땐 env `KIS_NEWS_LOOKBACKHOURS`(컨테이너 재생성 필요) |
-| `scheduler.stock-news.enabled` | false (default·prod 모두) | 실측 뒤 prod true 로 |
+| `macro.series` / `lookback-days` / `available-lag-days` / `timeout-seconds` | VIX(CBOE)·UST10Y·UST2Y(재무부) / 10 / 1 / 30 | 거시 시리즈 "시리즈:원천:URL"(§1.5). 원천 추가는 `MacroCsvSource` 구현 1개, 시리즈 추가는 `MacroSeries` 상수(원천 열 이름) + yml 1줄 |
+| `gdelt.themes` / `timeline-days` / `window-hours` / `max-records` / `min-interval-ms` / `max-retries` / `retry-backoff-ms` | 테마 6 / 30 / 36 / 60 / 6000 / 3 / 30000 | 사건 피드(§1.5). 테마 추가는 yml 1줄(코드 10자 이내), 호출 간격은 GDELT 5초 제한보다 여유 있게 |
+| `scheduler.stock-macro.enabled` / `scheduler.stock-eventfeed.enabled` | false (default·prod 모두) | `MacroSourceManualTest`·`GdeltDocManualTest` 실측 뒤 prod true 로. eventfeed 는 `cron-am`/`cron-pm` 두 cron·`lock-name-am`/`-pm` 두 락 |
 | `advisor.horizon-days` | 5 | 결정 호라이즌. 채점·KPI·학습 전부 이 값 |
 | `advisor.candidate-limit` / `max-per-sector` / `pick-min` / `pick-max` | 30 / 4 / 3 / 10 | 깔때기 |
 | `advisor.advise.deadline` | 19:55 | 이후에도 DAILY 미완료면 SKIPPED + #hvy-error |
@@ -132,7 +148,7 @@
 | 1차 | 배포 직후 | 스크리닝(초기 세트) + LLM + Slack + 후보 동결 + 채점 + IC 보고 + QUANT_TOPN 섀도 + 장중 점검 |
 | 2차 | 누적 LIVE 픽 ≥ `lesson.min-picks`(300, ≈8주) | 실적 블록·보정 표 주입, 교훈 제안·활성, LLM_NOMEM 섀도 |
 | 3차 | IC n_eff ≥ `ic.min-n-eff`(24) | 주간 가중치 세트 자동 갱신 |
-| 뉴스 | `KisNewsTitleManualTest` 실측 → `scheduler.stock-news` on → 며칠 쌓인 뒤 `advisor.news.enabled` on | news 블록·citedNews·LLM_NONEWS 섀도(8주). **뉴스 가치는 8주 뒤 LIVE − LLM_NONEWS 로만 판정**, se 안이면 다시 off |
+| 뉴스 | `GdeltDocManualTest` 실측 → `scheduler.stock-eventfeed` on → 며칠 쌓인 뒤 `advisor.news.enabled` on | news 블록·citedNews·LLM_NONEWS 섀도(8주). **뉴스 가치는 8주 뒤 LIVE − LLM_NONEWS 로만 판정**, se 안이면 다시 off |
 
 전부 yml 임계라 코드 변경 없이 켜진다. **3개월 규칙**: `GET /scores/summary` 의 LIVE 부가가치(픽 − 후보군)가 se 안에서 ≈0 이면 LLM 을 설명 전용으로 내리고 픽은 QUANT_TOPN 으로 전환할 것(사전 결정).
 
@@ -196,7 +212,8 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - 추세 성분 추가 → `TrendSql.labelCtes()` 의 comp CTE 에 CASE 1줄 + score 합에 항 추가 + `MarketTrendService` components 맵 + `AdvisorProperties.Trend` 손잡이. 판단·채점·기저율이 자동으로 같은 정의를 쓴다.
 - 연동 쌍 추가 → yml `advisor.morning.link-pairs` 에 `지수:심볼` 1개(심볼은 `kis.overseas.symbols` 에 수집돼 있어야 함). 코드 변경 없음.
 - 유니버스 시장 변경(KOSDAQ 포함 등) → yml `advisor.markets` + `IC_BACKFILL` 재실행. 코드 변경 없음(§1.4).
-- 뉴스 소스 추가 → `tb_stock_news.source` 값을 달리해 넣는 수집 잡 1개(`NewsItem` 생성·`StockNewsWriter.upsert`). advisor 는 source 를 가리지 않는다. DART 공시가 1순위 후보.
+- 뉴스 소스 추가 → `tb_stock_news.source` 값을 달리해 넣는 수집 잡 1개(`NewsItem` 생성·`StockNewsWriter.upsert`, `serial_no` 는 원천 고유키 해시). advisor 는 source 를 가리지 않는다. DART 공시가 1순위 후보(종목 태그가 있는 유일한 후보). GDELT 테마 추가는 yml `gdelt.themes` 1줄(코드 10자).
+- 거시 시리즈 추가 → `MacroSeries` 상수(원천 CSV 열 이름) + yml `macro.series` 1줄. 새 원천이면 `client/macro/MacroCsvSource` 구현 1개(`MacroSourceRouter` 가 자동 등록). 라이브 원천 = 백필 원천·`available_from` 규칙을 지킬 것(§1.5).
 - 2차: 실시간 웹소켓(장중 점검 주기 확대), 백테스트(밸류 이력·상폐 유니버스 스냅샷이 쌓인 뒤). 2026-09-13 프롬프트 v2~v4 계획 원문 `~/.claude/plans/moto-planner-agent-transient-lovelace.md`.
 
 ## 10. 미실측·잔여
@@ -204,9 +221,10 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - `KisIndexPriceManualTest`: 지수 현재가 TR ID 실측(틀리면 rt_cd≠0, 장중 점검 INDEX 실패로 기록).
 - `AdvisorOpenAiManualTest`: **Responses `text.format`(json_schema, strict)** 이 strict 스키마(nullable enum 포함, **v2 의 2단계 중첩 trendOutlook**)를 수용하는지·토큰·지연. Chat Completions 로 실측했던 2026-09-13 결과는 API 가 바뀌어 다시 확인해야 한다(§12). 프롬프트 v2 로 `promptChars` 가 v1 보다 약 1,500자 늘어난다(시장 trend 블록 2행 + dataAsOf + window).
 - 추세 임계 실측: §3 의 분포 SQL 을 psql 로 돌려 yml `advisor.trend.*` 를 조정한다. breadth 성분은 MV 가 생긴 뒤에야 과거 분포를 볼 수 있다.
-- `KisNewsTitleManualTest`: 경로·TR ID·응답 필드는 2026-09-13 운영 실측으로 확정(rt_cd=0, 40행 파싱). 남은 실측은 **공백 필터로 최신 기사가 오는지·`tr_cont=M` 연속조회 여부·페이지당 건수·하루 건수·종목 태그 비율**(변형 BLANK/LEGACY/BLANK_TIME 비교). 페이지당 건수 × `max-pages` 가 밤사이 건수보다 적으면 `scheduler.stock-news` cron 을 24시간(`0 5/30 * * * MON-FRI`)으로 넓힌다 — 순회는 "현재부터 과거로" 라 놓친 기사는 나중에 되찾지 못한다.
-- `KisOverseasSymbolManualTest`(미작성): VIX·미국 10년물 심볼을 KIS 가 주는지. 주면 yml `kis.overseas.symbols` 추가만.
-- psql 적용 순서(v2~v4 한 번에): `db/stock-schema.sql`(tb_stock_news) → `cat db/stock-derived-rebuild.sql db/stock-derived.sql | psql -1`(breadth MV) → `db/advisor-schema.sql`(13번째 테이블·ALTER 블록) → `db/advisor-seed.sql`.
+- `MacroSourceManualTest`(키 불필요): CBOE·재무부 CSV 형식이 파서와 맞는지, 06:35·08:35 KST 에 `lagDays` 가 1 인지(T-1 확보). 한 주 관찰 뒤 `scheduler.stock-macro` on.
+- `GdeltDocManualTest`(키 불필요): 30일 창 버킷 해상도(일/시간)·`timelinevolraw` 의 `norm`·`artlist` 필드명·건수·429 빈도. 2026-09-20 첫 실측은 `timelinetone` 7일 창 시간 버킷만 확인했고 나머지는 429·빈 응답 `{}` 이었다. 통과 뒤 `scheduler.stock-eventfeed` on → 며칠 쌓인 뒤 `advisor.news.enabled` on(뉴스 주입은 별도 결정).
+- `KisOverseasSymbolManualTest`(미작성): VIX·미국 10년물 심볼을 KIS 가 주는지. 주면 `MacroCsvSource` 대신 `kis.overseas.symbols` 1줄로 대체 가능(저장은 `tb_stock_macro_daily` 유지).
+- psql 적용 순서(v2~v4 한 번에): `db/stock-schema.sql`(tb_stock_news) → `cat db/stock-derived-rebuild.sql db/stock-derived.sql | psql -1`(breadth MV) → `db/advisor-schema.sql`(13번째 테이블·ALTER 블록) → `db/advisor-seed.sql`. **2026-09-20 추가분**: `db/stock-schema.sql` 재적용(`tb_stock_macro_daily`·`tb_stock_event_timeline`·`uk_stock_news_serial` — 전부 IF NOT EXISTS) → 확인 `SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'tb_stock_%'` = 25 → 선택 `DELETE FROM tb_stock_news WHERE source = 'KIS'` → 배포 → `POST /api/stock/admin/collect/MACRO {"startDate":"2015-01-01"}`(202, 시리즈 3 × 연도 파일) → `POST /NEWS {"startDate":"2017-01-01"}`(202, 6테마 × 90일 청크 × 2모드 ≈ 480호출 × 6초 ≈ 50분).
 - 섹터 채점의 업종 지수 코드(`sector_code` ↔ `tb_stock_index_daily.index_code`) 동일성 — 불일치면 MV 폴백이 자동 적용.
 - 관리자 화면(`/admin/advisor`) 없음. 프론트는 범위 밖.
 

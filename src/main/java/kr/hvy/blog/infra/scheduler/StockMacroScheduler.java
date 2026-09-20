@@ -14,22 +14,22 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 뉴스 제목 수집 (평일 08:05~19:35 30분 간격 KST). 종합 시황/공시 제목을 tb_stock_news 에 쌓아 advisor 판단(19:30)의 근거 입력으로 쓴다.
- * yml scheduler.stock-news.enabled 로 on/off (기동 시 평가).
+ * 거시 위험 지표(VIX·미국 국채 수익률) 증분 수집 (화~토 06:35·08:35 KST). 미국 마감(05:00 KST) 뒤 CBOE·재무부가 당일 값을 올리는 시각이
+ * 겨울엔 06:35 를 넘길 수 있어 08:35 에 한 번 더 돈다(upsert 라 중복 무해). yml scheduler.stock-macro.enabled 로 on/off (기동 시 평가).
  */
 @Slf4j
 @Component
 @Profile("!default")
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "scheduler.stock-news.enabled", havingValue = "true")
-public class StockNewsScheduler extends AbstractScheduler {
+@ConditionalOnProperty(name = "scheduler.stock-macro.enabled", havingValue = "true")
+public class StockMacroScheduler extends AbstractScheduler {
 
   private final StockCollectOrchestrator orchestrator;
 
-  @Scheduled(cron = "${scheduler.stock-news.cron-expression}", zone = "Asia/Seoul")
-  @SchedulerLock(name = "${scheduler.stock-news.lock-name:STOCK-NEWS}", lockAtMostFor = "10m", lockAtLeastFor = "1m")
+  @Scheduled(cron = "${scheduler.stock-macro.cron-expression}", zone = "Asia/Seoul")
+  @SchedulerLock(name = "${scheduler.stock-macro.lock-name:STOCK-MACRO}", lockAtMostFor = "10m", lockAtLeastFor = "1m")
   public void run() {
-    proceedScheduler("STOCK-NEWS")
-        .accept(() -> orchestrator.trigger(CollectJobType.NEWS, BackfillRequest.empty(), TriggerType.SCHEDULER));
+    proceedScheduler("STOCK-MACRO")
+        .accept(() -> orchestrator.trigger(CollectJobType.MACRO, BackfillRequest.empty(), TriggerType.SCHEDULER));
   }
 }

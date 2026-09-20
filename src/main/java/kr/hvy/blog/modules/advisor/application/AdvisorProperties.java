@@ -214,7 +214,8 @@ public class AdvisorProperties {
   }
 
   /**
-   * 뉴스 입력(advice-v4): tb_stock_news 의 제목을 판단 시각 이전 창에서 골라 프롬프트 news 블록으로 넣는다. 기본 off — KisNewsTitleManualTest 실측 뒤 켠다.
+   * 뉴스 입력(advice-v4): tb_stock_news 의 제목을 판단 시각 이전 창에서 골라 프롬프트 news 블록으로 넣는다. 기본 off — 원천은 GDELT 헤드라인(2026-09-20, KIS 제거)이며
+   * 켤지는 계획 Phase 1d(구조화 사건 주입)에서 결정한다.
    */
   @Data
   public static class News {

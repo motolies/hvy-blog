@@ -1,11 +1,11 @@
 # 주식(KIS) 퀀트 데이터 수집 모듈 운영 가이드
 
-작성일 2026-09-04, 최종 갱신 2026-09-13 (스케줄러 4개 prod 활성화 + 무인 운영 알림 2건 추가, 미구현 점검 §12).
+작성일 2026-09-04, 최종 갱신 2026-09-20 (거시 지표 MACRO·사건 피드 NEWS(GDELT) 잡 추가, KIS 뉴스 제목 수집 제거 — advisor 문서 §1.5).
 승인 계획: `~/.claude/plans/moto-planner-agent-api-memoized-turtle.md`.
 
 ## 1. 한눈에 보기
 
-- 원천: 한국투자증권(KIS) 실전 Open API + 종목 마스터 파일(`kospi_code/kosdaq_code/idxcode.mst.zip`).
+- 원천: 한국투자증권(KIS) 실전 Open API + 종목 마스터 파일(`kospi_code/kosdaq_code/idxcode.mst.zip`) + **비 KIS 공개 원천**(2026-09-20: CBOE·미국 재무부 CSV 의 거시 지표, GDELT DOC 2.0 의 사건 시계열·헤드라인 — 키 없음, `MacroDataPort`/`EventFeedPort` 로 KIS 경계와 분리).
 - 저장: PostgreSQL. 시계열은 JdbcTemplate 배치 upsert(`ON CONFLICT … WHERE … IS DISTINCT FROM`), 마스터·run·체크포인트·토큰은 JPA.
 - 원칙: **원주가 정본 + 수정계수 분리**(KIS 수정주가는 조회 시점 재계산이라 저장 금지), 상폐 종목 삭제 금지(비활성 보존), 실패는 예외가 아니라 run/체크포인트 상태.
 - 코드 위치: `kr.hvy.blog.modules.stock` (client / domain / repository / application), 스케줄러는 `infra/scheduler/Stock*Scheduler`.
@@ -15,14 +15,14 @@
 
 1. 운영 DB에 순서대로 적용한다. 모두 재실행 안전(`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`).
    ```bash
-   psql "$DATABASE_URL" -f src/main/resources/db/stock-schema.sql    # 테이블 22개 (재실행하면 새 테이블·COMMENT 만 반영)
+   psql "$DATABASE_URL" -f src/main/resources/db/stock-schema.sql    # 테이블 25개 (재실행하면 새 테이블·인덱스·COMMENT 만 반영. 2026-09-20: tb_stock_macro_daily·tb_stock_event_timeline·uk_stock_news_serial)
    psql "$DATABASE_URL" -f src/main/resources/db/stock-derived.sql   # MV 3개 + 뷰 3개 (schema 뒤에). MV 정의를 바꿨으면 stock-derived-rebuild.sql 선행(§9). 종목 일별 지표는 테이블이라 첫 적재는 POST /DERIVED_REFRESH {"force":true} (전체 ≈22분)
    psql "$DATABASE_URL" -f src/main/resources/db/stock-seed.sql      # tb_stock_global_sector_map 시드
    ```
-   `schema-postgres.sql`(전체 재구축용) 은 위 세 파일의 **원문**을 `-- >>> BEGIN db/stock-*.sql` / `-- <<< END …` 마커로 감싸 그대로 포함하고, DROP 블록에 stock 테이블 22개가 있다. 수정은 `db/stock-*.sql` 원본에만 하고 복사본을 갱신한다. `StockSchemaSyncTest` 가 불일치를 잡는다.
+   `schema-postgres.sql`(전체 재구축용) 은 위 세 파일의 **원문**을 `-- >>> BEGIN db/stock-*.sql` / `-- <<< END …` 마커로 감싸 그대로 포함하고, DROP 블록에 stock 테이블 25개가 있다. 수정은 `db/stock-*.sql` 원본에만 하고 복사본을 갱신한다. `StockSchemaSyncTest` 가 불일치를 잡는다.
    **기존 테이블의 새 컬럼**은 `CREATE TABLE IF NOT EXISTS` 로 반영되지 않으므로 `src/main/resources/db/migrate/<날짜>_<번호>_<내용>.sql`(`ALTER TABLE … ADD COLUMN IF NOT EXISTS`, 재실행 안전)을 먼저 적용한다. 현재: `20260908_01_financial_ratio_columns.sql`(재무 9컬럼), `20260912_01_etf_nav_rate_width.sql`(ETF NAV 비율 3컬럼 NUMERIC(12,4), 정밀도만 늘려 재작성 없음).
 2. 환경변수 `KIS_APP_KEY`, `KIS_APP_SECRET` 를 주입한다(Dockerfile·yml 기본값 없음). 없으면 앱은 기동되지만 모든 수집 잡이 400으로 거부된다.
-3. `scheduler.stock-*.enabled` 는 **prod 문서 4개 모두 `true`**(2026-09-13, 백필 완료), default 문서는 로컬·개발 보호로 `false`. `@ConditionalOnProperty` 라 기동 시 평가되므로 값을 바꾸면 재기동해야 한다. 특정 잡만 끄려면 그 키만 `false`.
+3. `scheduler.stock-*.enabled` 는 **prod 문서 4개(master·daily·overseas·weekly) 모두 `true`**(2026-09-13, 백필 완료), default 문서는 로컬·개발 보호로 `false`. `stock-macro`·`stock-eventfeed`(2026-09-20)는 양쪽 `false` 이며 `MacroSourceManualTest`·`GdeltDocManualTest` 실측 뒤 prod 에서 켠다. `@ConditionalOnProperty` 라 기동 시 평가되므로 값을 바꾸면 재기동해야 한다. 특정 잡만 끄려면 그 키만 `false`.
 4. 기동 후 확인: `GET /api/stock/admin/collect/token` → `POST /api/stock/admin/collect/token/refresh` (1분 1회 게이트, 재발급 실패 시 기존 토큰 유지).
 5. 테이블이 없으면 JPA 엔티티 4개(`tb_stock_master`, `tb_stock_collect_run`, `tb_stock_collect_checkpoint`, `tb_stock_kis_token`)는 `ddl-auto=validate` 로 기동이 실패하고, JdbcTemplate 테이블은 런타임 오류가 난다.
 
@@ -40,7 +40,7 @@
 요청 본문 `BackfillRequest`(모두 선택): `startDate`, `endDate`, `tickerFrom`, `tickerTo`, `tickers[]`, `indexCodes[]`, `resetCheckpoint`, `force`.
 응답 코드: 같은 잡이 RUNNING 이면 **409**(`runningRunId` 포함), 형식·전제조건 오류는 **400**. 둘 다 Slack 을 울리지 않는다(API 트리거 한정 — 스케줄러 트리거가 같은 이유로 거부되면 run 없이 `[주식 수집 미실행]` 을 `#hvy-error` 로 보낸다, §8).
 
-잡 유형(`CollectJobType`): `BACKFILL_ALL`(아래 §4 단계 순차), `MASTER`, `HOLIDAY`, `INDEX_BACKFILL`, `PRICE_BACKFILL`, `STOCK_INFO`, `VALUATION`, `MARKET_STAT`, `CORP_ACTION`, `ADJUST_FACTOR`, `INVESTOR_BACKFILL`, `ETF_NAV_BACKFILL`, `MARKET_INVESTOR_BACKFILL`, `FINANCIAL_BACKFILL`, `OVERSEAS_BACKFILL`, `DERIVED_REFRESH`, `VALIDATE`, `DAILY`, `WEEKLY`, `OVERSEAS_DAILY`, `RELOAD`.
+잡 유형(`CollectJobType`): `BACKFILL_ALL`(아래 §4 단계 순차), `MASTER`, `HOLIDAY`, `INDEX_BACKFILL`, `PRICE_BACKFILL`, `STOCK_INFO`, `VALUATION`, `MARKET_STAT`, `CORP_ACTION`, `ADJUST_FACTOR`, `INVESTOR_BACKFILL`, `ETF_NAV_BACKFILL`, `MARKET_INVESTOR_BACKFILL`, `FINANCIAL_BACKFILL`, `OVERSEAS_BACKFILL`, `DERIVED_REFRESH`, `VALIDATE`, `DAILY`, `WEEKLY`, `OVERSEAS_DAILY`, `MACRO`(거시 지표, `startDate` 로 백필), `NEWS`(GDELT 사건 피드, `startDate` 로 시계열만 백필), `RELOAD`. 비 KIS 잡 두 개도 `KIS_APP_KEY` 게이트를 지나므로(오케스트레이터 공통) 키 없는 환경에서는 400 이다.
 
 ## 4. 최초 백필 순서 (장 마감 후 19:00 KST 이후 권장)
 
@@ -85,6 +85,8 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
 | `StockMasterScheduler` | 평일 05:30 | MASTER(마스터 3종 + theme_code.mst → KRX·THEME 섹터맵, 테마 실패 시 THEME 만 건너뜀 `themeError`) → HOLIDAY(1페이지) | 15m |
 | `StockDailyCollectScheduler` | 평일 18:30 | DAILY: INDEX → PRICE → VALUATION → INVESTOR → MARKET_INVESTOR(시장별 오늘 1회, +2호출) → ETF_NAV(활성 ETF 최근 1윈도우, +≈1,000호출) → STATS(`kis.stats.enabled`, 기본 **true**, 종목당 3호출 ≈ 9.5분) → CA_HINT → VALIDATE → DERIVED(MV 3개 전체 REFRESH + 지표 30일 증분; 09-09 실측 8.5분, 창 함수 개선 후 목표 ≈4분) (총 ≈20~25분) | 40m |
 | `StockOverseasScheduler` | 화~토 06:30 | OVERSEAS_DAILY | 15m |
+| `StockMacroScheduler`(2026-09-20, 기본 off) | 화~토 06:35·08:35 | MACRO: `macro.series` 시리즈별 최근 10일 CSV 재수집 upsert(값 정정 시 `observed_at` 불변). 08:35 는 겨울 CBOE 게시 지연 보충 | 10m |
+| `StockEventFeedScheduler`(2026-09-20, 기본 off) | 화~토 06:40 · 평일 19:20 | NEWS: GDELT 테마 6 × (기사량·톤 시계열 최근 30일 완결 UTC 일자 → `tb_stock_event_timeline` LIVE) + 헤드라인 36h → `tb_stock_news(GDELT)`. 호출 간격 6초·429 백오프, 한 번에 ≈2~3분 | 15m ×2(락 AM/PM) |
 | `StockWeeklyScheduler` | 일 03:00 | WEEKLY: CORP_ACTION(±3개월) → STOCK_INFO(기업행사에만 있는 종목을 조회해 상폐일 있는 것만 비활성 마스터 행으로, 메타 `stockInfoCandidates`/`stockInfoApplied`) → ADJUST_FACTOR → FINANCIAL(정정 감지) → DERIVED_FULL(지표 테이블 전체 재계산 ≈22분 + MV ≈5분) | 2h |
 
 - DAILY 는 휴장일이면 run 만 남기고 끝난다(`force:true` 로 무시, failures 0 이라 Slack 없음). PRICE 단계 실패 시 DERIVED 만 건너뛴다. 단계별 상태·소요·`processed`·`failures` 는 run `metadata_json.steps[]`. 단계가 예외로 죽거나 단계 안 실패율 ≥5% 면 종목 비율과 무관하게 `#hvy-error`(§8, 2026-09-13).
@@ -96,7 +98,7 @@ curl -X POST $B/VALIDATE                                 # 정합성 점검
   FROM tb_stock_collect_run r LEFT JOIN LATERAL jsonb_array_elements(r.metadata_json->'steps') WITH ORDINALITY AS s(step, ord) ON TRUE
   WHERE r.started_at > now() - interval '7 days' AND r.job_type IN ('DAILY','WEEKLY') ORDER BY r.run_id, s.ord;
   ```
-- `/admin` 스케줄러 카탈로그(`SchedulerCatalog`)에 4개가 등록되어 있다.
+- `/admin` 스케줄러 카탈로그(`SchedulerCatalog`)에 7개(master·daily·overseas·weekly·macro·eventfeed AM/PM)가 등록되어 있다.
 - 로그 정리(`LogCleanerScheduler`): `tb_stock_kis_api_failure` 90일, 종료된 `tb_stock_collect_run` 1년.
 
 ## 6. 데이터 모델

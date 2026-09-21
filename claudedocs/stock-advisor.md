@@ -253,7 +253,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - 섹터 채점의 업종 지수 코드(`sector_code` ↔ `tb_stock_index_daily.index_code`) 동일성 — 불일치면 MV 폴백이 자동 적용. **advice-v6 는 같은 동일성에 rs/mom/consistent 가 걸린다** — 아래 매칭률 SQL 로 선행 확인.
 - ~~관리자 화면 없음~~ → 2026-09-20 blog-nextjs `/admin/quant/advisor` 로 해소(§13). 백엔드는 `GET /gate`·runs 필터만 추가(additive). 노트 탭은 후속(API 는 §13).
 - **advice-v6 · note-v1 배포 절차(2026-09-21)**:
-  1. psql `db/advisor-schema.sql` 재적용(`tb_advisor_pick_note` CREATE·`tb_advisor_advice.memory_json` ALTER 블록 — 전부 IF NOT EXISTS) → `db/advisor-seed.sql`(`SECTOR_MOM_20D`·`SECTOR_MOM_60D` 2행, ON CONFLICT DO NOTHING). 확인 `SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'tb_advisor_%'` → 15.
+  1. psql `db/migrate/20260921_01_advisor_note_v1.sql`(이번 릴리스 증분 한 파일: pick_note CREATE·memory_json ALTER·주석·SECTOR_MOM 시드 2행, 재실행 안전) — 또는 전체 `db/advisor-schema.sql` 재적용(`tb_advisor_pick_note` CREATE·`tb_advisor_advice.memory_json` ALTER 블록 — 전부 IF NOT EXISTS) → `db/advisor-seed.sql`(`SECTOR_MOM_20D`·`SECTOR_MOM_60D` 2행, ON CONFLICT DO NOTHING). 확인 `SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'tb_advisor_%'` → 15.
   2. 선행 확인 SQL 3개(업종 지수가 없으면 rs·mom 전부 null → consistent 전부 false → 규칙 8 폴백만 돈다):
      ```sql
      -- 업종 지수 적재 (3 초과여야 함 — 0001·1001·2001 만 있으면 업종 일봉이 없다)

@@ -1,10 +1,15 @@
 package kr.hvy.blog.modules.claude.application.service;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.ReentrantLock;
 import kr.hvy.blog.modules.admin.application.dto.MasterCodeUpdate;
@@ -36,6 +41,11 @@ public class ClaudeCodeRefreshService {
   private static final String ATTR_ACCESS_TOKEN = "accessToken";
   private static final String ATTR_EXPIRES_AT = "expiresAt";
   private static final long TOKEN_BUFFER_MILLIS = 5 * 60 * 1000L; // 만료 5분 전부터 갱신
+  // 정적 토큰(claude setup-token, 1년 유효) 만료 임박 경고: 남은 일수가 이 값 이하이면 계정별 하루 1회 NOTIFY
+  private static final long STATIC_TOKEN_WARN_DAYS = 14;
+  private static final long DAY_MILLIS = 86_400_000L;
+  private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+  private static final DateTimeFormatter KST_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(KST);
   private static final String TOKEN_ENDPOINT = "https://platform.claude.com/v1/oauth/token";
   private static final String CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
   private static final String ANTHROPIC_VERSION = "2023-06-01";
@@ -61,6 +71,10 @@ public class ClaudeCodeRefreshService {
   // 크론(다중 시각)과 수동 트리거(/api/claude/admin/refresh)가 동시에 실행되어
   // 동일 refreshToken 을 중복 제출(단회성 토큰 회전 경쟁)하지 않도록 인프로세스 직렬화한다.
   private final ReentrantLock refreshLock = new ReentrantLock();
+
+  // 정적 토큰 만료 경고 중복 억제: 계정 id → 마지막 경고일(KST). 크론이 하루 3회라 날짜 단위로 1회만 보낸다.
+  // 인메모리라 재시작 시 초기화되지만(재배포 당일 1통 중복 가능) refreshLock 으로 직렬화되어 경쟁은 없다.
+  private final Map<String, LocalDate> expiryWarnedOn = new ConcurrentHashMap<>();
 
   public ClaudeCodeRefreshService(
       @Qualifier("claudeRestClient") RestClient claudeRestClient,
@@ -127,7 +141,8 @@ public class ClaudeCodeRefreshService {
   /**
    * 단일 계정의 토큰 갱신 + ping.
    * <p>
-   * 캐시가 직전 실행의 갱신 결과를 아직 반영하지 못했을 가능성에 대비해, 갱신 직전 DB 에서 노드를 직접
+   * refreshToken 이 비어 있으면 {@code claude setup-token} 으로 발급한 정적 토큰 모드로 보고 갱신 없이 만료만 점검한다.
+   * 그 외에는 캐시가 직전 실행의 갱신 결과를 아직 반영하지 못했을 가능성에 대비해, 갱신 직전 DB 에서 노드를 직접
    * 재조회(캐시 우회)하여 최신 refreshToken 을 사용한다. ping 실패는 토큰 갱신 성공을 가리지 않도록 분리 처리한다.
    */
   private void refreshAccount(MasterCodeResponse cachedAccount) {
@@ -137,27 +152,28 @@ public class ClaudeCodeRefreshService {
     Map<String, Object> attrs = account.getAttributes();
     String refreshToken = (String) attrs.get(ATTR_REFRESH_TOKEN);
 
+    String accessToken;
     if (StringUtils.isBlank(refreshToken)) {
-      throw new IllegalStateException(
-          String.format("[%s] refreshToken이 비어있습니다", accountName));
-    }
-
-    // 1. accessToken이 만료되었거나 없으면 갱신
-    String accessToken = (String) attrs.get(ATTR_ACCESS_TOKEN);
-
-    if (isTokenExpired(attrs)) {
-      ClaudeTokenResponse tokenResponse = refreshAccessToken(refreshToken);
-      accessToken = tokenResponse.getAccessToken();
-      log.info("[{}] OAuth 토큰 갱신 완료, expires_in={}s", accountName, tokenResponse.getExpiresIn());
-
-      // 갱신된 토큰 정보를 MasterCode에 저장 (회전된 새 refreshToken 즉시 영속화)
-      long expiresAt = System.currentTimeMillis() + (tokenResponse.getExpiresIn() * 1000);
-      String newRefreshToken = StringUtils.isNotBlank(tokenResponse.getRefreshToken())
-          ? tokenResponse.getRefreshToken() : refreshToken;
-
-      updateTokenAttributes(account.getId(), attrs, accessToken, newRefreshToken, expiresAt);
+      // 정적 토큰 모드: 로컬 로그인과 독립된 1년 토큰이라 회전 충돌·로그인 절대 만료의 영향을 받지 않는다
+      accessToken = checkStaticToken(account, attrs);
     } else {
-      log.info("[{}] accessToken 유효 (만료까지 {}분), 갱신 생략", accountName, remainingMinutes(attrs));
+      // 1. accessToken이 만료되었거나 없으면 갱신
+      accessToken = (String) attrs.get(ATTR_ACCESS_TOKEN);
+
+      if (isTokenExpired(attrs)) {
+        ClaudeTokenResponse tokenResponse = refreshAccessToken(refreshToken);
+        accessToken = tokenResponse.getAccessToken();
+        log.info("[{}] OAuth 토큰 갱신 완료, expires_in={}s", accountName, tokenResponse.getExpiresIn());
+
+        // 갱신된 토큰 정보를 MasterCode에 저장 (회전된 새 refreshToken 즉시 영속화)
+        long expiresAt = System.currentTimeMillis() + (tokenResponse.getExpiresIn() * 1000);
+        String newRefreshToken = StringUtils.isNotBlank(tokenResponse.getRefreshToken())
+            ? tokenResponse.getRefreshToken() : refreshToken;
+
+        updateTokenAttributes(account.getId(), attrs, accessToken, newRefreshToken, expiresAt);
+      } else {
+        log.info("[{}] accessToken 유효 (만료까지 {}분), 갱신 생략", accountName, remainingMinutes(attrs));
+      }
     }
 
     // 2. ping 대화 수행 (사용량 타이머 리셋) — 토큰 갱신은 이미 끝났으므로 ping 실패가 계정 실패로 전이되지 않게 격리
@@ -173,14 +189,89 @@ public class ClaudeCodeRefreshService {
     }
   }
 
-  private long remainingMinutes(Map<String, Object> attrs) {
+  /**
+   * 정적 토큰(claude setup-token) 계정의 만료를 점검하고 ping 에 쓸 accessToken 을 반환한다.
+   * <p>
+   * 만료됐으면 ping 없이 예외로 실패 계정에 집계하고, {@link #STATIC_TOKEN_WARN_DAYS}일 이내면 NOTIFY 채널로
+   * 계정별 하루 1회 재발급을 안내한다. expiresAt 이 없거나 해석 불가하면 경고 로그만 남기고 진행한다
+   * (토큰이 이미 무효라면 ping 401 이 기존 경로로 통지된다).
+   */
+  private String checkStaticToken(MasterCodeResponse account, Map<String, Object> attrs) {
+    String accountName = account.getCode();
+    String accessToken = (String) attrs.get(ATTR_ACCESS_TOKEN);
+    if (StringUtils.isBlank(accessToken)) {
+      throw new IllegalStateException(
+          String.format("[%s] refreshToken·accessToken이 모두 비어있습니다", accountName));
+    }
+
+    Long expiresAt = parseExpiresAt(attrs);
+    if (expiresAt == null) {
+      log.warn("[{}] 정적 토큰(setup-token) 모드이나 expiresAt 이 없거나 해석 불가 — 만료 점검 생략", accountName);
+      return accessToken;
+    }
+
+    long remainingMillis = expiresAt - System.currentTimeMillis();
+    String expiresAtKst = KST_FORMAT.format(Instant.ofEpochMilli(expiresAt));
+    if (remainingMillis <= 0) {
+      throw new IllegalStateException(String.format(
+          "[%s] setup-token 만료(%s KST) — claude setup-token 으로 재발급 후 accessToken·expiresAt 갱신 필요",
+          accountName, expiresAtKst));
+    }
+
+    // Claude Code 의 로그인 만료 안내와 같은 올림 계산(남은 1초도 D-1)
+    long daysLeft = (remainingMillis + DAY_MILLIS - 1) / DAY_MILLIS;
+    log.info("[{}] 정적 토큰(setup-token) 모드, 만료까지 {}일 ({} KST)", accountName, daysLeft, expiresAtKst);
+
+    if (daysLeft <= STATIC_TOKEN_WARN_DAYS) {
+      warnStaticTokenExpiry(account, daysLeft, expiresAtKst);
+    }
+    return accessToken;
+  }
+
+  /**
+   * 정적 토큰 만료 임박 안내를 NOTIFY 채널로 보낸다. 같은 계정은 KST 기준 하루 1회만 보낸다.
+   */
+  private void warnStaticTokenExpiry(MasterCodeResponse account, long daysLeft, String expiresAtKst) {
+    LocalDate today = LocalDate.now(KST);
+    if (today.equals(expiryWarnedOn.get(account.getId()))) {
+      return;
+    }
+    expiryWarnedOn.put(account.getId(), today);
+
+    notify.sendMessage(NotifyRequest.builder()
+        .channel(SlackChannel.NOTIFY.getChannel())
+        .message(String.format("[%s] Claude setup-token 만료 D-%d (%s KST) · claude setup-token 으로 재발급 후 MasterCode 갱신",
+            account.getCode(), daysLeft, expiresAtKst))
+        .isNotify(false)
+        .build());
+  }
+
+  /**
+   * attributes 의 expiresAt(epoch millis)을 해석한다.
+   * <p>
+   * 스케줄러가 쓴 값은 숫자(Long)지만 관리자 화면에서 입력한 값은 문자열로 저장되므로 둘 다 받는다.
+   * 비어 있거나 숫자가 아니면(시드 플레이스홀더 등) null 을 반환한다.
+   */
+  private Long parseExpiresAt(Map<String, Object> attrs) {
     Object expiresAtObj = attrs.get(ATTR_EXPIRES_AT);
-    if (expiresAtObj == null) {
+    if (expiresAtObj instanceof Number number) {
+      return number.longValue();
+    }
+    if (expiresAtObj instanceof String text && StringUtils.isNotBlank(text)) {
+      try {
+        return Long.parseLong(text.trim());
+      } catch (NumberFormatException e) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  private long remainingMinutes(Map<String, Object> attrs) {
+    Long expiresAt = parseExpiresAt(attrs);
+    if (expiresAt == null) {
       return 0;
     }
-    long expiresAt = expiresAtObj instanceof Number
-        ? ((Number) expiresAtObj).longValue()
-        : Long.parseLong(expiresAtObj.toString());
     return Math.max(0, (expiresAt - System.currentTimeMillis()) / 60_000);
   }
 
@@ -190,14 +281,10 @@ public class ClaudeCodeRefreshService {
       return true;
     }
 
-    Object expiresAtObj = attrs.get(ATTR_EXPIRES_AT);
-    if (expiresAtObj == null) {
+    Long expiresAt = parseExpiresAt(attrs);
+    if (expiresAt == null) {
       return true;
     }
-
-    long expiresAt = expiresAtObj instanceof Number
-        ? ((Number) expiresAtObj).longValue()
-        : Long.parseLong(expiresAtObj.toString());
 
     return System.currentTimeMillis() >= (expiresAt - TOKEN_BUFFER_MILLIS);
   }

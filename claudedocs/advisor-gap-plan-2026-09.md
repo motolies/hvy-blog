@@ -56,7 +56,7 @@ WEEKLY_REVIEW(일 08:00) ── LESSONS ──┤  아니오 → steps.skip("LES
 
 | # | 항목 | 현재 | 성격 | 근거 |
 |---|---|---|---|---|
-| ① | **`advisor.shadow.nomem-weeks`(8) 미사용** — 메모리 활성 뒤 LLM_NOMEM 섀도가 끝나지 않는다(호출·비용 영구 2배). 계획·문서는 "8주간 병행" | yml·Properties 에만 있고 읽는 코드 0건. NONEWS 는 `nonewsShadowOpen()` 으로 8주 창이 구현돼 있어 대조된다 | **코드 결함(잠복)** — 300 픽 뒤 발현 | `AdvisorProperties.java:318`, `AdviseJob.java:258-263,275-277` |
+| ① | **`advisor.shadow.nomem-weeks`(8) 미사용** — 메모리 활성 뒤 LLM_NOMEM 섀도가 끝나지 않는다(호출·비용 영구 2배). 계획·문서는 "8주간 병행" | yml·Properties 에만 있고 읽는 코드 0건. NONEWS 는 `nonewsShadowOpen()` 으로 8주 창이 구현돼 있어 대조된다 | **코드 결함(잠복)** — 300 픽 뒤 발현. **2026-09-21 수정**(`feat/advisor-sector-momentum-notes`): `AdviseJob.nomemShadowOpen()` = 첫 메모리 주입 LIVE(`memory_json IS NOT NULL`) + nomem-weeks 이내, NOMEM 정의는 recentOutcomes·lessons·scoreboard 전부 없음(stock-advisor.md §1.6·§8) | `AdvisorProperties.java:318`, `AdviseJob.java:258-263,275-277` |
 | ② | 교훈 **수동 등록 API** 없음 | psql 만 가능, 검증 규칙 우회 | 구현 갭 | `AdvisorAdminController.java:228-241` |
 | ③ | 교훈 생성기 셀에 **trend 차원 없음** — 셀은 regime×시그널×섹터, 스키마는 trend 를 허용 → LLM 이 표에 없는 trend 조건을 제안할 수 있고 근거 셀은 없다 | 문서 §8 에 "후속" 으로 명시 | 구현 갭 | `LessonService.cells():57-102`, lesson-system-v2 |
 | ④ | **보정 표를 교훈보다 먼저** 켜라는 검토 권고 — 실적 블록·보정 표·교훈이 같은 게이트(300) | `memoryOn` 하나로 묶임 | 설계 권고와 상이 | `AdviseJob.java:165,173`, `ScoreJob.java:106-107` |
@@ -178,7 +178,7 @@ SELECT job_type, status, COUNT(*) FROM tb_stock_collect_checkpoint GROUP BY 1, 2
 | **A-1 수동 등록 API** `POST /api/advisor/admin/lessons` | 요청 `{scope, condition{regime,trend,signal,op,pct,sector}, observation, evidence{n,from,to,excess,t}, rule}` → `LessonProposalResponse` 1건으로 감싸 **`LessonService.apply()` 재사용**(reject 규칙 그대로: 형식·n≥20·\|t\|≥2·티커 금지·중복). run_id null, model `manual`. 거부는 400 + 사유. `GET /lessons/cells?from&to` 로 셀 표(근거 찾기용) 노출 | `LessonServiceTest` 수동 경로, 컨트롤러 400/200 |
 | **A-2 셀에 trend 차원** | `LessonService.cells()` SQL 에 `CASE c.bench_index_code WHEN '0001' THEN a.trend_kospi ELSE a.trend_kosdaq END AS trend_code` 추가, 셀 키 5원(regime\|trend\|signal\|bucket\|sector), 셀 조합에 trend·trend×signal·trend×sector 추가(n≥20 필터 동일). `Cell` 레코드·`reviewPayload` 에 `trend`. lesson-system-**v3**(셀 설명에 trend 열) + `LESSON_VERSION="lesson-v3"` | `LessonServiceTest` 셀 키, `WeeklyReviewJobTest` |
 | **A-3 보정 표 선행 게이트** | `advisor.lesson.calibration-min-picks`(기본 100) 신설. `memoryOn` 을 둘로 분리: `scoreboardOn`(실적 블록·보정 표) / `lessonsOn`(교훈). `AdviseJob`·`ScoreJob`·`WeeklyReviewJob` 3곳. NOMEM 섀도는 둘 중 하나라도 켜지면 시작 | `AdviseJobTest` 게이트 조합 3경우 |
-| **A-4 NOMEM 섀도 8주 종료(결함 ①)** | `AdviceWriter.firstAdviceDate(AdviceVariant.LLM_NOMEM)` → `nomemShadowOpen(baseDate)` = 첫 NOMEM 판단일 + `shadow.nomem-weeks` 이내(NONEWS 와 동형). 종료 뒤 `steps.skip("SHADOW_NOMEM","메모리 섀도 기간 종료")` | `AdviseJobTest` 창 경계 |
+| **A-4 NOMEM 섀도 8주 종료(결함 ①)** — **2026-09-21 수정 완료** | 구현은 `AdviceWriter.firstMemoryAdviceDate()`(LIVE `memory_json IS NOT NULL` 의 MIN(base_date)) → `nomemShadowOpen(baseDate)` = 첫 메모리 주입일 + `shadow.nomem-weeks` 이내(NONEWS 와 동형). 시작점을 "첫 NOMEM 판단일" 이 아니라 "첫 메모리 주입 LIVE" 로 둔 이유: 300 게이트 전에도 recentOutcomes(note-v1)가 실리면 NOMEM 이 돌므로 주입 사실이 정본. 종료 뒤 `steps.skip("SHADOW_NOMEM","섀도 기간 종료")` | `AdviseJobTest.nomemShadowClosesAfterWeeks` |
 | 문서 | `stock-advisor.md` §3 관리자 API·§8 교훈(수동 등록 절차·trend 셀)·§2 설정 | |
 
 ### B. 가중치 운영 — 브랜치 `feat/advisor-signal-toggle` (규모 소)

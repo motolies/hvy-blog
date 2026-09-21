@@ -1,6 +1,6 @@
 # AI 시장 판단(advisor) 운영 문서
 
-- 모듈 `kr.hvy.blog.modules.advisor`, 테이블 `tb_advisor_*` 14개(`db/advisor-schema.sql`, 시드 `db/advisor-seed.sql`; 13번째 `tb_advisor_morning_check` 는 advice-v3, 14번째 `tb_advisor_chat` 은 chat-v1 §11), REST `/api/advisor/admin/**`(ROLE_ADMIN)
+- 모듈 `kr.hvy.blog.modules.advisor`, 테이블 `tb_advisor_*` 15개(`db/advisor-schema.sql`, 시드 `db/advisor-seed.sql`; 13번째 `tb_advisor_morning_check` 는 advice-v3, 14번째 `tb_advisor_chat` 은 chat-v1 §11, 15번째 `tb_advisor_pick_note` 는 note-v1 §1.6), REST `/api/advisor/admin/**`(ROLE_ADMIN)
 - 작성 2026-09-13. 계획 원문 `~/.claude/plans/elegant-singing-glade.md`. 수집 계층은 `claudedocs/stock-collect.md`.
 - **투자 자문이 아니다.** 개인 실험이며 모든 Slack 메시지에 면책 문구가 고정된다.
 
@@ -9,9 +9,9 @@
 | 시각(KST) | 잡 | 내용 |
 |---|---|---|
 | 18:30 평일 | stock DAILY | 일봉·지표 수집 (advisor 의 입력) |
-| 19:30~19:55 5분 간격 | **ADVISE** | 게이트(DAILY 완료·PRICE/DERIVED OK) → 채점·IC 증분 → 시장 특징(지수·수급·해외·섹터·σ + **규칙 추세·관측 기준일·적용 구간**) → 정량 스크리닝(KOSPI 유니버스 `advisor.markets` ≈ 수백 → 컷 → 후보 30, 섹터당 ≤4) → 정량 top-N 섀도 → LLM 판단(strict JSON, 후보 enum) → 가드 → 저장·입력 스냅샷 → **#hvy-advisor 발행** → (메모리 활성 시) 메모리 없는 LLM 섀도 |
+| 19:30~19:55 5분 간격 | **ADVISE** | 게이트(DAILY 완료·PRICE/DERIVED OK) → 채점·IC 증분 → 시장 특징(지수·수급·해외·섹터·σ + **규칙 추세·관측 기준일·적용 구간**) → 정량 스크리닝(KOSPI 유니버스 `advisor.markets` ≈ 수백 → 컷 → 후보 30, 섹터당 ≤4) → 정량 top-N 섀도 → 프롬프트(recentOutcomes 확정 빈도표는 확정 노트 ≥10 이면, 실적 블록·교훈은 300 게이트 뒤) → LLM 판단(strict JSON, 후보 enum) → 가드 → 저장(`memory_json`)·입력 스냅샷 → **#hvy-advisor 발행** → (메모리가 하나라도 실렸고 `nomem-weeks` 창 안이면) 메모리 없는 LLM 섀도 |
 | 07:30 평일 | **MORNING_CHECK** | 06:30 해외 수집 뒤·09:00 개장 전. 밤사이 미국 마감 수익률 × 기준일 β(주 심볼)로 **예상 갭**을 계산해 직전 판단의 지수 방향을 유지/강화/주의 판정(규칙 기반, LLM 없음, 원 판단 불변). `tb_advisor_morning_check` 1행 + Slack 짧은 보고. h=1 채점에서 D+1 시가 갭과 대조(`MORNING`) |
-| 12:00 평일 | **INTRADAY** | 직전 영업일 판단을 KIS 현재가로 대조, 일치율·판정 짧은 보고(규칙 기반, 학습 미반영) |
+| 12:00 평일 | **INTRADAY** | 직전 영업일 판단을 KIS 현재가로 대조해 일치율·판정을 보고하고, 픽마다 시가 대비·지수 대비 초과·z 를 재 결정론 분류(ON_TRACK·MARKET_DRAG·IDIOSYNCRATIC·OVERSHOOT·FLAT) + assist 회고 1회를 `tb_advisor_pick_note` 에 남긴다(note-v1, §1.6). T+5 채점이 CONFIRMED/REFUTED 로 확정하고, 다음 판단 프롬프트에는 **확정 빈도표(recentOutcomes)만** 들어간다(회고 문장은 기록·보고용) |
 | 08:00 일요일 | **WEEKLY_REVIEW** | 확정 재채점 → IC 가중치 세트(n_eff 게이트) → 교훈(누적 픽 게이트) → 동결 입력 재실행 Jaccard → 주간 보고 → 스냅샷 보존 정리 |
 | 수동 | SCORE / IC_BACKFILL | 채점 보충 / IC 사전 추정(1회) |
 
@@ -64,6 +64,23 @@
 - run 메타: MACRO `series{VIX:{fetched,rows,latest,lagDays}}` — 06:35 실행에서 `lagDays` 가 1 이면 T-1 확보, 2 면 게시 지연(08:35 가 보충). NEWS `themes{code:{timelineRows,articlesFetched,articlesInserted|error}}`. 시리즈·테마 단위로 실패를 격리하고 run 은 PARTIAL(`CollectNotifier` 규칙 그대로). 본문 0바이트·헤더 변경은 조용한 0행이 아니라 실패다.
 - 실측(스케줄 on 전, 키 불필요): `MACRO_PROBE=true ./gradlew test --tests "*MacroSourceManualTest"`(형식·lagDays), `GDELT_PROBE=true ./gradlew test --tests "*GdeltDocManualTest"`(30일 창 버킷 해상도·volraw 의 norm·artlist 필드·429 빈도). 통과하면 prod `scheduler.stock-macro.enabled`·`scheduler.stock-eventfeed.enabled` 를 true 로 재기동.
 
+### 1.6 섹터 기간 모멘텀·12:00 오답노트·2계층 메모리 (advice-v6 · note-v1, 2026-09-21)
+
+운영 시작 뒤 사용자가 느낀 세 문제 — 섹터 관점이 5일 하나뿐, 12:00 점검이 "맞았다/틀렸다" 집계에서 끝남, 교훈 주기가 너무 김(300 게이트) — 를 한 브랜치(`feat/advisor-sector-momentum-notes`, 계획 `plan/advisor-sector-momentum-notes.md`)에서 세 축으로 풀었다. 퀀트 규율 검토 권고를 전부 채택한 **사용자 결정 4건**이 설계의 뼈대다.
+
+| 결정 | 내용 | 이유 |
+|---|---|---|
+| ① 노트의 다음 판단 반영 | **T+5 로 확정된 결정론 빈도표만** 프롬프트에. LLM 회고 문장(deviation·why·hypothesis)은 DB·Slack·관리자 기록용, 프롬프트 미주입(가설 주입 플래그도 구현하지 않음) | D+1 09:00→12:00 3시간 수익률의 분산은 T+5 의 약 9% 이고 종목 1일~1주 구간은 단기 반전 우세라 반나절 방향은 잔여 4.5일에 예측력이 0 이거나 음. 그 위의 "왜" 는 노이즈에 붙인 서사이며 다음날 주입은 n=1 일화 학습 = 교훈 게이트(n≥20·\|t\|≥2)의 우회 |
+| ② 섹터 모멘텀 | **프롬프트 v6 + 정량 시그널 동시**(점수 반영은 배포 후 `IC_BACKFILL` 뒤) | 프롬프트만 바꾸면 LIVE−QUANT_TOPN(LLM 부가가치)에 특징 효과가 섞인다. "꾸준히 오른" 은 **시장 대비 초과 3구간**으로 — 절대 양수 3구간은 강세장 전부 통과·약세장 공집합이라 섹터 선택이 아니라 시장 타이밍으로 퇴화 |
+| ③ 교훈 체계 | **그대로 + t 통계의 se 를 base_date 클러스터로 보정**(300 게이트 유지) | 게이트를 낮추면 n≥20 셀은 regime 단독만 남아 시그널×섹터 교훈은 0건 또는 우연 통과. 진짜 문제는 같은 날 픽의 공통 요인·5일 창 겹침으로 픽 단위 se 가 1.7~2배 과소인 것 |
+| ④ 가치 측정 | **LLM_NOMEM 섀도 8주 병행**(judge +1회/일) + `nomem-weeks` 미사용 결함 동시 수정 + 사전 등록 판정(§8) | 8주(n_eff≈13, se≈0.55%/5일)로는 "행동을 바꾸는가·크게 해치는가" 만 답할 수 있다. 0.2%/5일 을 t=2 로 보려면 약 1,200일 |
+
+**축 A — 섹터 기간 모멘텀(advice-v6).** 원천은 `mv_stock_index_metric` 의 **KOSPI 업종 지수** 행(`tb_stock_sector_map.sector_code` = `tb_stock_index_daily.index_code`, 이미 `ret_5d/20d/60d` 계산됨). 업종 지수는 KOSPI 종목만으로 구성된 시총가중 공식 지수라 기존 `mv_stock_sector_daily` 동일가중(양시장, KOSDAQ 종목 수가 지배)과 KOSPI 후보의 불일치가 사라진다. sectors 표에 `rs5/rs20/rs60`(업종 지수 − KOSPI 0001, 소수), `mom`(세 구간 백분위 평균, members≥5 섹터끼리, 등가중·튜닝 금지), `consistent`(rs5>0∧rs20>0∧rs60>0), `overheated`(업종 5일 수익률 > `overheated-sigma`(2.0)×σ5d(0001)) 가 **맨 뒤에** 붙고 top 8 정렬이 `cw5`→`mom` 으로 바뀌었다. 후보 행에도 `secRs60`·`secCons`(1/0/null — 업종 지수 없으면 null) 를 실어 LLM 이 두 표를 조인하지 않게 한다. 정량 시그널 `SECTOR_MOM_20D`·`SECTOR_MOM_60D`(feat CTE `sector_rs_20d/60d`, base 0.05, IC 학습) 는 시드에 있지만 **활성 세트에 행이 없어 `IC_BACKFILL` 재실행 전엔 점수에서 빠진다**(프롬프트 특징은 즉시). 주도 섹터 enum 은 후보가 있는 섹터로 한정(bottom 을 고를 수 없음), `SectorCall.consistent` 저장 → SECTOR 채점 consistent 분할(§7). 가드는 `secCons=0` 또는 `overheated` 섹터 LONG 픽의 확신을 `non-consistent-conviction-cap`(0.70) 으로 **기계 클램프**(stats `capNonConsistent`·`capOverheated`) — 프롬프트 문구만으로 두지 않는다. 지수가 없는 섹터는 rs·mom null·consistent false 로 규칙 8 폴백("3구간 초과 미충족" reason) 경로만 돈다.
+
+**축 B — 12:00 오답노트(note-v1).** `IntradayCheckJob` 을 `AdvisorSteps` 로 단계화: `INDEX`(격리, 지수 2+벤치) → `PICKS`(필수, KIS 조회·정량·`PickDeviation.classify` 결정론 분류, `KisPriceResponse.Output` 에 시가·고저·기준가 맨 뒤 추가) → `REFLECT`(격리, FLAT 아닌 픽만 assist 1회, `intraday-note-system-v1.md`·`NoteSchemaFactory`, 전부 FLAT 이거나 `note.enabled=false` 면 SKIPPED) → `SAVE`(필수, check 1행) → `NOTES`(격리, note N행 — 노트 테이블이 아직 없어도(배포 전) 기존 점검은 산다) → `PUBLISH`(격리, Slack 픽 줄 ≤10). 어느 격리 단계가 죽어도 일치율·판정·Slack 은 유지되고 run 은 PARTIAL. 정량: `sinceOpen = current/open−1`(**진입가 대비, 1차 지표** — D+1 시가 진입 규약과 정합), `excess = sinceOpen − benchSinceOpen`(지수 시가 있으면 OPEN 기준, 없으면 전일 대비 차 PREV_CLOSE 폴백 → `tags_json.excessBasis`), `z = excess / (vol20×√(3/6.5))`. 분류 `PickNoteClass`: FLAT(\|z\|<1, 회고 생략) · ON_TRACK(방향 일치) · MARKET_DRAG(시장 동반 하락 — 지수 대비 초과는 작지만 픽 자체가 유의하게 하락, 자체 등락 z ≤ −임계) · IDIOSYNCRATIC(지수 대비 −1σ 이상 뒤처짐) · OVERSHOOT(z≥2, 되돌림 경고), AVOID 는 부호 반전. 회고 출력 {deviation ≤120·why ≤200·hypothesis ≤120(티커·종목명·날짜 금지 — 위반은 null 저장)·tags{signals⊂SignalCode, sector, regime}}. 테이블은 **append-only·bitemporal**: `UNIQUE(check_id, ticker)`, 12:00 관측을 UPSERT 로 덮지 않고, 집계는 (advice, ticker) 별 `noted_at` 가장 이른 행(정규 점검 밖 `offHours=true` 는 기록만). `ScoreJob` 이 h=5 PROVISIONAL 저장 직후 `finalize` — `final_excess = excess_ret`, `status = sign(excess_rate)==sign(final_excess) ? CONFIRMED : REFUTED`(12:00 초과가 없던 행은 OPEN 유지 + finalized_at 만). 직후 호출이 격리 실패했던 판단은 `ScoreJob` 의 `NOTE_SWEEP` 단계(OPEN·미확정 노트가 있는 판단을 매 run 훑어 재시도, 결정 호라이즌 채점이 없으면 0건)가 보충한다. 12:00 값은 이 테이블에만 살고 픽·후보·채점·IC·교훈 SQL 은 읽지 않는다(`AdvisorSqlBoundaryTest` 가 소스 문자열로 단언).
+
+**축 C — 2계층 메모리.** 빠른 층 = `recentOutcomes`(`RecentOutcomesService`): 기준일 앞 `note.window-trading-days`(20) 거래일의 확정 노트를 `finalized_at·noted_at ≤ 기준일 note.cutoff(20:00 KST)` 로 읽어(사후 재실행에서 미래 확정 차단) `class × secCons` 빈도표 `{windowTradingDays, finalizedAsOf, columns:[class,secCons,n,confirmRate,meanFinalExcess,se,underpowered], rows}` 로 만든다. 확정 노트 < `min-finalized`(10) 이면 블록 생략(run 메타 `skip.NOTES`), 행은 n 상위 `max-rows`(5), `underpowered = n<30`, secCons 없음은 `"-"`. 프롬프트 위치는 scoreboard 뒤·lessons 앞, 지시는 "확신을 **한 단계(0.05) 안에서만**, underpowered 는 참고만, 종목 추가·제거·순위 변경 금지". 느린 층 = scoreboard·lessons(300 게이트 그대로). 헤더 `memory_json = {recentOutcomes: 행수, lessons: [id], scoreboard: bool}` 은 **하나도 실리지 않으면 NULL**(NOMEM 섀도도 NULL) — `AdviceWriter.firstMemoryAdviceDate()`(LIVE 의 MIN(base_date) WHERE memory_json IS NOT NULL) 가 NOMEM 창의 시작점이다. `SHADOW_NOMEM` 실행 조건은 `memoryInjected && nomemShadowOpen(baseDate)`(첫 메모리 판단일 + `shadow.nomem-weeks`(8) 이내, NONEWS 와 동형) 로 바뀌어 **2026-09-21 까지 `nomem-weeks` 를 읽는 코드가 없어 NOMEM 이 영구 병행이던 결함이 수정**됐다(skip 사유 "메모리 미주입"/"섀도 기간 종료"). 300 전에는 scoreboard·lessons 가 비어 NOMEM = "노트만 뺀 것" 이라 정확히 1요인이다. 주간 보고 KPI 블록에 `LIVE vs NOMEM(최근 4주): 픽 Jaccard 평균·|Δconviction| 평균 (n=일수)` 와 `OPEN 노트 10영업일 초과: N건`(finalize 정지 경보, `PickNoteRepository.countStaleOpen`) 2줄이 붙는다(`MEMORY` 단계, 격리). 교훈 셀의 t 는 base_date 클러스터 se(`LessonService.clusterT`, D<2 → 0, `Cell.nDays`) 로 바뀌었고 `lesson-system-v2.md` 에 설명 한 줄만 보탰다(스키마 불변, 버전 유지).
+
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
 19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.
@@ -82,7 +99,12 @@
 | `advisor.model.judge-max-completion-tokens` / `assist-max-completion-tokens` | 8000 / 2000 (yml 20000 / 10000) | Responses `max_output_tokens`(추론 토큰 포함, 비용 손잡이). 잘리면 잡 FAILED `"max_output_tokens 에서 잘렸습니다"` — 상한을 올린다 |
 | `advisor.model.max-retries` / `timeout-seconds` | 3 / 120 | `OpenAiResponsesClient` 재시도(429·408·409·5xx·네트워크, Retry-After ≤30s) / `openAiRestClient` 응답 타임아웃. 세 모델 공통 |
 | `advisor.cost.*` | 0 | 100만 토큰당 USD. 채우면 run.cost_usd 계산 |
-| `advisor.prompt.version` | `advice-v5` | 프롬프트 버전(표기용 — 실제 로드는 `PromptResources.ADVICE_VERSION`·파일명 `prompts/advisor/advice-system-v5.md`). 파일을 고치면 둘을 같이 올린다 |
+| `advisor.prompt.version` | `advice-v6` | 프롬프트 버전(표기용 — 실제 로드는 `PromptResources.ADVICE_VERSION`·파일명 `prompts/advisor/advice-system-v6.md`). 파일을 고치면 둘을 같이 올린다 |
+| `advisor.advise.non-consistent-conviction-cap` / `overheated-sigma` | 0.70 / 2.0 | advice-v6 가드 클램프: `secCons=0`(소속 업종 지수가 1주·1개월·3개월 중 하나라도 시장 미달) 또는 `overheated` 섹터 LONG 픽의 확신 상한(CONVICTIONS 값 중 하나) / 섹터 과열 = 업종 지수 5일 수익률 > 배수 × σ_5d(KOSPI). stats `capNonConsistent`·`capOverheated` 로 준수율 관찰(§1.6) |
+| `advisor.note.enabled` | `${ADVISOR_NOTE_ENABLED:true}` | false 면 12:00 회고 LLM 호출(REFLECT)만 건너뛴다 — 정량·분류 노트는 그대로 저장(무료·결정론) |
+| `advisor.note.z-threshold` / `max-reflect-picks` | 1.0 / 10 | \|z\| 미만이면 FLAT(회고 생략) / 회고 호출 1건에 넣는 픽 상한(\|z\| 큰 순, assist 1회/일) |
+| `advisor.note.window-trading-days` / `min-finalized` / `max-rows` / `cutoff` | 20 / 10 / 5 / 20:00 | recentOutcomes 집계 창(거래일) / 확정 노트가 이보다 적으면 블록 생략 / 빈도표 최대 행(class × secCons, n 상위) / 확정 마감(KST) — 사후 재실행에서 이 시각 이후 확정·관측이 새지 않게(`news.cutoff` 와 같은 뜻) |
+| `advisor.shadow.nomem-weeks` | 8 | 메모리(recentOutcomes·lessons·scoreboard 중 하나라도)가 처음 실린 LIVE 판단부터 메모리 없는 LLM 섀도(LLM_NOMEM) 병행 기간. **2026-09-21 이전엔 읽는 코드가 없어 영구 병행이었다**(§1.6·§8 사전 등록 판정) |
 | `advisor.markets` | `[KOSPI]` | 스크리닝·rank-IC 유니버스 시장(`MarketType` 코드). 빈 목록·오타는 기동 실패. **바꾸면 `IC_BACKFILL`(baseDate 없이) 재실행**으로 IC 재기준화(§1.4) |
 | `advisor.trend.bull-threshold` / `bear-threshold` | 2 / −2 | 추세 성분 합 임계. 배포 후 10년 라벨 분포(§3 SQL)로 조정 — 보합 <15% 면 ±3, >55% 면 ret60 컷 0.03 |
 | `advisor.trend.ret60-threshold` / `breadth-high` / `breadth-low` | 0.05 / 0.60 / 0.40 | 60일 수익률·MA20 상회 비율 성분 컷 |
@@ -194,7 +216,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - 배당락(DIVIDEND, 계수 없음)은 현금배당/진입일 원주가 가산. 비용 0.3% 는 `cost_adj_excess` 보고 전용.
 - 청산일 행 없음: 구간 마지막 종가로 청산 — 상폐 DELISTED, 아니면 SUSPENDED. **학습 포함**(빼면 낙관 편향). 진입가 없음 MISSING(다음 날 재시도).
 - 잠정(PROVISIONAL) → 마지막 WEEKLY 성공 이후 확정(CONFIRMED) 재채점(유상증자 계수 지연).
-- 국면: close-to-close, 밴드 = 0.5×σ_1d×√h(직전 60일; h=5 면 σ_5d — 2026-09-13 이전엔 √5 고정이라 진단 h=1·20 밴드가 틀렸다), 밴드 안 NEUTRAL, Brier 는 부호 기준. 섹터: 업종 지수 있으면 종가, 없으면 MV 동일가중, 시장 대비 초과 >0.
+- 국면: close-to-close, 밴드 = 0.5×σ_1d×√h(직전 60일; h=5 면 σ_5d — 2026-09-13 이전엔 √5 고정이라 진단 h=1·20 밴드가 틀렸다), 밴드 안 NEUTRAL, Brier 는 부호 기준. 섹터: 업종 지수 있으면 종가, 없으면 MV 동일가중, 시장 대비 초과 >0. **SECTOR 콜은 `leading_sectors[].consistent`(advice-v6) 로 나눠 consistent=true/false 적중률을 따로 본다** — v6 효과는 전환일(첫 v6 LIVE, 2026-09-2x) 전후 SECTOR 적중률·LIVE valueAdd 로 재고, 8주 뒤 n≈120(se≈4.5pp) 에서 분할 차이를 읽는다.
 - **아침 점검(advice-v3, h=1 패스만, subject_type `MORNING`)**: predicted=지수별 판정(REINFORCE/HOLD/CAUTION), actual=D+1 시가 갭 `open(D+1)/close(D)−1`, band=임계, actual_dir=|갭|<임계 NEUTRAL 아니면 부호. hit: HOLD 는 |갭|<임계, REINFORCE·CAUTION 은 예상 갭과 부호 일치. 예상 갭이 없던 지수(미국 휴장·β 결손)는 MISSING. 픽 채점은 D+1 시가 진입이라 야간 갭이 픽에는 빠지고 INDEX 콜(close→close)에는 들어간다는 비대칭을 이 행이 설명해 준다(INDEX 를 open(D+1)→close 로 바꾸는 규약 변경은 6개월 뒤 갭 기여도를 본 뒤).
 - **추세 전망(advice-v2, h=20 패스만, `tb_advisor_call_score` subject_type)**: `TREND` predicted=persist 버킷, actual_dir=실현 버킷(확정 라벨이 판단 때 동결한 라벨과 처음 달라진 거래일 오프셋 1~5 → WITHIN_5D, 6~20 → ABOUT_20D, 없음 → BEYOND_20D), hit=일치, **Brier=(confidence−1[hit])² 적중 기준(INDEX 의 부호 기준과 섞지 않는다)**, event_date=전환일. `TREND_INV` predicted=무효화 타입, actual_dir=FIRED|QUIET, hit=전환·발동이 둘 다 없거나 둘 다 있고 ±tolerance 안(조기 신호로 작동), NONE 은 MISSING. 정답은 `TrendSql` 로 결정론이라 LLM 선택과 무관하다. **첫 행은 20영업일 뒤, 4주간 적중률을 판정하지 않는다.** TREND 는 픽 진입·청산과 무관한 서술 검증용이며 교훈 evidence·보정 표·가중치에 쓰지 않는다.
 - KPI: 변형별(LIVE·QUANT_TOPN·LLM_NOMEM) LONG 픽 승률·평균 초과±se·후보군 평균·**부가가치**, AVOID 별도, 국면 적중·Brier skill, 보정 표, 주간 보고에 "20일 추세 지속 적중 · 무효화 신호 적중" 별도 줄. `data_quality=OK` 만.
@@ -202,9 +224,11 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 ## 8. 피드백 규율
 
 - 가중치: `m̂ = 1 + n_eff/(n_eff+24)·(ĪC/0.03 − 1)`, clip[0.5, 2.0], Σ 재정규화, 음의 IC 는 뒤집지 않고 하한+flagged. 세트는 새 행(이력), 픽은 세트 id 참조. 수동 롤백 `POST /weights/sets/{id}/activate`.
-- 교훈: 기계 판정 `condition`({regime, trend, signal, op, pct, sector}) + evidence(n≥20, |t|≥2) 필수, 종목코드 금지, 활성 ≤8, 활성 4주/적용 20건 후 (적용 − 비적용) ≤0 이면 폐기, 프롬프트에서는 **확신 조정만**. 생성기엔 누적 셀 집계표·보정 표·활성 교훈 사후 성과만 준다. `trend` 키(lesson-v2)는 스키마·판정에 있지만 생성기의 셀 집계는 아직 regime×시그널×섹터라 trend 조건 교훈은 수동 등록으로만 생긴다(후속).
+- 교훈: 기계 판정 `condition`({regime, trend, signal, op, pct, sector}) + evidence(n≥20, |t|≥2) 필수, 종목코드 금지, 활성 ≤8, 활성 4주/적용 20건 후 (적용 − 비적용) ≤0 이면 폐기, 프롬프트에서는 **확신 조정만**. 생성기엔 누적 셀 집계표·보정 표·활성 교훈 사후 성과만 준다. `trend` 키(lesson-v2)는 스키마·판정에 있지만 생성기의 셀 집계는 아직 regime×시그널×섹터라 trend 조건 교훈은 수동 등록으로만 생긴다(후속). **셀의 t 는 base_date 클러스터 se**(2026-09-21, 사용자 결정 ③): 셀 안 픽을 기준일로 묶은 일별 평균 초과의 표본 표준편차/√D 를 se 로 쓰고 D(서로 다른 기준일 수) < 2 면 t=0 — 같은 날 5픽이 전부 +2% 여도 유의해지지 않는다. `Cell.n` 은 픽 수 그대로, `nDays` 가 생성기 입력에 추가(스키마·`LESSON_VERSION` 불변). 게이트 값(n≥20·|t|≥2·300) 은 그대로고 판정만 보수화된다.
+- recentOutcomes(빠른 층, note-v1): 프롬프트에는 **T+5 로 확정된 결정론 빈도표만**(≤5행, 창 20 거래일, `finalized_at·noted_at ≤ 기준일 20:00 KST`, 확정 ≥10 이면), 지시는 확신 **±0.05 한 단계 안**·underpowered(n<30) 참고만·종목 추가/제거/순위 변경 금지. LLM 회고 문장(deviation·why·hypothesis)·OPEN 노트·12:00 원문은 어떤 경로로도 프롬프트에 넣지 않는다(DB·Slack·관리자 기록용). 가드가 recentOutcomes 있는 날 conviction 변화폭을 검사하지는 않는다(원래 확신을 모름) — 대신 NOMEM 대조로 |Δconviction| 을 잰다. 빠른 층은 "규칙 문장" 이 아니라 "관찰 빈도표" 라서 교훈 게이트의 우회가 아니다.
+- **사전 등록 판정(NOMEM 8주, 2026-09-21 등록)**: 첫 메모리 주입 LIVE(`memory_json IS NOT NULL` 의 MIN(base_date)) + 8주 뒤 `GET /scores/summary` 변형 표와 주간 보고 `LIVE vs NOMEM` 줄로 판정한다. (a) 픽 Jaccard ≥ 0.9 ∧ 평균 |Δconviction| < 0.05 → 노트가 행동을 바꾸지 않음(inert) → `recentOutcomes` 주입 off(`note.min-finalized` 를 크게 올려 끈다). (b) 짝지은 일별 차 d̄(LIVE − NOMEM 초과) < −1se → 해침 → off. (c) 그 외 → 300 게이트(느린 층 시작)까지 유지, 그때 3요인 분리가 필요하면 `LLM_NONOTES` 4번째 변형을 검토. 8주로는 "바꾸는가·크게 해치는가" 만 답할 수 있음(σ≈2%/5일·n_eff≈N/3 → se≈0.55%/5일, 탐지 가능 효과 ≈1%/5일) — 0.2%/5일 을 t=2 로 보려면 약 1,200일이므로 8주 뒤 "효과 있음" 을 선언하지 않는다. 판정 규칙을 결과를 본 뒤 바꾸지 않는다.
 - 재현성: 주 1회 직전 LIVE 입력 동결 재실행, Jaccard <0.7 이면 경고(LLM 랭킹 관여 축소 검토).
-- 룩어헤드 불변식: 특징 SQL 은 기준일 이하만(`FeatureSqlTest.noLookahead`, `AdvisorScreeningPgTest.futureRowsDoNotChangeScreening`), LEAD 는 IC·채점에만, 밸류에이션은 당일 스냅샷만(과거 IC 제외), 12:00 정보 소급 금지.
+- 룩어헤드 불변식: 특징 SQL 은 기준일 이하만(`FeatureSqlTest.noLookahead`, `AdvisorScreeningPgTest.futureRowsDoNotChangeScreening`), LEAD 는 IC·채점에만, 밸류에이션은 당일 스냅샷만(과거 IC 제외), 12:00 정보 소급 금지 — `tb_advisor_pick_note`·`tb_advisor_intraday_check` 를 `FeatureSql`·`SignalIcService`·`AdviceScoringService`·`LessonService`·`CandidateScreeningService`·`MarketFeatureService` 가 참조하지 않음을 `AdvisorSqlBoundaryTest` 가 소스 문자열로 단언한다.
 
 ## 9. 확장 훅
 
@@ -214,6 +238,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - 유니버스 시장 변경(KOSDAQ 포함 등) → yml `advisor.markets` + `IC_BACKFILL` 재실행. 코드 변경 없음(§1.4).
 - 뉴스 소스 추가 → `tb_stock_news.source` 값을 달리해 넣는 수집 잡 1개(`NewsItem` 생성·`StockNewsWriter.upsert`, `serial_no` 는 원천 고유키 해시). advisor 는 source 를 가리지 않는다. DART 공시가 1순위 후보(종목 태그가 있는 유일한 후보). GDELT 테마 추가는 yml `gdelt.themes` 1줄(코드 10자).
 - 거시 시리즈 추가 → `MacroSeries` 상수(원천 CSV 열 이름) + yml `macro.series` 1줄. 새 원천이면 `client/macro/MacroCsvSource` 구현 1개(`MacroSourceRouter` 가 자동 등록). 라이브 원천 = 백필 원천·`available_from` 규칙을 지킬 것(§1.5).
+- 12:00 노트 class 추가 → `PickNoteClass` 상수 1개(EnumCode, code==상수명) + `PickDeviation.classify` 분기 1줄 + `PickDeviationTest` 경계 케이스 + `advice-system-v6.md` recentOutcomes 문단·`intraday-note-system-v1.md` 의 class 설명 1줄. `note_class` 는 VARCHAR(20) 라 스키마 변경 없음. recentOutcomes 빈도표·Slack 픽 줄은 코드 값을 그대로 쓰므로 자동 반영.
 - 2차: 실시간 웹소켓(장중 점검 주기 확대), 백테스트(밸류 이력·상폐 유니버스 스냅샷이 쌓인 뒤). 2026-09-13 프롬프트 v2~v4 계획 원문 `~/.claude/plans/moto-planner-agent-transient-lovelace.md`.
 
 ## 10. 미실측·잔여
@@ -225,8 +250,27 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - `GdeltDocManualTest`(키 불필요): 30일 창 버킷 해상도(일/시간)·`timelinevolraw` 의 `norm`·`artlist` 필드명·건수·429 빈도. 2026-09-20 첫 실측은 `timelinetone` 7일 창 시간 버킷만 확인했고 나머지는 429·빈 응답 `{}` 이었다. 통과 뒤 `scheduler.stock-eventfeed` on → 며칠 쌓인 뒤 `advisor.news.enabled` on(뉴스 주입은 별도 결정).
 - `KisOverseasSymbolManualTest`(미작성): VIX·미국 10년물 심볼을 KIS 가 주는지. 주면 `MacroCsvSource` 대신 `kis.overseas.symbols` 1줄로 대체 가능(저장은 `tb_stock_macro_daily` 유지).
 - psql 적용 순서(v2~v4 한 번에): `db/stock-schema.sql`(tb_stock_news) → `cat db/stock-derived-rebuild.sql db/stock-derived.sql | psql -1`(breadth MV) → `db/advisor-schema.sql`(13번째 테이블·ALTER 블록) → `db/advisor-seed.sql`. **2026-09-20 추가분**: `db/stock-schema.sql` 재적용(`tb_stock_macro_daily`·`tb_stock_event_timeline`·`uk_stock_news_serial` — 전부 IF NOT EXISTS) → 확인 `SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'tb_stock_%'` = 25 → 선택 `DELETE FROM tb_stock_news WHERE source = 'KIS'` → 배포 → `POST /api/stock/admin/collect/MACRO {"startDate":"2015-01-01"}`(202, 시리즈 3 × 연도 파일) → `POST /NEWS {"startDate":"2017-01-01"}`(202, 6테마 × 90일 청크 × 2모드 ≈ 480호출 × 6초 ≈ 50분).
-- 섹터 채점의 업종 지수 코드(`sector_code` ↔ `tb_stock_index_daily.index_code`) 동일성 — 불일치면 MV 폴백이 자동 적용.
-- ~~관리자 화면 없음~~ → 2026-09-20 blog-nextjs `/admin/quant/advisor` 로 해소(§13). 백엔드는 `GET /gate`·runs 필터만 추가(additive).
+- 섹터 채점의 업종 지수 코드(`sector_code` ↔ `tb_stock_index_daily.index_code`) 동일성 — 불일치면 MV 폴백이 자동 적용. **advice-v6 는 같은 동일성에 rs/mom/consistent 가 걸린다** — 아래 매칭률 SQL 로 선행 확인.
+- ~~관리자 화면 없음~~ → 2026-09-20 blog-nextjs `/admin/quant/advisor` 로 해소(§13). 백엔드는 `GET /gate`·runs 필터만 추가(additive). 노트 탭은 후속(API 는 §13).
+- **advice-v6 · note-v1 배포 절차(2026-09-21)**:
+  1. psql `db/advisor-schema.sql` 재적용(`tb_advisor_pick_note` CREATE·`tb_advisor_advice.memory_json` ALTER 블록 — 전부 IF NOT EXISTS) → `db/advisor-seed.sql`(`SECTOR_MOM_20D`·`SECTOR_MOM_60D` 2행, ON CONFLICT DO NOTHING). 확인 `SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'tb_advisor_%'` → 15.
+  2. 선행 확인 SQL 3개(업종 지수가 없으면 rs·mom 전부 null → consistent 전부 false → 규칙 8 폴백만 돈다):
+     ```sql
+     -- 업종 지수 적재 (3 초과여야 함 — 0001·1001·2001 만 있으면 업종 일봉이 없다)
+     SELECT COUNT(DISTINCT index_code) FROM tb_stock_index_daily;
+     -- 섹터 코드 ↔ 업종 지수 매칭률 (0.8 미만이면 매핑 테이블 선행 후 진행)
+     SELECT COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM tb_stock_index_daily i WHERE i.index_code = sm.sector_code))::float / COUNT(*)
+     FROM tb_stock_sector_map sm WHERE sm.source = 'KRX' AND sm.valid_to IS NULL;
+     -- 업종 지수 최신일 (국내 종가 dataAsOf 와 같아야 rs 가 non-null — 다르면 dataAsOf.sectorIndex 로 드러난다)
+     SELECT MAX(trade_date) FROM mv_stock_index_metric
+     WHERE index_code IN (SELECT DISTINCT sector_code FROM tb_stock_sector_map WHERE valid_to IS NULL);
+     ```
+     업종 일봉이 없으면 `POST /api/stock/admin/collect/INDEX_BACKFILL` 먼저.
+  3. 배포 → `POST /api/advisor/admin/jobs/IC_BACKFILL`(baseDate 없이) 1회 — 새 시그널 IC 사전 추정·새 BACKFILL 세트 활성화. 그 전엔 `SECTOR_MOM_*` 가 점수에서 빠진다(프롬프트 특징 `secRs60/secCons` 는 즉시).
+  4. 다음 19:30 ADVISE: `GET /advices/{id}/prompt` 에서 sectors 컬럼 13개·candidates `secRs60/secCons`·`recentOutcomes` 부재(확정 노트 <10) 확인, 가드 stats `capNonConsistent` 비율(50% 넘으면 프롬프트가 규칙을 안 따르는 신호). **전환일(첫 v6 LIVE) 기록.** 다음 12:00 INTRADAY: `tb_advisor_pick_note` N행·class 분포·Slack 픽 줄·`tb_advisor_run.llm_calls=1`(전부 FLAT 이면 0). 장외 수동 실행은 현재가=종가라 `offHours=true`·"장외 점검" 표기.
+  5. 5영업일 뒤 SCORE → 노트 CONFIRMED/REFUTED·`finalized_at` → 확정 ≥10 이후 ADVISE 프롬프트에 `recentOutcomes` + `memory_json` + `SHADOW_NOMEM` 단계(LLM 2회). 8주 뒤 §8 사전 등록 판정.
+  6. 실측 `KisIndexPriceManualTest`(키 필요): 지수 현재가 응답에 `bstp_nmix_oprc`(업종 지수 시가) 가 채워지는지 — 없으면 excess 가 PREV_CLOSE 폴백으로만 계산된다(run 메타 `excessBasis`).
+  7. 롤백: `PromptResources.ADVICE_VERSION` 을 v5 로 되돌리고 재배포(테이블·컬럼은 남겨도 무해). 노트 회고만 끄려면 `ADVISOR_NOTE_ENABLED=false`.
 
 ## 11. Slack 채팅 봇 (chat-v1, 2026-09-13)
 
@@ -322,4 +366,5 @@ judge/assist 도 채팅 봇과 같은 `OpenAiResponsesChatModel` 로 옮겼다. 
 - **신설 엔드포인트(additive)**
   - `GET /api/advisor/admin/gate?baseDate=` → `AdvisorGateResponse{baseDate, tradingDay, alreadyDone, dataReady, pastDeadline, quality, reason, ready, waitQuietly}`. `AdvisorGateService.decide` 와 같은 판정(스케줄러·AdviseJob 이 쓰는 것)이고 `ready`·`waitQuietly` 는 서버가 **값으로** 확정한다(record 파생 메서드는 Jackson 이 직렬화하지 않고, 프론트가 다시 계산하면 규칙이 두 곳에 생긴다). `reason` 은 게이트의 한글 사유 그대로("휴장일 …", "이미 판단이 있습니다", "파생 지표가 아직 없습니다", "DAILY 수집이 아직 끝나지 않았습니다", "DAILY 의 PRICE·DERIVED 단계가 실패했습니다: run=…", "DAILY 완료"). 부작용 없음.
   - `GET /api/advisor/admin/runs?jobType=&status=&from=&to=&limit=` — `status`(`AdvisorStatus`)·기간(`startedAt` 기준 KST 날짜 양끝 포함) 선택 필터. stock 과 동형(`Specification`, null 조건은 Predicate 미생성).
+  - **note-v1(2026-09-21, additive)**: `GET /api/advisor/admin/notes?from=&to=&status=&limit=` — 12:00 픽 노트(기준일 양끝 포함, `PickNoteStatus` OPEN|CONFIRMED|REFUTED, 최신 점검 순). `GET /advices/{id}` 응답에 `notes`(그 판단의 노트 전부, 점검 시각·티커 순)와 헤더 `memoryJson`(프롬프트에 실린 메모리 요약, 없으면 null) 이 추가됐다. 화면(노트 탭)은 후속.
 - 검증: `AdvisorAdminGateIntegrationTest`(advisor.enabled=true + Redis Testcontainers, 게이트는 목으로 두고 HTTP 계약·펼침·runs 필터를 본다 — H2 에 advisor JDBC 테이블이 없어 실제 판정은 `AdvisorGateServiceTest` 가 담당).

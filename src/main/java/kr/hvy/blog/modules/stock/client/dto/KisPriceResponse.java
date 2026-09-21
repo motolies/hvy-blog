@@ -12,7 +12,11 @@ public record KisPriceResponse(
     @JsonProperty("output") Output output
 ) implements KisEnvelope {
 
-  /** output: 현재가 스냅샷. 전일 대비·누적 거래량은 advisor 장중 점검이 쓴다(2026-09-13) */
+  /**
+   * output: 현재가 스냅샷. 전일 대비·누적 거래량은 advisor 장중 점검이 쓴다(2026-09-13).
+   * 시가·고가·저가·기준가(stck_oprc·stck_hgpr·stck_lwpr·stck_sdpr, KIS data.csv inquire_price 컬럼)는 12:00 픽 노트의 "시가 대비" 계산용으로
+   * 2026-09-21 에 <b>맨 뒤에</b> 더했다 — 위치 record 라 기존 테스트가 위치 인자로 채우므로 중간 삽입 금지.
+   */
   public record Output(
       @JsonProperty("stck_shrn_iscd") String ticker,
       @JsonProperty("stck_prpr") String currentPrice,
@@ -35,7 +39,11 @@ public record KisPriceResponse(
       @JsonProperty("temp_stop_yn") String tempStop,
       @JsonProperty("sltr_yn") String liquidating,
       @JsonProperty("mang_issu_cls_code") String administrative,
-      @JsonProperty("mrkt_warn_cls_code") String marketWarning
+      @JsonProperty("mrkt_warn_cls_code") String marketWarning,
+      @JsonProperty("stck_oprc") String openPrice,
+      @JsonProperty("stck_hgpr") String highPrice,
+      @JsonProperty("stck_lwpr") String lowPrice,
+      @JsonProperty("stck_sdpr") String basePrice
   ) {
   }
 }

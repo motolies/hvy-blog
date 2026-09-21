@@ -18,7 +18,8 @@ import org.springframework.web.client.RestClient;
  * <pre>
  * KIS_APP_KEY=... KIS_APP_SECRET=... ./gradlew test --tests "kr.hvy.blog.modules.stock.client.KisIndexPriceManualTest"
  * </pre>
- * 확인 항목: rt_cd=0 인지(아니면 TR ID 가 틀린 것 — msg1 확인), output.bstp_nmix_prpr / bstp_nmix_prdy_ctrt 가 채워지는지.
+ * 확인 항목: rt_cd=0 인지(아니면 TR ID 가 틀린 것 — msg1 확인), output.bstp_nmix_prpr / bstp_nmix_prdy_ctrt 가 채워지는지,
+ * 12:00 픽 노트(note-v1)가 쓰는 지수 시가 bstp_nmix_oprc 와 종목 시가·기준가 stck_oprc / stck_sdpr 가 채워지는지(비면 PREV_CLOSE 폴백 경로만 돈다).
  */
 @Slf4j
 class KisIndexPriceManualTest {
@@ -38,15 +39,17 @@ class KisIndexPriceManualTest {
     for (String code : new String[] {"0001", "1001"}) {
       String body = get(token, KisRestMarketDataAdapter.INDEX_PRICE_PATH, KisRestMarketDataAdapter.INDEX_PRICE_TR_ID, "U", code);
       KisIndexPriceResponse parsed = KisJson.read(body, KisIndexPriceResponse.class);
-      log.info("[INDEX_PRICE {}] rt_cd={}, msg_cd={}, msg1={}, prpr={}, ctrt={}, raw(앞 400자)={}", code, parsed.rtCd(), parsed.msgCd(), parsed.msg1(),
-          parsed.output() == null ? null : parsed.output().currentValue(), parsed.output() == null ? null : parsed.output().changeRate(),
+      log.info("[INDEX_PRICE {}] rt_cd={}, msg_cd={}, msg1={}, prpr={}, ctrt={}, oprc(bstp_nmix_oprc)={}, raw(앞 400자)={}", code, parsed.rtCd(),
+          parsed.msgCd(), parsed.msg1(), parsed.output() == null ? null : parsed.output().currentValue(),
+          parsed.output() == null ? null : parsed.output().changeRate(), parsed.output() == null ? null : parsed.output().openValue(),
           StringUtils.abbreviate(body, 400));
     }
     String body = get(token, KisRestMarketDataAdapter.PRICE_PATH, KisRestMarketDataAdapter.PRICE_TR_ID, "J", "005930");
     KisPriceResponse parsed = KisJson.read(body, KisPriceResponse.class);
-    log.info("[PRICE 005930] rt_cd={}, prpr={}, prdy_ctrt={}, acml_vol={}", parsed.rtCd(),
+    log.info("[PRICE 005930] rt_cd={}, prpr={}, prdy_ctrt={}, acml_vol={}, oprc(stck_oprc)={}, sdpr(stck_sdpr)={}", parsed.rtCd(),
         parsed.output() == null ? null : parsed.output().currentPrice(), parsed.output() == null ? null : parsed.output().changeRate(),
-        parsed.output() == null ? null : parsed.output().accumulatedVolume());
+        parsed.output() == null ? null : parsed.output().accumulatedVolume(), parsed.output() == null ? null : parsed.output().openPrice(),
+        parsed.output() == null ? null : parsed.output().basePrice());
   }
 
   private String get(KisTokenResponse token, String path, String trId, String marketDiv, String code) {

@@ -13,6 +13,11 @@ import lombok.Getter;
  * 수급은 시총이 아니라 60일 평균 거래대금×5 로 정규화한다 — 밸류에이션 스냅샷은 당일만 있어 과거 IC 사전 추정에서 시총을 쓸 수 없고,
  * 라이브와 IC 가 같은 정의를 써야 학습이 성립한다(2026-09-13).
  * VALUE_RANK 는 과거 값이 없어 IC 학습 대상이 아니고(multiplier 1.0 고정), GLOBAL_LINK 는 국면 특징 전용이라 표현식이 없다.
+ * <p>
+ * SECTOR_MOM_20D/60D(advice-v6, 2026-09-21)는 종목 소속 업종 지수(mv_stock_index_metric, tb_stock_sector_map.sector_code = 업종 코드)의
+ * 20·60일 수익률에서 KOSPI(0001) 같은 창 수익률을 뺀 시장 대비 초과다. KOSPI 업종 지수는 KOSPI 종목만으로 구성된 시총가중 공식 지수라
+ * 양시장 동일가중 MV(SECTOR_STRENGTH) 와 달리 KOSPI 후보의 구성과 어긋나지 않는다. 업종 지수가 없는 섹터는 NULL(점수 기여 0).
+ * 사전 가중치 합은 1.10 이 되지만 점수는 Σw 로 정규화하므로 합 1.00 을 지킬 필요가 없다. 활성 세트에 행이 없으면(IC_BACKFILL 전) 점수에서 빠진다.
  */
 @Getter
 @AllArgsConstructor
@@ -31,6 +36,8 @@ public enum SignalCode implements EnumCode<String> {
   RS_INDEX("RS_INDEX", "지수 대비 20일 상대강도", "f.ret_20d - f.index_ret_20d", true, 0.08, true),
   VALUE_RANK("VALUE_RANK", "PBR (낮을수록)", "f.pbr", false, 0.05, false),
   VOL_20D("VOL_20D", "20일 변동성 (낮을수록)", "f.vol_20d", false, 0.03, true),
+  SECTOR_MOM_20D("SECTOR_MOM_20D", "섹터(업종 지수) 20일 시장 대비 초과", "f.sector_rs_20d", true, 0.05, true),
+  SECTOR_MOM_60D("SECTOR_MOM_60D", "섹터(업종 지수) 60일 시장 대비 초과", "f.sector_rs_60d", true, 0.05, true),
   GLOBAL_LINK("GLOBAL_LINK", "해외 연동 (국면 특징 전용)", null, true, 0.00, false);
 
   private final String code;

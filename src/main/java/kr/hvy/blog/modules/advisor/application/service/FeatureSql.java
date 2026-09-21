@@ -22,6 +22,9 @@ public final class FeatureSql {
    * <p>
    * feat 는 {@code :markets}(advisor.markets, 시장 코드 목록) 로 시장을 한정한다 — 호출자는 :from/:to 와 함께 반드시 바인딩한다.
    * 스크리닝 백분위·유니버스 수·rank-IC 표본이 모두 이 필터 뒤의 행이므로 세 척도가 같은 유니버스를 쓴다(advice-v5, 2026-09-13).
+   * <p>
+   * sector_rs_5d/20d/60d(advice-v6) 는 소속 업종 지수(six, index_code = sector_code)의 같은 창 수익률에서 벤치 지수(ix)의 수익률을 뺀
+   * 시장 대비 초과다. 업종 지수 행이 없거나 창이 짧으면 NULL 로 남는다(SECTOR_MOM_20D/60D 시그널·후보 secRs5/20/60·secCons 특징의 원천).
    */
   public static String featureCtes() {
     return """
@@ -57,6 +60,7 @@ public final class FeatureSql {
                    sm.sector_code, sm.sector_name, sc.cw_5d AS sector_cw_5d,
                    CASE WHEN vo.vol_n >= 15 THEN vo.vol_20d END AS vol_20d,
                    ix.ret_20d AS index_ret_20d,
+                   six.ret_5d - ix.ret_5d AS sector_rs_5d, six.ret_20d - ix.ret_20d AS sector_rs_20d, six.ret_60d - ix.ret_60d AS sector_rs_60d,
                    p.close_price AS raw_close
             FROM base b
                      JOIN tb_stock_daily_metric m ON m.ticker = b.ticker AND m.trade_date = b.trade_date
@@ -68,6 +72,7 @@ public final class FeatureSql {
                      LEFT JOIN vol vo ON vo.ticker = m.ticker AND vo.trade_date = m.trade_date
                      LEFT JOIN mv_stock_index_metric ix ON ix.index_code = CASE ms.market_type WHEN 'KOSPI' THEN '0001' ELSE '1001' END
                                                        AND ix.trade_date = m.trade_date
+                     LEFT JOIN mv_stock_index_metric six ON six.index_code = sm.sector_code AND six.trade_date = m.trade_date
             WHERE ms.market_type IN (:markets)
         )
         """;

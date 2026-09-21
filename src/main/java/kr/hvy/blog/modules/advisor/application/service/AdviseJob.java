@@ -41,10 +41,14 @@ import org.springframework.stereotype.Component;
 /**
  * 일일 판단 파이프라인 (ADVISE, 평일 19:30~19:55 KST).
  * <pre>
- * 게이트 → 채점·IC 증분(격리) → 시장 특징 → 스크리닝(활성 가중치) → QUANT_TOPN 섀도 저장 → 프롬프트(실적 블록·교훈은 표본 게이트 뒤) →
- * LLM 판단(strict 스키마) → 가드 → LIVE 저장·입력 스냅샷 → Slack 발행 → (메모리 활성 시) LLM_NOMEM 섀도
+ * 게이트 → 채점·IC 증분(격리) → 시장 특징 → 스크리닝(활성 가중치) → QUANT_TOPN 섀도 저장 → 프롬프트(실적 블록·교훈은 표본 게이트 뒤,
+ * recentOutcomes 확정 빈도표는 확정 노트 게이트 뒤 — 격리) → LLM 판단(strict 스키마) → 가드 → LIVE 저장(memory_json)·입력 스냅샷 → Slack 발행 →
+ * (메모리가 하나라도 실렸고 nomem-weeks 창 안이면) LLM_NOMEM 섀도 → (뉴스가 실렸고 nonews-weeks 창 안이면) LLM_NONEWS 섀도
  * </pre>
- * 스크리닝·판단·저장은 실패하면 잡 전체가 FAILED(부분 추천 금지). 채점·섀도·발행 실패는 격리되어 PARTIAL 로 남는다.
+ * 스크리닝·판단·저장은 실패하면 잡 전체가 FAILED(부분 추천 금지). 채점·노트·섀도·발행 실패는 격리되어 PARTIAL 로 남는다.
+ * <p>
+ * 2계층 메모리(note-v1, 2026-09-21): 빠른 층 = recentOutcomes(12:00 노트의 T+5 확정 빈도표, 300 게이트 전에도 주입), 느린 층 = scoreboard·lessons(300 게이트 뒤).
+ * LLM_NOMEM 은 세 가지 전부 없는 판단이라 300 전에는 정확히 "노트만 뺀" 1요인 섀도가 된다. 헤더 memory_json 이 어떤 메모리가 실렸는지 남기고 NOMEM 창의 시작점이 된다.
  */
 @Slf4j
 @Component
@@ -68,6 +72,8 @@ public class AdviseJob implements AdvisorJob {
   private final ObjectProvider<ScoreHook> scoreHook;
   /** 뉴스 입력(advice-v4). advisor.news.enabled 일 때만 쓴다 */
   private final ObjectProvider<NewsFeatureService> newsFeatures;
+  /** 12:00 노트의 T+5 확정 빈도표(note-v1) */
+  private final RecentOutcomesService recentOutcomes;
 
   /** 채점 단계 훅 (Phase 5 의 ScoreJob 이 구현). 없으면 IC 증분만 돈다 */
   public interface ScoreHook {
@@ -91,7 +97,8 @@ public class AdviseJob implements AdvisorJob {
   public AdviseJob(AdvisorProperties properties, AdvisorGateService gate, SignalIcService icService, MarketFeatureService marketFeatures,
       CandidateScreeningService screening, WeightSetRepository weightSets, AdvicePromptBuilder promptBuilder, PromptResources prompts,
       @Qualifier(MarketJudgeClient.JUDGE_BEAN) MarketJudgeClient judge, AdviceWriter adviceWriter, PromptInputWriter promptInputs,
-      LessonRepository lessons, AdvisorNotifier notifier, ObjectProvider<ScoreHook> scoreHook, ObjectProvider<NewsFeatureService> newsFeatures) {
+      LessonRepository lessons, AdvisorNotifier notifier, ObjectProvider<ScoreHook> scoreHook, ObjectProvider<NewsFeatureService> newsFeatures,
+      RecentOutcomesService recentOutcomes) {
     this.properties = properties;
     this.gate = gate;
     this.icService = icService;
@@ -108,6 +115,7 @@ public class AdviseJob implements AdvisorJob {
     this.notifier = notifier;
     this.scoreHook = scoreHook;
     this.newsFeatures = newsFeatures;
+    this.recentOutcomes = recentOutcomes;
   }
 
   @Override
@@ -181,14 +189,29 @@ public class AdviseJob implements AdvisorJob {
       steps.skip("NEWS", "뉴스 입력 비활성");
     }
     final NewsBlock news = newsBox[0];
-    PromptPayload payload = promptBuilder.build(market[0], tagged, promptScoreboard, activeLessons, weightSet.enabledWeights(), decision.quality(), news);
+    // 빠른 층(note-v1): 12:00 노트의 T+5 확정 빈도표 — 격리. 조회 실패·확정 노트 부족은 블록 없이 판단한다(단계는 OK, 부족 사유는 skip.NOTES 메타)
+    final Map<String, Object>[] outcomesBox = newMapBox();
+    boolean notesOk = steps.run("NOTES", () -> outcomesBox[0] = recentOutcomes.block(baseDate).orElse(null));
+    if (notesOk && outcomesBox[0] == null) {
+      execution.putMetadata("skip.NOTES", "확정 노트 < " + properties.getNote().getMinFinalized());
+    }
+    final Map<String, Object> outcomes = outcomesBox[0];
+    PromptPayload payload = promptBuilder.build(market[0], tagged, promptScoreboard, activeLessons, weightSet.enabledWeights(), decision.quality(), news,
+        outcomes);
     if (payload.truncated()) {
       execution.warn("입력 길이 상한으로 후보를 " + payload.candidatesIncluded() + "개로 줄였습니다");
     }
+    // 메모리 요약: 세 층 중 하나라도 실렸으면 헤더 memory_json 에 남긴다(없으면 null) — NOMEM 창 시작점·사후 요인 분리
+    Map<String, Object> memoryJson = memoryJson(outcomes, activeLessons, promptScoreboard);
+    boolean memoryInjected = memoryJson != null;
     execution.putMetadata("promptChars", payload.json().length());
     execution.putMetadata("memoryOn", memoryOn);
+    if (memoryInjected) {
+      execution.putMetadata("memory", memoryJson);
+    }
     execution.putMetadata("newsIds", payload.newsIds().size());
-    Map<String, String> sectorNames = sectorNames(market[0], candidates);
+    // 섹터 맥락(advice-v6): 이름 + consistent·overheated — 가드의 주도 섹터 검증·확신 클램프에 쓴다. LIVE·섀도가 같은 맥락을 공유한다
+    AdviceGuard.SectorContext sectorContext = AdviceGuard.SectorContext.of(market[0], candidates);
     String schema = AdviceSchemaFactory.schemaJson(payload.candidateTickers(), payload.sectorCodes(), payload.newsIds());
 
     // ⑤ 판단 (필수) → ⑥ 가드
@@ -197,7 +220,7 @@ public class AdviseJob implements AdvisorJob {
     MarketJudgeClient.JudgeResult jr = judged[0];
     execution.recordLlmUsage(jr.model(), PromptResources.ADVICE_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
     List<CandidateRow> included = candidates.subList(0, payload.candidatesIncluded());
-    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorNames, trendCodes, news);
+    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorContext, trendCodes, news);
     execution.putMetadata("guard", guarded.stats());
     if (guarded.tooFew(properties.getPickMin())) {
       promptInputs.upsert(new PromptInputRow(execution.runId(), AdviceVariant.LIVE, PromptResources.ADVICE_VERSION, prompts.adviceSha256(),
@@ -219,7 +242,7 @@ public class AdviseJob implements AdvisorJob {
         .dataAsOf(market[0].dataAsOf()).entryDate(market[0].entryDate()).exitDate(market[0].exitDate()).newsIds(payload.newsIds())
         .promptVersion(PromptResources.ADVICE_VERSION).model(jr.model()).systemFingerprint(jr.responseId())
         .weightSetId(result.weightSetId()).activeLessonIds(activeLessons.stream().map(LessonRow::lessonId).toList())
-        .dataQuality(decision.quality()).guard(guarded.stats())
+        .dataQuality(decision.quality()).guard(guarded.stats()).memoryJson(memoryJson)
         .build();
     final long[] adviceId = new long[1];
     steps.runOrThrow("SAVE", () -> {
@@ -254,16 +277,16 @@ public class AdviseJob implements AdvisorJob {
       }
     });
 
-    // ⑨ 섀도 (격리). 요인 분리: NOMEM = 뉴스 그대로·메모리 없음, NONEWS = 메모리 그대로·뉴스 없음 — LIVE 와 정확히 한 요인만 다르다
-    if (memoryOn && (!activeLessons.isEmpty() || promptScoreboard != null)) {
-      steps.run("SHADOW_NOMEM", () -> saveLlmShadow(AdviceVariant.LLM_NOMEM, execution, market[0], tagged, weightSet, sectorNames, decision,
-          null, List.of(), news, "shadowNomemAdviceId"));
+    // ⑨ 섀도 (격리). 요인 분리: NOMEM = 뉴스 그대로·메모리(recentOutcomes·lessons·scoreboard) 없음, NONEWS = 메모리 그대로·뉴스 없음 — LIVE 와 정확히 한 요인만 다르다
+    if (memoryInjected && nomemShadowOpen(baseDate)) {
+      steps.run("SHADOW_NOMEM", () -> saveLlmShadow(AdviceVariant.LLM_NOMEM, execution, market[0], tagged, weightSet, sectorContext, decision,
+          null, List.of(), news, "shadowNomemAdviceId", null));
     } else {
-      steps.skip("SHADOW_NOMEM", "메모리 미활성");
+      steps.skip("SHADOW_NOMEM", memoryInjected ? "섀도 기간 종료" : "메모리 미주입");
     }
     if (news != null && nonewsShadowOpen(baseDate)) {
-      steps.run("SHADOW_NONEWS", () -> saveLlmShadow(AdviceVariant.LLM_NONEWS, execution, market[0], tagged, weightSet, sectorNames, decision,
-          promptScoreboard, activeLessons, null, "shadowNonewsAdviceId"));
+      steps.run("SHADOW_NONEWS", () -> saveLlmShadow(AdviceVariant.LLM_NONEWS, execution, market[0], tagged, weightSet, sectorContext, decision,
+          promptScoreboard, activeLessons, null, "shadowNonewsAdviceId", outcomes));
     } else {
       steps.skip("SHADOW_NONEWS", news == null ? "뉴스 없음" : "뉴스 섀도 기간 종료");
     }
@@ -274,6 +297,36 @@ public class AdviseJob implements AdvisorJob {
    */
   boolean nonewsShadowOpen(LocalDate baseDate) {
     return adviceWriter.firstNewsAdviceDate().map(first -> !baseDate.isAfter(first.plusWeeks(properties.getShadow().getNonewsWeeks()))).orElse(true);
+  }
+
+  /**
+   * 메모리 없는 섀도(LLM_NOMEM)를 돌릴 기간인지: 메모리가 처음 실린 LIVE 판단(memory_json IS NOT NULL)부터 advisor.shadow.nomem-weeks 주 안 — NONEWS 와 동형.
+   * 첫 판단이 아직 없으면(오늘이 처음) 연다. 2026-09-21 까지 nomem-weeks 를 읽는 코드가 없어 NOMEM 이 영구 병행이던 결함의 수정(운영 문서 §8 사전 등록 판정).
+   */
+  boolean nomemShadowOpen(LocalDate baseDate) {
+    return adviceWriter.firstMemoryAdviceDate().map(first -> !baseDate.isAfter(first.plusWeeks(properties.getShadow().getNomemWeeks()))).orElse(true);
+  }
+
+  /**
+   * 헤더 memory_json: 프롬프트에 실린 메모리 요약 {recentOutcomes: 행수, lessons: [id], scoreboard: bool}. 셋 다 없으면 null(주입 없음) — NOMEM 섀도도 null.
+   */
+  static Map<String, Object> memoryJson(Map<String, Object> recentOutcomes, List<LessonRow> lessons, Map<String, Object> scoreboard) {
+    boolean hasOutcomes = recentOutcomes != null && !recentOutcomes.isEmpty();
+    boolean hasLessons = lessons != null && !lessons.isEmpty();
+    boolean hasScoreboard = scoreboard != null && !scoreboard.isEmpty();
+    if (!hasOutcomes && !hasLessons && !hasScoreboard) {
+      return null;
+    }
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("recentOutcomes", RecentOutcomesService.rowCount(hasOutcomes ? recentOutcomes : null));
+    m.put("lessons", hasLessons ? lessons.stream().map(LessonRow::lessonId).toList() : List.of());
+    m.put("scoreboard", hasScoreboard);
+    return m;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object>[] newMapBox() {
+    return (Map<String, Object>[]) new Map[1];
   }
 
   /**
@@ -310,22 +363,22 @@ public class AdviseJob implements AdvisorJob {
 
   /**
    * LLM 섀도 1회: 같은 시장·후보 입력에서 요인 하나만 바꿔 한 번 더 판단해 variant 로 저장한다 (발행 없음).
-   * LLM_NOMEM 은 메모리(실적 블록·교훈) 없이·뉴스는 그대로, LLM_NONEWS 는 뉴스 없이·메모리는 그대로 — 각 섀도가 LIVE 와 정확히 한 요인만 달라야
-   * (LIVE − 섀도) 가 그 요인의 가치가 된다.
+   * LLM_NOMEM 은 메모리(실적 블록·교훈·recentOutcomes) 없이·뉴스는 그대로, LLM_NONEWS 는 뉴스 없이·메모리는 그대로 — 각 섀도가 LIVE 와 정확히 한 요인만 달라야
+   * (LIVE − 섀도) 가 그 요인의 가치가 된다. 헤더 memory_json 은 이 섀도에 실제로 실린 메모리로 적는다(NOMEM 은 null, NONEWS 는 LIVE 와 같은 값).
    */
   private void saveLlmShadow(AdviceVariant variant, AdvisorExecution execution, MarketFeatures market, ScreeningResult screened, WeightSet weightSet,
-      Map<String, String> sectorNames, AdvisorGateService.Decision decision, Map<String, Object> scoreboard, List<LessonRow> lessons, NewsBlock news,
-      String metadataKey) {
+      AdviceGuard.SectorContext sectorContext, AdvisorGateService.Decision decision, Map<String, Object> scoreboard, List<LessonRow> lessons,
+      NewsBlock news, String metadataKey, Map<String, Object> recentOutcomes) {
     if (adviceWriter.find(screened.baseDate(), AdviceHeader.KIND_DAILY, variant).isPresent()) {
       return;
     }
-    PromptPayload payload = promptBuilder.build(market, screened, scoreboard, lessons, weightSet.enabledWeights(), decision.quality(), news);
+    PromptPayload payload = promptBuilder.build(market, screened, scoreboard, lessons, weightSet.enabledWeights(), decision.quality(), news, recentOutcomes);
     String schema = AdviceSchemaFactory.schemaJson(payload.candidateTickers(), payload.sectorCodes(), payload.newsIds());
     MarketJudgeClient.JudgeResult jr = judge.judge(prompts.adviceSystem(), payload, schema);
     execution.recordLlmUsage(jr.model(), PromptResources.ADVICE_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
     List<CandidateRow> included = screened.candidates().subList(0, payload.candidatesIncluded());
     Map<String, MarketTrendCode> trendCodes = market.trendCodes();
-    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorNames, trendCodes, news);
+    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorContext, trendCodes, news);
     AdviceHeader header = AdviceHeader.builder().runId(execution.runId()).baseDate(screened.baseDate()).adviceKind(AdviceHeader.KIND_DAILY)
         .variant(variant).horizonDays(properties.getHorizonDays())
         .regimeCode(guarded.regime()).kospiDir(guarded.kospiDir()).kosdaqDir(guarded.kosdaqDir()).pUp(guarded.pUp())
@@ -334,7 +387,7 @@ public class AdviseJob implements AdvisorJob {
         .dataAsOf(market.dataAsOf()).entryDate(market.entryDate()).exitDate(market.exitDate()).newsIds(payload.newsIds())
         .promptVersion(PromptResources.ADVICE_VERSION).model(jr.model()).systemFingerprint(jr.responseId())
         .weightSetId(screened.weightSetId()).activeLessonIds(lessons.stream().map(LessonRow::lessonId).toList())
-        .dataQuality(decision.quality()).guard(guarded.stats()).build();
+        .dataQuality(decision.quality()).guard(guarded.stats()).memoryJson(memoryJson(recentOutcomes, lessons, scoreboard)).build();
     long id = adviceWriter.insertHeader(header);
     adviceWriter.insertCandidates(id, included);
     adviceWriter.insertPicks(id, guarded.picks());
@@ -359,14 +412,6 @@ public class AdviseJob implements AdvisorJob {
       tagged.add(c.toBuilder().appliedLessonIds(ids).build());
     }
     return tagged;
-  }
-
-  private static Map<String, String> sectorNames(MarketFeatures market, List<CandidateRow> candidates) {
-    Map<String, String> names = new LinkedHashMap<>();
-    market.topSectors().forEach(s -> names.put(s.code(), s.name()));
-    market.bottomSectors().forEach(s -> names.put(s.code(), s.name()));
-    candidates.stream().filter(c -> c.sectorCode() != null).forEach(c -> names.putIfAbsent(c.sectorCode(), c.sectorName()));
-    return names;
   }
 
   /** 테스트용 */

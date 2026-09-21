@@ -48,7 +48,12 @@ public record AdviceHeader(
     DataQuality dataQuality,
     Map<String, Object> guard,
     Instant publishedAt,
-    Instant createdAt) {
+    Instant createdAt,
+    /**
+     * 프롬프트에 실린 메모리 요약 {recentOutcomes: 행수, lessons: [id], scoreboard: bool} (note-v1). 하나도 실리지 않았으면(300 게이트 전·확정 노트 부족·NOMEM 섀도) null —
+     * LLM_NOMEM 섀도 창의 시작점(AdviceWriter.firstMemoryAdviceDate)과 사후 요인 분리에 쓴다
+     */
+    Map<String, Object> memoryJson) {
 
   public static final String KIND_DAILY = "DAILY";
 

@@ -51,6 +51,15 @@ class TradingCalendarTest {
   }
 
   @Test
+  @DisplayName("이전 영업일 n개: asOf 제외·최근 순, 주말·휴장일을 건너뛰고 마지막 원소가 창 시작일")
+  void previousTradingDays() {
+    // 2026-09-18(금) 기준 앞 4 영업일: 17(목) 16(수) 14(월) 11(금) — 15(화) 휴장·주말 제외
+    assertThat(tradingCalendar.previousTradingDays(LocalDate.of(2026, 9, 18), 4))
+        .containsExactly(LocalDate.of(2026, 9, 17), LocalDate.of(2026, 9, 16), LocalDate.of(2026, 9, 14), LocalDate.of(2026, 9, 11));
+    assertThat(tradingCalendar.previousTradingDays(LocalDate.of(2026, 9, 14), 1)).containsExactly(LocalDate.of(2026, 9, 11));
+  }
+
+  @Test
   @DisplayName("영업일이 전혀 없으면(캘린더 오류) 예외로 드러낸다")
   void failsWhenNoTradingDays() {
     when(calendar.isTradingDay(any())).thenReturn(false);

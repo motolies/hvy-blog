@@ -14,12 +14,15 @@ import org.junit.jupiter.api.Test;
 class FeatureSqlTest {
 
   @Test
-  @DisplayName("점수화 가능한 시그널은 표현식이 있는 11개, IC 학습 대상은 밸류를 뺀 10개다")
+  @DisplayName("점수화 가능한 시그널은 표현식이 있는 13개, IC 학습 대상은 밸류를 뺀 12개다 (advice-v6: 섹터 모멘텀 2개 추가, 사전 합 1.10)")
   void catalog() {
-    assertThat(SignalCode.scorable()).hasSize(11).doesNotContain(SignalCode.GLOBAL_LINK);
-    assertThat(SignalCode.learnable()).hasSize(10).doesNotContain(SignalCode.VALUE_RANK, SignalCode.GLOBAL_LINK);
+    assertThat(SignalCode.scorable()).hasSize(13).doesNotContain(SignalCode.GLOBAL_LINK)
+        .contains(SignalCode.SECTOR_MOM_20D, SignalCode.SECTOR_MOM_60D);
+    assertThat(SignalCode.learnable()).hasSize(12).doesNotContain(SignalCode.VALUE_RANK, SignalCode.GLOBAL_LINK);
     double baseSum = SignalCode.scorable().stream().mapToDouble(SignalCode::getBaseWeight).sum();
-    assertThat(baseSum).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-9));
+    // 점수는 Σw 로 정규화하므로 사전 합이 1.00 일 필요는 없다 — 시드(advisor-seed.sql)와 같은 값인지만 고정한다
+    assertThat(baseSum).isCloseTo(1.10, org.assertj.core.data.Offset.offset(1e-9));
+    assertThat(SignalCode.SECTOR_MOM_60D.getExpression()).isEqualTo("f.sector_rs_60d");
   }
 
   @Test
@@ -54,7 +57,8 @@ class FeatureSqlTest {
   @DisplayName("IC 언피벗은 학습 시그널마다 (code, 값) 쌍이고 낮을수록 좋은 시그널은 음수화한다")
   void icValuesList() {
     String values = FeatureSql.icValuesList(SignalCode.learnable());
-    assertThat(values).contains("('MOM_20D', (f.ret_20d))").contains("('VOL_20D', -(f.vol_20d))").doesNotContain("VALUE_RANK");
+    assertThat(values).contains("('MOM_20D', (f.ret_20d))").contains("('VOL_20D', -(f.vol_20d))").contains("('SECTOR_MOM_20D', (f.sector_rs_20d))")
+        .doesNotContain("VALUE_RANK");
   }
 
   @Test
@@ -64,5 +68,8 @@ class FeatureSqlTest {
     assertThat(ctes).doesNotContain("LEAD(").doesNotContain("> :to");
     assertThat(ctes).contains("BETWEEN :from AND :to");
     assertThat(ctes).as("advice-v5: 스크리닝·IC 가 같은 시장 필터를 쓴다").contains("WHERE ms.market_type IN (:markets)");
+    // advice-v6: 업종 지수는 같은 날짜 행만 조인한다(six.trade_date = m.trade_date) — 기준일 뒤 행을 볼 수 없다
+    assertThat(ctes).contains("LEFT JOIN mv_stock_index_metric six ON six.index_code = sm.sector_code AND six.trade_date = m.trade_date")
+        .contains("six.ret_5d - ix.ret_5d AS sector_rs_5d").contains("six.ret_20d - ix.ret_20d AS sector_rs_20d").contains("six.ret_60d - ix.ret_60d AS sector_rs_60d");
   }
 }

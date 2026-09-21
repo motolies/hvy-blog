@@ -275,8 +275,10 @@ advisor:
   pick-max: 10                    # Slack 은 픽마다 section 1개 — 36 초과면 블록 50 상한
   advise:
     deadline: "19:55"             # DAILY 완료 대기 마감(KST). 이후 미완료면 SKIPPED + #hvy-error
+    non-consistent-conviction-cap: 0.70   # advice-v6: secCons=0(세 구간 초과 미충족)·overheated 섹터 LONG 픽의 확신 상한 — 가드가 기계 클램프(stats capNonConsistent/capOverheated)
+    overheated-sigma: 2.0         # 섹터 과열 = 업종 지수 5일 수익률 > 배수 × σ_5d(KOSPI)
   prompt:
-    version: advice-v5            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문 (2026-09-13). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
+    version: advice-v6            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문, v6 섹터 기간 모멘텀(업종 지수 rs5/20/60·consistent·overheated, 2026-09-21). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
   news:                           # 뉴스 입력(advice-v4). tb_stock_news(scheduler.stock-eventfeed, GDELT 헤드라인) 가 쌓여 있어야 한다. 주입 시점은 계획 Phase 1d(구조화 사건)에서 결정
     enabled: ${NEWS_ENABLED:false}
@@ -335,6 +337,14 @@ advisor:
   cost:
     input-per-1m-usd: 0           # 0 이면 비용 미계산. 모델 단가로 채우면 run.cost_usd 에 기록
     output-per-1m-usd: 0
+  note:                           # 12:00 픽 노트(오답노트, note-v1 2026-09-21). INTRADAY 가 픽별 편차를 분류·회고해 tb_advisor_pick_note 에 남기고 T+5 채점이 CONFIRMED/REFUTED 로 확정
+    enabled: ${ADVISOR_NOTE_ENABLED:true}   # false 면 회고 LLM 호출(REFLECT)만 건너뛴다 — 정량·분류 노트는 그대로 저장
+    z-threshold: 1.0              # |z| 미만이면 FLAT(회고 생략). z = 지수 대비 초과 / (vol20 × √(3/6.5))
+    max-reflect-picks: 10         # 회고 호출 1건에 넣는 픽 상한(|z| 큰 순). assist 1회/일
+    window-trading-days: 20       # recentOutcomes 집계 창(거래일)
+    min-finalized: 10             # 확정 노트가 이보다 적으면 recentOutcomes 블록 생략
+    max-rows: 5                   # recentOutcomes 빈도표 최대 행 수(class × secCons)
+    cutoff: "20:00"               # recentOutcomes 확정 마감(KST) — 사후 재실행(baseDate=)에서 이 시각 이후 확정·관측된 노트가 새어 들지 않게(advisor.news.cutoff 와 같은 뜻)
   retention-days: 180             # 프롬프트 입력 스냅샷 보존
   # Slack #hvy-advisor 채팅 봇 (chat-v1, 2026-09-13). Socket Mode 수신 — 공개 URL·서명 검증 없음, app-level 토큰 1개.
   # 토큰·채널·허용 사용자 중 하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨). bot 토큰은 slack.token(SLACK_BOT_TOKEN) 재사용

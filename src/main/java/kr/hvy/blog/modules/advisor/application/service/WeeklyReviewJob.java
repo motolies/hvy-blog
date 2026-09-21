@@ -21,6 +21,7 @@ import kr.hvy.blog.modules.advisor.domain.model.PromptInputRow;
 import kr.hvy.blog.modules.advisor.domain.model.SignalWeightRow;
 import kr.hvy.blog.modules.advisor.domain.model.WeightSet;
 import kr.hvy.blog.modules.advisor.repository.jdbc.AdviceWriter;
+import kr.hvy.blog.modules.advisor.repository.jdbc.PickNoteRepository;
 import kr.hvy.blog.modules.advisor.repository.jdbc.PromptInputWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.WeightSetRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,7 @@ import org.springframework.stereotype.Component;
  *   <li>가중치 세트 갱신 (n_eff 게이트) → 활성화</li>
  *   <li>교훈: 사후 성과 갱신·폐기 → 셀 집계 → 보조 모델 제안 → 규칙 검증 저장 (누적 픽 게이트 뒤)</li>
  *   <li>재현성: 직전 LIVE 입력을 동결한 채 N회 재실행 → 픽 집합 Jaccard</li>
+ *   <li>메모리 점검(note-v1): 최근 4주 LIVE vs LLM_NOMEM 픽 Jaccard·|Δconviction|(사전 등록 판정의 재료, 운영 문서 §8) + 확정 지연 노트 수(finalize 정지 경보)</li>
  *   <li>주간 보고 발행, 프롬프트 스냅샷 보존 정리</li>
  * </ol>
  * 각 단계는 격리되어 하나가 죽어도 나머지는 진행하고 run 은 PARTIAL 로 남는다.
@@ -46,6 +48,12 @@ import org.springframework.stereotype.Component;
 public class WeeklyReviewJob implements AdvisorJob {
 
   static final int REVIEW_WINDOW_DAYS = 90;
+  /** LIVE vs NOMEM 대조 창(주) — 8주 섀도의 절반, 최근 행동 변화를 본다 */
+  static final int MEMORY_COMPARE_WEEKS = 4;
+  /** 확정 지연 판정: base_date 로부터 이 영업일이 지나도 finalized_at 이 없으면 정지 의심(T+5 채점은 D+6 ADVISE 에서 돈다) */
+  static final int STALE_NOTE_TRADING_DAYS = 10;
+  /** 대조 창 안 헤더 조회 상한(변형당) */
+  static final int MEMORY_COMPARE_LIMIT = 60;
 
   private final AdvisorProperties properties;
   private final ScoreJob scoreJob;
@@ -60,6 +68,8 @@ public class WeeklyReviewJob implements AdvisorJob {
   private final MarketJudgeClient assist;
   private final AdvisorNotifier notifier;
   private final JdbcTemplate jdbc;
+  private final PickNoteRepository notes;
+  private final TradingCalendar calendar;
 
   /**
    * 유일한 생성자. judge/assist 클라이언트는 AdvisorAiConfig 의 judgeClient/assistClient 빈을 받는다.
@@ -68,7 +78,7 @@ public class WeeklyReviewJob implements AdvisorJob {
   public WeeklyReviewJob(AdvisorProperties properties, ScoreJob scoreJob, SignalIcService icService, WeightSetRepository weightSets,
       LessonService lessonService, AdvisorKpiService kpi, AdviceWriter adviceWriter, PromptInputWriter promptInputs, PromptResources prompts,
       @Qualifier(MarketJudgeClient.JUDGE_BEAN) MarketJudgeClient judge, @Qualifier(MarketJudgeClient.ASSIST_BEAN) MarketJudgeClient assist,
-      AdvisorNotifier notifier, JdbcTemplate jdbc) {
+      AdvisorNotifier notifier, JdbcTemplate jdbc, PickNoteRepository notes, TradingCalendar calendar) {
     this.properties = properties;
     this.scoreJob = scoreJob;
     this.icService = icService;
@@ -82,6 +92,8 @@ public class WeeklyReviewJob implements AdvisorJob {
     this.assist = assist;
     this.notifier = notifier;
     this.jdbc = jdbc;
+    this.notes = notes;
+    this.calendar = calendar;
   }
 
   @Override
@@ -207,6 +219,8 @@ public class WeeklyReviewJob implements AdvisorJob {
         kpiLines.add("채점된 픽 없음");
       }
     });
+    // 메모리 점검(note-v1, 격리): LIVE vs NOMEM 행동 차이 + 확정 지연 노트 — KPI 블록에 2줄
+    steps.run("MEMORY", () -> memoryLines(execution, today, kpiLines));
     List<String> calibrationLines = new ArrayList<>();
     for (AdvisorKpiService.CalibrationRow c : kpi.calibration(from, today)) {
       calibrationLines.add(String.format("확신 %.2f: n=%d 실현 승률 %.0f%%", c.conviction(), c.n(), pct(c.hitRate())));
@@ -282,11 +296,7 @@ public class WeeklyReviewJob implements AdvisorJob {
     int pairs = 0;
     for (int i = 0; i < pickSets.size(); i++) {
       for (int j = i + 1; j < pickSets.size(); j++) {
-        Set<String> union = new HashSet<>(pickSets.get(i));
-        union.addAll(pickSets.get(j));
-        Set<String> inter = new HashSet<>(pickSets.get(i));
-        inter.retainAll(pickSets.get(j));
-        jaccardSum += union.isEmpty() ? 1.0 : (double) inter.size() / union.size();
+        jaccardSum += jaccard(pickSets.get(i), pickSets.get(j));
         pairs++;
       }
     }
@@ -297,6 +307,70 @@ public class WeeklyReviewJob implements AdvisorJob {
     if (jaccard < 0.7) {
       warnings.add(String.format("재현성 낮음 (Jaccard %.2f < 0.70) — LLM 랭킹 관여 축소 검토", jaccard));
     }
+  }
+
+  /**
+   * 픽 집합 Jaccard (둘 다 비면 1).
+   */
+  static double jaccard(Set<String> a, Set<String> b) {
+    Set<String> union = new HashSet<>(a);
+    union.addAll(b);
+    Set<String> inter = new HashSet<>(a);
+    inter.retainAll(b);
+    return union.isEmpty() ? 1.0 : (double) inter.size() / union.size();
+  }
+
+  /**
+   * KPI 블록의 메모리 점검 2줄(note-v1).
+   * ① 최근 4주 같은 기준일의 LIVE·LLM_NOMEM 판단 쌍에서 픽 Jaccard 평균과 공통 티커의 |Δconviction| 평균 — 8주 뒤 사전 등록 판정(Jaccard ≥ 0.9 ∧ |Δconv| < 0.05 → 주입 off)의 재료.
+   *   쌍이 없으면 "쌍 없음"(메모리 미주입 기간·섀도 종료 뒤).
+   * ② base_date 로부터 10 영업일이 지나도 finalized_at 이 없는 노트 수 — 0 이 아니면 T+5 finalize 가 멈춘 것이라 recentOutcomes 가 조용히 빈다.
+   */
+  void memoryLines(AdvisorExecution execution, LocalDate today, List<String> lines) {
+    LocalDate from = today.minusWeeks(MEMORY_COMPARE_WEEKS);
+    Map<LocalDate, AdviceHeader> nomem = new LinkedHashMap<>();
+    for (AdviceHeader h : adviceWriter.findRange(from, today, AdviceVariant.LLM_NOMEM, MEMORY_COMPARE_LIMIT)) {
+      nomem.putIfAbsent(h.baseDate(), h);
+    }
+    double jaccardSum = 0;
+    double convictionSum = 0;
+    int convictionPairs = 0;
+    int days = 0;
+    for (AdviceHeader live : adviceWriter.findRange(from, today, AdviceVariant.LIVE, MEMORY_COMPARE_LIMIT)) {
+      AdviceHeader shadow = nomem.get(live.baseDate());
+      if (shadow == null || live.adviceId() == null || shadow.adviceId() == null) {
+        continue;
+      }
+      Map<String, Double> livePicks = new LinkedHashMap<>();
+      adviceWriter.picks(live.adviceId()).forEach(p -> livePicks.put(p.ticker(), p.conviction()));
+      Map<String, Double> shadowPicks = new LinkedHashMap<>();
+      adviceWriter.picks(shadow.adviceId()).forEach(p -> shadowPicks.put(p.ticker(), p.conviction()));
+      jaccardSum += jaccard(livePicks.keySet(), shadowPicks.keySet());
+      for (Map.Entry<String, Double> e : livePicks.entrySet()) {
+        Double other = shadowPicks.get(e.getKey());
+        if (other != null) {
+          convictionSum += Math.abs(e.getValue() - other);
+          convictionPairs++;
+        }
+      }
+      days++;
+    }
+    if (days == 0) {
+      lines.add(String.format("LIVE vs NOMEM(최근 %d주): 쌍 없음", MEMORY_COMPARE_WEEKS));
+    } else {
+      double jaccard = jaccardSum / days;
+      Double dConviction = convictionPairs == 0 ? null : convictionSum / convictionPairs;
+      lines.add(String.format("LIVE vs NOMEM(최근 %d주): 픽 Jaccard 평균 %.2f · |Δconviction| 평균 %s (n=%d일)", MEMORY_COMPARE_WEEKS, jaccard,
+          dConviction == null ? "-" : String.format("%.2f", dConviction), days));
+      execution.putMetadata("nomemJaccard", Math.round(jaccard * 1000) / 1000.0);
+      if (dConviction != null) {
+        execution.putMetadata("nomemDeltaConviction", Math.round(dConviction * 1000) / 1000.0);
+      }
+    }
+    LocalDate staleBefore = calendar.previousTradingDays(today, STALE_NOTE_TRADING_DAYS).getLast();
+    int stale = notes.countStaleOpen(staleBefore);
+    lines.add(String.format("OPEN 노트 %d영업일 초과: %d건", STALE_NOTE_TRADING_DAYS, stale));
+    execution.putMetadata("staleNotes", stale);
   }
 
   private double degradedRatio(LocalDate from, LocalDate to) {

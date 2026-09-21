@@ -2,8 +2,10 @@ package kr.hvy.blog.modules.advisor.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.client.llm.AdviceResponse;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
@@ -14,6 +16,7 @@ import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
+import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
 import kr.hvy.blog.modules.advisor.domain.model.SignalValue;
 import kr.hvy.blog.modules.advisor.domain.model.TrendOutlook;
 import org.junit.jupiter.api.DisplayName;
@@ -21,13 +24,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
 /**
- * 가드 규칙을 고정한다: 후보 밖·중복·근거 위조 제거, 확신 이산화, AVOID 상한, 픽 상한·하한, 인젝션 문자 제거, 추세 전망 폴백·모순 강등.
+ * 가드 규칙을 고정한다: 후보 밖·중복·근거 위조 제거, 확신 이산화, AVOID 상한, 픽 상한·하한, 인젝션 문자 제거, 추세 전망 폴백·모순 강등,
+ * advice-v6 섹터 맥락(주도 섹터 consistent 전달·secCons=0/overheated LONG 확신 클램프).
  */
 class AdviceGuardTest {
 
   private final AdvisorProperties properties = new AdvisorProperties(new MockEnvironment());
   private final AdviceGuard guard = new AdviceGuard(properties);
-  private final Map<String, String> sectors = Map.of("G2510", "반도체", "G3020", "음식료");
+  /** G2510 은 세 구간 연속 초과(consistent), G3020 은 과열(overheated) */
+  private final AdviceGuard.SectorContext sectors = new AdviceGuard.SectorContext(Map.of("G2510", "반도체", "G3020", "음식료"), Set.of("G2510"), Set.of("G3020"));
   private final Map<String, MarketTrendCode> trends = Map.of("0001", MarketTrendCode.BULL, "1001", MarketTrendCode.BEAR);
   private final AdviceResponse.TrendOutlookView outlook = new AdviceResponse.TrendOutlookView(
       new AdviceResponse.Outlook("BEYOND_20D", "0.70", "BELOW_MA20"), new AdviceResponse.Outlook("WITHIN_5D", "0.60", "ABOVE_MA60"));
@@ -51,14 +56,16 @@ class AdviceGuardTest {
 
     assertThat(result.picks()).extracting(PickRow::ticker).containsExactly("005930");
     assertThat(result.picks().getFirst().pickRank()).isEqualTo(1);
-    assertThat(result.picks().getFirst().conviction()).isEqualTo(0.80);
+    assertThat(result.picks().getFirst().conviction()).as("secCons null(업종 지수 없음)·비과열 섹터는 클램프 대상이 아니다").isEqualTo(0.80);
     assertThat(result.originalPicks()).isEqualTo(5);
     assertThat(result.removed()).isEqualTo(4);
     assertThat(result.removalRatio()).isEqualTo(0.8);
     assertThat(result.stats()).containsEntry("unknownTicker", 1).containsEntry("duplicate", 1).containsEntry("badDirection", 1)
-        .containsEntry("citedMismatch", 1).containsEntry("unknownSector", 1).containsEntry("sanitized", 1);
+        .containsEntry("citedMismatch", 1).containsEntry("unknownSector", 1).containsEntry("sanitized", 1)
+        .doesNotContainKeys("capNonConsistent", "capOverheated");
     assertThat(result.sectors()).hasSize(1);
     assertThat(result.sectors().getFirst().name()).isEqualTo("반도체");
+    assertThat(result.sectors().getFirst().consistent()).as("advice-v6: 주도 섹터 콜에 입력 맥락의 consistent 를 채운다").isTrue();
     assertThat(result.summary()).isEqualTo("총평  입니다");
     assertThat(result.regime()).isEqualTo(MarketRegimeCode.RISK_ON);
     assertThat(result.kospiDir()).isEqualTo(DirectionCall.UP);
@@ -98,6 +105,50 @@ class AdviceGuardTest {
     assertThat(result.pUp()).as("0.5 → 가장 가까운 0.55").isEqualTo(0.55);
     assertThat(result.stats()).containsKey("clampedPUp");
     assertThat(result.tooFew(properties.getPickMin())).isFalse();
+  }
+
+  @Test
+  @DisplayName("advice-v6: secCons=0 후보·overheated 섹터의 LONG 픽은 확신이 0.70 으로 내려가고(제거 아님) capNonConsistent/capOverheated 에 남는다 — "
+      + "AVOID·상한 이하·secCons null 은 그대로, 주도 섹터 콜은 consistent 를 담는다")
+  void capsNonConsistentAndOverheatedLongPicks() {
+    List<CandidateRow> candidates = List.of(
+        sectorCandidate("000001", "G2510", 0.05),   // secCons 1, 비과열 → 그대로
+        sectorCandidate("000002", "G2510", -0.02),  // secCons 0 → 클램프
+        sectorCandidate("000003", "G3020", 0.05),   // secCons 1 이지만 과열 섹터 → 클램프
+        sectorCandidate("000004", "G2510", -0.02),  // secCons 0 이지만 AVOID → 대상 아님
+        sectorCandidate("000005", "G2510", -0.02),  // secCons 0 이지만 0.65 ≤ 상한 → 통계도 남지 않음
+        sectorCandidate("000006", "G2510", null));  // secRs60 없음 → secCons null → 그대로
+    AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("RISK_ON", "UP", "UP", "0.60", ""), outlook,
+        List.of(new AdviceResponse.SectorView("G2510", "지속"), new AdviceResponse.SectorView("G3020", "3구간 초과 미충족")),
+        List.of(pick("000001", "LONG", "0.85", List.of()), pick("000002", "LONG", "0.85", List.of()), pick("000003", "LONG", "0.80", List.of()),
+            pick("000004", "AVOID", "0.85", List.of()), pick("000005", "LONG", "0.65", List.of()), pick("000006", "LONG", "0.90", List.of())),
+        "");
+
+    AdviceGuard.Result result = guard.validate(response, candidates, sectors, trends);
+
+    assertThat(result.removed()).isZero();
+    assertThat(result.picks()).hasSize(6);
+    Map<String, Double> conviction = new HashMap<>();
+    result.picks().forEach(p -> conviction.put(p.ticker(), p.conviction()));
+    assertThat(conviction).containsEntry("000001", 0.85).containsEntry("000002", 0.70).containsEntry("000003", 0.70)
+        .containsEntry("000004", 0.85).containsEntry("000005", 0.65).containsEntry("000006", 0.90);
+    assertThat(result.stats()).containsEntry("capNonConsistent", 1).containsEntry("capOverheated", 1).doesNotContainKey("clampedConviction");
+    assertThat(result.picks().getFirst().ticker()).as("클램프 뒤 확신 내림차순으로 순위가 매겨진다").isEqualTo("000006");
+    assertThat(result.sectors()).extracting(SectorCall::code, SectorCall::consistent)
+        .containsExactly(org.assertj.core.groups.Tuple.tuple("G2510", true), org.assertj.core.groups.Tuple.tuple("G3020", false));
+
+    // 맥락이 이름만이면 과열 클램프·consistent 는 없고, secCons 클램프(후보 특징 기반)만 남는다
+    AdviceGuard.Result plain = guard.validate(response, candidates, AdviceGuard.SectorContext.ofNames(Map.of("G2510", "반도체", "G3020", "음식료")), trends);
+    assertThat(plain.picks().stream().filter(p -> p.ticker().equals("000003")).findFirst().orElseThrow().conviction()).isEqualTo(0.80);
+    assertThat(plain.stats()).doesNotContainKey("capOverheated").containsEntry("capNonConsistent", 1);
+    assertThat(plain.sectors()).allMatch(s -> Boolean.FALSE.equals(s.consistent()));
+
+    // 상한은 설정에서 온다 (가드는 호출 시점의 properties 를 읽는다)
+    properties.getAdvise().setNonConsistentConvictionCap(0.60);
+    AdviceGuard.Result lower = guard.validate(response, candidates, sectors, trends);
+    assertThat(lower.picks().stream().filter(p -> p.ticker().equals("000002")).findFirst().orElseThrow().conviction()).isEqualTo(0.60);
+    assertThat(lower.picks().stream().filter(p -> p.ticker().equals("000005")).findFirst().orElseThrow().conviction()).as("0.65 > 0.60 이라 이제 클램프").isEqualTo(0.60);
+    assertThat(lower.stats()).containsEntry("capNonConsistent", 2).containsEntry("capOverheated", 1);
   }
 
   @Test
@@ -170,6 +221,16 @@ class AdviceGuardTest {
         .sectorCode("G2510").sectorName("반도체")
         .signals(Map.of("FOREIGN_FLOW", new SignalValue(0.9, 0.12, 0.0031), "MOM_20D", new SignalValue(0.8, 0.12, r20)))
         .features(Map.of("r20", r20, "distHigh52w", -0.02, "per", 14.2)).appliedLessonIds(List.of()).build();
+  }
+
+  /** 소속 섹터·섹터 3개월 초과(secRs60, null 이면 키 없음)를 가진 후보. secRs5·secRs20 은 양수 고정이라 secCons 는 secRs60 부호로 정해진다 */
+  private static CandidateRow sectorCandidate(String ticker, String sector, Double secRs60) {
+    Map<String, Object> features = new HashMap<>(Map.of("r20", 0.03, "secRs5", 0.01, "secRs20", 0.02));
+    if (secRs60 != null) {
+      features.put("secRs60", secRs60);
+    }
+    return CandidateRow.builder().ticker(ticker).quantRank(1).quantScore(0.5).stockName("n").marketType("KOSPI").benchIndexCode("0001")
+        .sectorCode(sector).sectorName(sector).signals(Map.of()).features(features).appliedLessonIds(List.of()).build();
   }
 
   private static AdviceResponse.Pick pick(String ticker, String direction, String conviction, List<AdviceResponse.Cited> cited) {

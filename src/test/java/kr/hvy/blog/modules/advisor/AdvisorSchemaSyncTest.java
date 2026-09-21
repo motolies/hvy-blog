@@ -24,7 +24,7 @@ class AdvisorSchemaSyncTest {
   private static final List<String> SOURCES = List.of("db/advisor-schema.sql", "db/advisor-seed.sql");
   private static final String LAST_STOCK_SOURCE = "db/stock-seed.sql";
   private static final Pattern CREATE_TABLE = Pattern.compile("^CREATE TABLE IF NOT EXISTS (\\w+)");
-  static final int TABLE_COUNT = 14;
+  static final int TABLE_COUNT = 15;
 
   @Test
   @DisplayName("마커 사이 내용이 원본 두 파일과 줄 단위로 같다")

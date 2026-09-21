@@ -16,6 +16,7 @@ import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.CitedFeature;
+import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
 import kr.hvy.blog.modules.advisor.domain.model.NewsBlock;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
@@ -30,10 +31,65 @@ import org.apache.commons.lang3.StringUtils;
  *   <li>citedFeatures 의 값이 입력 특징과 허용오차(상대 2% 또는 절대 1e-4) 밖이면 픽 제거(근거 위조)</li>
  *   <li>픽 > max 는 확신 내림차순 상위만, AVOID 는 최대 2개, 픽 < min 이면 tooFew</li>
  *   <li>텍스트에서 <!channel>·<!here>·제어문자 제거, 길이 절단</li>
+ *   <li>advice-v6: secCons=0 후보·overheated 섹터의 LONG 픽은 확신을 advisor.advise.non-consistent-conviction-cap 으로 클램프(제거 아님, stats
+ *       capNonConsistent/capOverheated). 주도 섹터 콜에는 입력 sectors 의 consistent 를 채운다</li>
  * </ul>
  * 제거율(제거 픽 / 원본 픽)이 30% 를 넘으면 모델·프롬프트가 어긋난 신호로 보고 run 을 PARTIAL 로 둔다.
  */
 public final class AdviceGuard {
+
+  /**
+   * 가드가 보는 섹터 맥락(advice-v6). names 는 주도 섹터 검증·표기용 코드 → 이름(top·bottom 표 ∪ 후보 섹터), consistent 는 세 구간 모두 시장을 이긴 섹터,
+   * overheated 는 과열 섹터. consistent/overheated 는 시장 특징(top·bottom)에서, 후보에만 있는 섹터의 consistent 는 후보의 secCons 로 보충한다.
+   */
+  public record SectorContext(Map<String, String> names, Set<String> consistent, Set<String> overheated) {
+
+    /**
+     * 시장 특징과 후보로 맥락을 만든다 (AdviseJob 의 LIVE·섀도가 같은 맥락을 쓴다).
+     * <p>
+     * 범위 한정: overheated 는 프롬프트 sectors 표에 실린 top 8·bottom 3 에서만 온다 — LLM 이 본 것과 같은 정보로만 클램프해야 "규칙 11 을 안 지켰다" 는
+     * 관측(capOverheated)이 성립하고, 표 밖 섹터의 5일 수익률은 프롬프트에도 없다. 따라서 중간 순위(9~n−4위) 과열 섹터의 후보는 클램프되지 않는다(의도).
+     * consistent 는 후보 행의 secCons(1) 로 보충할 수 있어 표 밖 섹터도 채워진다 — 후보 행에 실린 값이라 역시 LLM 이 본 정보다.
+     */
+    public static SectorContext of(MarketFeatures market, List<CandidateRow> candidates) {
+      Map<String, String> names = new LinkedHashMap<>();
+      Set<String> consistent = new HashSet<>();
+      Set<String> overheated = new HashSet<>();
+      List<MarketFeatures.SectorFeature> features = new ArrayList<>();
+      if (market.topSectors() != null) {
+        features.addAll(market.topSectors());
+      }
+      if (market.bottomSectors() != null) {
+        features.addAll(market.bottomSectors());
+      }
+      for (MarketFeatures.SectorFeature s : features) {
+        names.put(s.code(), s.name());
+        if (Boolean.TRUE.equals(s.consistent())) {
+          consistent.add(s.code());
+        }
+        if (Boolean.TRUE.equals(s.overheated())) {
+          overheated.add(s.code());
+        }
+      }
+      for (CandidateRow c : candidates) {
+        if (c.sectorCode() == null) {
+          continue;
+        }
+        names.putIfAbsent(c.sectorCode(), c.sectorName());
+        if (Integer.valueOf(1).equals(AdvicePromptBuilder.secCons(c.features()))) {
+          consistent.add(c.sectorCode());
+        }
+      }
+      return new SectorContext(names, consistent, overheated);
+    }
+
+    /**
+     * 이름만 있는 맥락 (consistent·overheated 없음 — 테스트·구버전 호출용).
+     */
+    public static SectorContext ofNames(Map<String, String> names) {
+      return new SectorContext(names, Set.of(), Set.of());
+    }
+  }
 
   public static final double REMOVAL_ALERT_RATIO = 0.30;
   static final int MAX_AVOID = 2;
@@ -65,21 +121,24 @@ public final class AdviceGuard {
   }
 
   /**
-   * @param trends 지수 코드 → 규칙 추세 (무효화 조건의 방향 일관성 검사용, 없으면 빈 맵)
+   * @param sectors 섹터 맥락(이름·consistent·overheated)
+   * @param trends  지수 코드 → 규칙 추세 (무효화 조건의 방향 일관성 검사용, 없으면 빈 맵)
    */
-  public Result validate(AdviceResponse response, List<CandidateRow> candidates, Map<String, String> sectorNames,
-      Map<String, MarketTrendCode> trends) {
-    return validate(response, candidates, sectorNames, trends, null);
+  public Result validate(AdviceResponse response, List<CandidateRow> candidates, SectorContext sectors, Map<String, MarketTrendCode> trends) {
+    return validate(response, candidates, sectors, trends, null);
   }
 
   /**
    * @param news 프롬프트에 실린 뉴스 블록(없으면 null). citedNews 는 실린 id 만 남기고(unknownNews), 종목 픽이 다른 종목에만 태깅된 기사를 인용하면
    *             제거(newsMismatch) — 숫자 위조와 달리 픽은 버리지 않는다(시장 헤드라인을 종목 근거로 드는 건 정당하다).
    */
-  public Result validate(AdviceResponse response, List<CandidateRow> candidates, Map<String, String> sectorNames,
-      Map<String, MarketTrendCode> trends, NewsBlock news) {
+  public Result validate(AdviceResponse response, List<CandidateRow> candidates, SectorContext sectors, Map<String, MarketTrendCode> trends,
+      NewsBlock news) {
     Map<String, Object> stats = new LinkedHashMap<>();
     Map<String, Set<String>> newsTickers = news == null ? Map.of() : news.tickersById();
+    Map<String, String> sectorNames = sectors == null ? Map.of() : sectors.names();
+    Set<String> consistentSectors = sectors == null ? Set.of() : sectors.consistent();
+    Set<String> overheatedSectors = sectors == null ? Set.of() : sectors.overheated();
     Map<String, CandidateRow> byTicker = new LinkedHashMap<>();
     candidates.forEach(c -> byTicker.put(c.ticker(), c));
 
@@ -97,8 +156,8 @@ public final class AdviceGuard {
         outlook("0001", tv == null ? null : tv.kospi(), trends == null ? null : trends.get("0001"), stats),
         outlook("1001", tv == null ? null : tv.kosdaq(), trends == null ? null : trends.get("1001"), stats));
 
-    // ----- 섹터 -----
-    List<SectorCall> sectors = new ArrayList<>();
+    // ----- 섹터 (consistent 는 LLM 출력이 아니라 입력 맥락에서 채운다) -----
+    List<SectorCall> sectorCalls = new ArrayList<>();
     Set<String> seenSectors = new HashSet<>();
     if (response.sectors() != null) {
       for (AdviceResponse.SectorView s : response.sectors()) {
@@ -110,8 +169,8 @@ public final class AdviceGuard {
           increment(stats, "duplicateSector");
           continue;
         }
-        sectors.add(new SectorCall(s.code(), sectorNames.get(s.code()), sanitize(s.reason(), RISK_LIMIT, stats)));
-        if (sectors.size() == 4) {
+        sectorCalls.add(new SectorCall(s.code(), sectorNames.get(s.code()), sanitize(s.reason(), RISK_LIMIT, stats), consistentSectors.contains(s.code())));
+        if (sectorCalls.size() == 4) {
           break;
         }
       }
@@ -139,15 +198,20 @@ public final class AdviceGuard {
           removed++;
           continue;
         }
-        List<CitedFeature> cited = checkCited(p.citedFeatures(), byTicker.get(p.ticker()), stats);
+        CandidateRow candidate = byTicker.get(p.ticker());
+        List<CitedFeature> cited = checkCited(p.citedFeatures(), candidate, stats);
         if (cited == null) {
           removed++;
           continue;
         }
+        double conviction = conviction(p.conviction(), stats, "clampedConviction");
+        if (direction == PickDirection.LONG) {
+          conviction = capBySector(conviction, candidate, overheatedSectors, stats);
+        }
         picks.add(PickRow.builder()
             .ticker(p.ticker())
             .direction(direction)
-            .conviction(conviction(p.conviction(), stats, "clampedConviction"))
+            .conviction(conviction)
             .thesis(sanitize(p.thesis(), THESIS_LIMIT, stats))
             .riskNote(sanitize(p.risk(), RISK_LIMIT, stats))
             .cited(cited)
@@ -178,8 +242,33 @@ public final class AdviceGuard {
     }
     stats.put("originalPicks", original);
     stats.put("removed", removed);
-    return new Result(regime, kospi, kosdaq, pUp, rationale, sectors, ranked, sanitize(response.summary(), SUMMARY_LIMIT, stats), stats,
+    return new Result(regime, kospi, kosdaq, pUp, rationale, sectorCalls, ranked, sanitize(response.summary(), SUMMARY_LIMIT, stats), stats,
         original, removed, outlooks);
+  }
+
+  /**
+   * advice-v6 섹터 규칙의 기계 클램프: 후보의 secCons 가 0(소속 업종 지수가 1주·1개월·3개월 중 하나라도 시장에 미달) 이거나 소속 섹터가 overheated 면
+   * LONG 확신을 advisor.advise.non-consistent-conviction-cap 으로 내린다 — 제거가 아니라 클램프라 픽 제거율에 넣지 않는다. 실제로 내려간 경우만
+   * capNonConsistent·capOverheated 를 세어 프롬프트 규칙 11 의 준수율을 관찰한다. secCons null(업종 지수 없음·창 부족)은 클램프하지 않는다.
+   * AVOID 는 대상이 아니다 — 지속 미충족·과열은 매수 위험이지 회피의 근거를 약하게 하는 요인이 아니다.
+   */
+  private double capBySector(double conviction, CandidateRow candidate, Set<String> overheatedSectors, Map<String, Object> stats) {
+    double cap = properties.getAdvise().getNonConsistentConvictionCap();
+    if (candidate == null || conviction <= cap) {
+      return conviction;
+    }
+    boolean nonConsistent = Integer.valueOf(0).equals(AdvicePromptBuilder.secCons(candidate.features()));
+    boolean overheated = candidate.sectorCode() != null && overheatedSectors.contains(candidate.sectorCode());
+    if (!nonConsistent && !overheated) {
+      return conviction;
+    }
+    if (nonConsistent) {
+      increment(stats, "capNonConsistent");
+    }
+    if (overheated) {
+      increment(stats, "capOverheated");
+    }
+    return cap;
   }
 
   /**
@@ -226,6 +315,11 @@ public final class AdviceGuard {
     known.putIfAbsent("instFlow", known.get("INST_FLOW"));
     known.putIfAbsent("rsIdx", known.get("RS_INDEX"));
     known.putIfAbsent("vol20", known.get("vol20d"));
+    // advice-v6: secCons 는 파생 열(1/0)이라 특징 맵에 없다 — 인용되면 같은 정의로 대조한다
+    Integer secCons = AdvicePromptBuilder.secCons(candidate.features());
+    if (secCons != null) {
+      known.putIfAbsent("secCons", secCons.doubleValue());
+    }
     List<CitedFeature> result = new ArrayList<>();
     for (AdviceResponse.Cited c : cited) {
       if (c == null || c.name() == null) {

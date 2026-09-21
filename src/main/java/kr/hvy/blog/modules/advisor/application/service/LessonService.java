@@ -39,8 +39,12 @@ public class LessonService {
   static final double HIGH_PCT = 0.8;
   static final double LOW_PCT = 0.2;
 
-  /** 집계 셀 */
-  public record Cell(String regime, String signal, String bucket, String sector, int n, double meanExcess, double tStat, LocalDate from, LocalDate to) {
+  /**
+   * 집계 셀. n 은 픽 수, tStat 은 base_date 클러스터 표준오차 기준(같은 날 픽의 공통 요인·5일 창 겹침으로 픽 단위 se 는 1.7~2배 과소, 2026-09-21 사용자 결정 ③),
+   * nDays 는 서로 다른 base_date 수(D). D < 2 면 t = 0 — 하루치 픽으로는 어떤 셀도 유의해질 수 없다.
+   */
+  public record Cell(String regime, String signal, String bucket, String sector, int n, double meanExcess, double tStat, LocalDate from, LocalDate to,
+                     int nDays) {
   }
 
   /** 제안 적용 결과 */
@@ -52,7 +56,7 @@ public class LessonService {
   private final AdvisorProperties properties;
 
   /**
-   * 누적 LIVE LONG 픽(h=결정 호라이즌, 품질 OK)을 셀로 집계한다.
+   * 누적 LIVE LONG 픽(h=결정 호라이즌, 품질 OK)을 셀로 집계한다. meanExcess 는 픽 평균 그대로, t 는 {@link #clusterT} 의 base_date 클러스터 se 로 계산한다.
    */
   public List<Cell> cells(LocalDate from, LocalDate to) {
     List<Map<String, Object>> rows = jdbc.queryForList("""
@@ -91,14 +95,34 @@ public class LessonService {
         continue;
       }
       double mean = values.stream().mapToDouble(v -> v[0]).average().orElse(0);
-      double var = n < 2 ? 0 : values.stream().mapToDouble(v -> (v[0] - mean) * (v[0] - mean)).sum() / (n - 1);
-      double se = Math.sqrt(var / n);
-      double t = se > 0 ? mean / se : 0;
+      double[] cluster = clusterT(values, mean);
       String[] k = e.getKey().split("\\|", -1);
       LocalDate[] range = ranges.get(e.getKey());
-      cells.add(new Cell(blankToNull(k[0]), blankToNull(k[1]), blankToNull(k[2]), blankToNull(k[3]), n, mean, t, range[0], range[1]));
+      cells.add(new Cell(blankToNull(k[0]), blankToNull(k[1]), blankToNull(k[2]), blankToNull(k[3]), n, mean, cluster[0], range[0], range[1], (int) cluster[1]));
     }
     return cells;
+  }
+
+  /**
+   * base_date 클러스터 t 통계: 셀 안 픽을 기준일로 묶어 일별 평균 초과를 만들고, 그 표본 표준편차 / √D 를 se 로 써 t = mean / se. D(서로 다른 기준일 수) < 2 또는 se = 0 이면 t = 0.
+   * values 의 각 원소는 {excess, epochDay}. 돌려주는 값은 {t, D}.
+   */
+  static double[] clusterT(List<double[]> values, double mean) {
+    Map<Long, double[]> byDay = new LinkedHashMap<>();
+    for (double[] v : values) {
+      double[] acc = byDay.computeIfAbsent((long) v[1], d -> new double[2]);
+      acc[0] += v[0];
+      acc[1] += 1;
+    }
+    int days = byDay.size();
+    if (days < 2) {
+      return new double[] {0, days};
+    }
+    double[] dailyMeans = byDay.values().stream().mapToDouble(acc -> acc[0] / acc[1]).toArray();
+    double dailyMean = java.util.Arrays.stream(dailyMeans).average().orElse(0);
+    double var = java.util.Arrays.stream(dailyMeans).map(m -> (m - dailyMean) * (m - dailyMean)).sum() / (days - 1);
+    double se = Math.sqrt(var / days);
+    return new double[] {se > 0 ? mean / se : 0, days};
   }
 
   /**
@@ -118,6 +142,7 @@ public class LessonService {
       m.put("t", round(c.tStat()));
       m.put("from", c.from().toString());
       m.put("to", c.to().toString());
+      m.put("nDays", c.nDays());
       cellRows.add(m);
     }
     payload.put("cells", cellRows);
@@ -329,7 +354,7 @@ public class LessonService {
   }
 
   private static void add(Map<String, List<double[]>> groups, Map<String, LocalDate[]> ranges, String key, double excess, LocalDate date) {
-    groups.computeIfAbsent(key, k -> new ArrayList<>()).add(new double[] {excess});
+    groups.computeIfAbsent(key, k -> new ArrayList<>()).add(new double[] {excess, date.toEpochDay()});
     LocalDate[] range = ranges.computeIfAbsent(key, k -> new LocalDate[] {date, date});
     if (date.isBefore(range[0])) {
       range[0] = date;

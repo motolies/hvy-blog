@@ -22,8 +22,10 @@ import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorTriggerType;
 import kr.hvy.blog.modules.advisor.domain.code.LessonStatus;
+import kr.hvy.blog.modules.advisor.domain.code.PickNoteStatus;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.LessonRow;
+import kr.hvy.blog.modules.advisor.domain.model.PickNoteRow;
 import kr.hvy.blog.modules.advisor.domain.model.PromptInputRow;
 import kr.hvy.blog.modules.advisor.domain.model.SignalIcRow;
 import kr.hvy.blog.modules.advisor.domain.model.WeightSet;
@@ -32,6 +34,7 @@ import kr.hvy.blog.modules.advisor.repository.jdbc.AdviceWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.ChatWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.IntradayCheckWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.LessonRepository;
+import kr.hvy.blog.modules.advisor.repository.jdbc.PickNoteRepository;
 import kr.hvy.blog.modules.advisor.repository.jdbc.PromptInputWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.ScoreWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.SignalIcWriter;
@@ -84,6 +87,7 @@ public class AdvisorAdminController {
   private final LessonRepository lessons;
   private final AdvisorProperties properties;
   private final ChatWriter chatWriter;
+  private final PickNoteRepository pickNotes;
 
   // ========== 실행 ==========
 
@@ -152,7 +156,8 @@ public class AdvisorAdminController {
   public AdviceDetailResponse advice(@PathVariable long adviceId) {
     AdviceHeader header = adviceWriter.findById(adviceId).orElseThrow(() -> new NoSuchElementException("판단을 찾을 수 없습니다: " + adviceId));
     return new AdviceDetailResponse(header, adviceWriter.candidates(adviceId), adviceWriter.picks(adviceId), scoreWriter.candidateScores(adviceId),
-        scoreWriter.callScores(adviceId), intradayChecks.findByAdvice(adviceId), morningChecks.findByAdvice(adviceId).orElse(null));
+        scoreWriter.callScores(adviceId), intradayChecks.findByAdvice(adviceId), morningChecks.findByAdvice(adviceId).orElse(null),
+        pickNotes.findByAdvice(adviceId));
   }
 
   /**
@@ -260,6 +265,19 @@ public class AdvisorAdminController {
     lessons.find(lessonId).orElseThrow(() -> new NoSuchElementException("교훈을 찾을 수 없습니다: " + lessonId));
     lessons.updateStatus(lessonId, LessonStatus.RETIRED, java.time.Instant.now(), reason);
     return lessons.find(lessonId).orElseThrow();
+  }
+
+  // ========== 12:00 픽 노트 (오답노트, note-v1) ==========
+
+  /**
+   * 픽 노트 조회. 기준일 {@code [from, to]} 양끝 포함(둘 다 선택), status 선택(OPEN|CONFIRMED|REFUTED), 최신 점검 순. limit 기본 100·최대 500.
+   * 화면은 후속 — 이 API 는 additive 라 기존 관리자 화면은 그대로 동작한다.
+   */
+  @GetMapping("/notes")
+  public List<PickNoteRow> notes(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(required = false) PickNoteStatus status, @RequestParam(defaultValue = "100") int limit) {
+    return pickNotes.search(from, to, status, clamp(limit));
   }
 
   // ========== 컨트롤러 지역 예외 처리 (Slack 미발송) ==========

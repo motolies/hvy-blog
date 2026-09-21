@@ -16,6 +16,8 @@ import java.util.Map;
  * @param exitDate             적용 청산일(예정) = h번째 영업일 종가
  * @param trends               지수별 규칙 기반 중기 추세 (KOSPI·KOSDAQ)
  * @param links                국내 지수 ↔ 미국 심볼 연동 강도 (advice-v3, 없으면 빈 목록)
+ * @param sectorIndexAsOf      업종 지수(mv_stock_index_metric, 섹터 코드 = 업종 코드) 마지막 날 (advice-v6). 0001 과 날짜가 다르면 섹터 rs 는 null 이 되고
+ *                             이 값이 지연을 드러낸다. 업종 지수가 하나도 없으면 null
  */
 public record MarketFeatures(
     LocalDate asOf,
@@ -32,7 +34,8 @@ public record MarketFeatures(
     LocalDate entryDate,
     LocalDate exitDate,
     List<MarketTrend> trends,
-    List<GlobalLink> links) {
+    List<GlobalLink> links,
+    LocalDate sectorIndexAsOf) {
 
   public record IndexFeature(String code, String name, double close, Double r1, Double r5, Double r20, Double r60, Double distMa20, Double distMa60) {
   }
@@ -45,8 +48,14 @@ public record MarketFeatures(
   public record GlobalFeature(String symbol, LocalDate date, double close, Double r1, Double r5, Double r20, Double r60) {
   }
 
-  /** 섹터 5일 시총가중 등락 합, 최신일 상승 비율·52주 고점 근접 비율, 외인 5일 순매수 합, 구성 종목 수 */
-  public record SectorFeature(String code, String name, Double cw5d, Double rising, Double nearHigh, Long frgn5, int members) {
+  /**
+   * 섹터 1행. 앞 7개는 양시장 동일가중 MV 기준(cw5 = 5일 등락 합 %p, 최신일 상승 비율·52주 고점 근접 비율, 외인 5일 순매수 합, 구성 종목 수).
+   * 뒤 6개(advice-v6)는 업종 지수 기준 — rs5/rs20/rs60 = 업종 지수 1주·1개월·3개월 수익률 − KOSPI 같은 창 수익률(소수), mom = 세 rs 의 백분위 평균(0~1,
+   * members 게이트를 넘은 섹터끼리·세 값이 전부 있는 섹터만), consistent = 세 구간 모두 > 0(지수 없으면 false), overheated = 업종 지수 5일 수익률 >
+   * advisor.advise.overheated-sigma × σ_5d(KOSPI). 업종 지수가 없거나 창이 짧으면 rs·mom 은 null. 필드는 맨 뒤에만 추가한다(프롬프트 표 위치 의존).
+   */
+  public record SectorFeature(String code, String name, Double cw5d, Double rising, Double nearHigh, Long frgn5, int members,
+                              Double rs5, Double rs20, Double rs60, Double mom, Boolean consistent, Boolean overheated) {
   }
 
   /**
@@ -81,6 +90,8 @@ public record MarketFeatures(
     block.put("sector", sectorAsOf == null ? null : sectorAsOf.toString());
     block.put("global", globalAsOf == null ? null : globalAsOf.toString());
     block.put("globalAgeTradingDays", globalAgeTradingDays);
+    // advice-v6: 새 키는 맨 뒤 (data_as_of_json 위치를 읽는 소비자 보호)
+    block.put("sectorIndex", sectorIndexAsOf == null ? null : sectorIndexAsOf.toString());
     return block;
   }
 }

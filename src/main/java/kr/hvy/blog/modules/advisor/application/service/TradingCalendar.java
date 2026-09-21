@@ -51,6 +51,24 @@ public class TradingCalendar {
   }
 
   /**
+   * asOf 앞의 영업일 n개(asOf 제외, 최근 순 내림차순). 마지막 원소가 창의 시작일이다 — recentOutcomes 의 "기준일 이전 N 거래일" 창(note-v1) 에 쓴다.
+   */
+  public List<LocalDate> previousTradingDays(LocalDate asOf, int n) {
+    List<LocalDate> days = new ArrayList<>();
+    LocalDate cursor = asOf;
+    for (int i = 0; i < MAX_SCAN_DAYS && days.size() < n; i++) {
+      cursor = cursor.minusDays(1);
+      if (calendar.isTradingDay(cursor)) {
+        days.add(cursor);
+      }
+    }
+    if (days.size() < n) {
+      throw new IllegalStateException("영업일 " + n + "개를 " + MAX_SCAN_DAYS + "일 안에 찾지 못했습니다: asOf=" + asOf);
+    }
+    return days;
+  }
+
+  /**
    * (from, to] 사이의 영업일 수. from ≥ to 면 0.
    */
   public int tradingDaysBetween(LocalDate from, LocalDate to) {

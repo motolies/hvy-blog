@@ -131,6 +131,10 @@ public class CandidateScreeningService {
     putFeature(features, "sectorCw5d", rs, "sector_cw_5d");
     putFeature(features, "vol20d", rs, "vol_20d");
     putFeature(features, "rsIdx20d", rs, "index_ret_20d");
+    // advice-v6: 소속 업종 지수의 시장 대비 초과(1주·1개월·3개월). 지수가 없으면 키 자체가 빠진다 → 프롬프트 secCons null
+    putFeature(features, "secRs5", rs, "sector_rs_5d");
+    putFeature(features, "secRs20", rs, "sector_rs_20d");
+    putFeature(features, "secRs60", rs, "sector_rs_60d");
     CandidateRow row = CandidateRow.builder()
         .ticker(rs.getString("ticker"))
         .quantScore(round6(rs.getDouble("score")))

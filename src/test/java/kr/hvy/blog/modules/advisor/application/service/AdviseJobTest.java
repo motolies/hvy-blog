@@ -66,6 +66,7 @@ class AdviseJobTest {
   @SuppressWarnings("unchecked")
   private final ObjectProvider<NewsFeatureService> newsProvider = mock(ObjectProvider.class);
   private final NewsFeatureService newsFeatures = mock(NewsFeatureService.class);
+  private final RecentOutcomesService recentOutcomes = mock(RecentOutcomesService.class);
   private final LocalDate base = LocalDate.of(2026, 9, 11);
   private final AtomicInteger llmCalls = new AtomicInteger();
   /** 후보 T00~T02 를 고르고 T00 은 입력 특징(r20=0.012345)을 허용오차 안에서 인용 */
@@ -91,10 +92,13 @@ class AdviseJobTest {
           ChatResponseMetadata.builder().id("resp").model("judge-x").usage(new DefaultUsage(6000, 1900)).build());
     };
     job = new AdviseJob(properties, gate, icService, marketFeatures, screening, weightSets, new AdvicePromptBuilder(properties), new PromptResources(),
-        new MarketJudgeClient(ChatClient.create(stub), "judge-x"), adviceWriter, promptInputs, lessons, notifier, hookProvider, newsProvider);
+        new MarketJudgeClient(ChatClient.create(stub), "judge-x"), adviceWriter, promptInputs, lessons, notifier, hookProvider, newsProvider,
+        recentOutcomes);
     when(hookProvider.getIfAvailable()).thenReturn(null);
     when(newsProvider.getIfAvailable()).thenReturn(newsFeatures);
+    when(recentOutcomes.block(any())).thenReturn(Optional.empty());
     when(adviceWriter.firstNewsAdviceDate()).thenReturn(Optional.empty());
+    when(adviceWriter.firstMemoryAdviceDate()).thenReturn(Optional.empty());
     when(gate.decide(any(), any())).thenReturn(new AdvisorGateService.Decision(true, false, true, false, DataQuality.OK, "DAILY 완료"));
     when(icService.computeIncremental(any())).thenReturn(Optional.empty());
     when(marketFeatures.features(base)).thenReturn(AdvicePromptBuilderTest.market());
@@ -141,7 +145,9 @@ class AdviseJobTest {
     assertThat(live.model()).isEqualTo("judge-x");
     assertThat(live.weightSetId()).isEqualTo(1L);
     assertThat(live.leadingSectors()).hasSize(1);
-    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION);
+    assertThat(live.leadingSectors().getFirst().consistent()).as("advice-v6: 섹터 맥락(SectorContext)의 consistent 가 주도 섹터 콜에 실린다").isTrue();
+    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION).isEqualTo("advice-v6");
+    assertThat(live.guard()).as("T00 은 secCons=1·비과열이라 클램프 없음").doesNotContainKeys("capNonConsistent", "capOverheated");
     assertThat(live.trendKospi()).as("규칙 추세는 시장 특징에서").isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
     assertThat(live.trendKosdaq()).as("KOSDAQ 추세 없음(픽스처)").isNull();
     assertThat(live.outlooks()).hasSize(2);
@@ -157,12 +163,79 @@ class AdviseJobTest {
     verify(adviceWriter, org.mockito.Mockito.times(2)).insertPicks(anyLong(), picks.capture());
     assertThat(picks.getAllValues().get(0)).as("정량 섀도 top-N").hasSize(properties.getShadow().getQuantTopN());
     assertThat(picks.getAllValues().get(1)).extracting(PickRow::ticker).containsExactly("T00", "T01", "T02");
-    verify(promptInputs).upsert(any());
+    ArgumentCaptor<kr.hvy.blog.modules.advisor.domain.model.PromptInputRow> inputs = ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.domain.model.PromptInputRow.class);
+    verify(promptInputs).upsert(inputs.capture());
     verify(notifier).publish(any(SlackMessage.class));
     verify(adviceWriter).markPublished(eq(843L), any());
     assertThat(execution.metadata("adviceId")).isEqualTo(843L);
     assertThat(execution.steps()).extracting(AdvisorExecution.StepResult::name)
-        .contains("IC", "FEATURES", "SCREEN", "SHADOW_QUANT", "JUDGE", "SAVE", "PUBLISH", "SHADOW_NOMEM");
+        .contains("IC", "FEATURES", "SCREEN", "SHADOW_QUANT", "NOTES", "JUDGE", "SAVE", "PUBLISH", "SHADOW_NOMEM");
+    // note-v1: 확정 노트 게이트 미달(empty) → 블록 없음·memory_json null·NOMEM 은 "메모리 미주입" 으로 건너뛴다
+    assertThat(inputs.getValue().userPayload()).doesNotContain("recentOutcomes");
+    assertThat(live.memoryJson()).isNull();
+    assertThat(execution.metadata("skip.NOTES")).isEqualTo("확정 노트 < " + properties.getNote().getMinFinalized());
+    assertThat(execution.metadata("skip.SHADOW_NOMEM")).isEqualTo("메모리 미주입");
+    assertThat(execution.metadata("memory")).isNull();
+  }
+
+  @Test
+  @DisplayName("note-v1: recentOutcomes 가 있으면 LIVE 프롬프트에 실리고 헤더 memory_json 이 채워지며, 메모리 없는 섀도(LLM_NOMEM)가 한 번 더 돌아 LLM 2회")
+  void recentOutcomesInjectedRunsNomemShadow() {
+    when(recentOutcomes.block(base)).thenReturn(Optional.of(outcomesBlock()));
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SUCCESS);
+    assertThat(llmCalls.get()).as("LIVE + LLM_NOMEM").isEqualTo(2);
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter, org.mockito.Mockito.times(3)).insertHeader(headers.capture());
+    assertThat(headers.getAllValues()).extracting(AdviceHeader::variant).containsExactly(AdviceVariant.QUANT_TOPN, AdviceVariant.LIVE, AdviceVariant.LLM_NOMEM);
+    AdviceHeader live = headers.getAllValues().get(1);
+    assertThat(live.memoryJson()).containsEntry("recentOutcomes", 2).containsEntry("lessons", List.of()).containsEntry("scoreboard", false);
+    assertThat(headers.getAllValues().get(2).memoryJson()).as("NOMEM 섀도는 메모리 없음 → null").isNull();
+    ArgumentCaptor<kr.hvy.blog.modules.advisor.domain.model.PromptInputRow> inputs = ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.domain.model.PromptInputRow.class);
+    verify(promptInputs, org.mockito.Mockito.times(2)).upsert(inputs.capture());
+    assertThat(inputs.getAllValues().get(0).variant()).isEqualTo(AdviceVariant.LIVE);
+    assertThat(inputs.getAllValues().get(0).userPayload()).contains("\"recentOutcomes\":{\"windowTradingDays\":20").contains("\"IDIOSYNCRATIC\",1,14,");
+    assertThat(inputs.getAllValues().get(1).variant()).isEqualTo(AdviceVariant.LLM_NOMEM);
+    assertThat(inputs.getAllValues().get(1).userPayload()).as("NOMEM 프롬프트에는 빈도표가 없다").doesNotContain("recentOutcomes");
+    assertThat(execution.metadata("memory")).isEqualTo(live.memoryJson());
+    assertThat(execution.metadata("shadowNomemAdviceId")).isEqualTo(844L);
+    assertThat(execution.metadata("skip.NOTES")).isNull();
+    assertThat(execution.metadata("memoryOn")).as("300 게이트(느린 층)는 그대로 꺼져 있다").isEqualTo(false);
+  }
+
+  @Test
+  @DisplayName("note-v1: 메모리가 처음 실린 LIVE 판단이 nomem-weeks 보다 오래됐으면 NOMEM 섀도는 '섀도 기간 종료' 로 건너뛴다 (nomem-weeks 미사용 결함 수정)")
+  void nomemShadowClosesAfterWeeks() {
+    when(recentOutcomes.block(base)).thenReturn(Optional.of(outcomesBlock()));
+    when(adviceWriter.firstMemoryAdviceDate()).thenReturn(Optional.of(base.minusWeeks(properties.getShadow().getNomemWeeks()).minusDays(1)));
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SUCCESS);
+    assertThat(llmCalls.get()).as("LIVE 만").isEqualTo(1);
+    verify(adviceWriter, org.mockito.Mockito.times(2)).insertHeader(any());
+    assertThat(execution.metadata("skip.SHADOW_NOMEM")).isEqualTo("섀도 기간 종료");
+    assertThat(execution.metadata("memory")).isNotNull();
+
+    // 창 경계: 첫 메모리 판단일 + nomem-weeks 당일까지는 열려 있고, 첫 판단이 없으면(오늘이 처음) 열린다
+    when(adviceWriter.firstMemoryAdviceDate()).thenReturn(Optional.of(base.minusWeeks(properties.getShadow().getNomemWeeks())));
+    assertThat(job.nomemShadowOpen(base)).isTrue();
+    when(adviceWriter.firstMemoryAdviceDate()).thenReturn(Optional.empty());
+    assertThat(job.nomemShadowOpen(base)).isTrue();
+  }
+
+  /** RecentOutcomesService 가 만든 형식의 빈도표 2행 */
+  private static java.util.Map<String, Object> outcomesBlock() {
+    java.util.Map<String, Object> block = new java.util.LinkedHashMap<>();
+    block.put("windowTradingDays", 20);
+    block.put("finalizedAsOf", "2026-09-11");
+    block.put("columns", List.of("class", "secCons", "n", "confirmRate", "meanFinalExcess", "se", "underpowered"));
+    block.put("rows", List.of(List.of("IDIOSYNCRATIC", 1, 14, 0.64, -0.0121, 0.0048, true), List.of("ON_TRACK", 1, 22, 0.55, 0.0031, 0.0039, true)));
+    return block;
   }
 
   @Test

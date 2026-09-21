@@ -62,10 +62,12 @@ class SignalWeightMathTest {
     assertThat(byCode.get("GLOBAL_LINK").weight()).as("비활성은 0").isEqualTo(0.0);
 
     double sum = updated.stream().filter(SignalWeightRow::enabled).mapToDouble(SignalWeightRow::weight).sum();
-    assertThat(sum).as("활성 가중치 합 = 사전 합 1.0 (소수 6자리 반올림 오차 허용)").isCloseTo(1.0, within(1e-5));
+    double baseSum = SignalCode.scorable().stream().mapToDouble(SignalCode::getBaseWeight).sum();
+    assertThat(sum).as("활성 가중치 합 = 사전 합 Σbase(advice-v6 시드 1.10, 소수 6자리 반올림 오차 허용)").isCloseTo(baseSum, within(1e-5));
+    assertThat(byCode.get("SECTOR_MOM_60D").multiplier()).as("새 섹터 시그널도 통계 없으면 1.0").isEqualTo(1.0);
     assertThat(byCode.get("MOM_60D").note()).as("통계 없는 학습 시그널은 표시").isEqualTo("IC 없음 — 배수 1.0 유지");
-    // 비율 보존: MOM_20D : MOM_60D = (0.12·1.25) : (0.10·1.0)
-    assertThat(byCode.get("MOM_20D").weight() / byCode.get("MOM_60D").weight()).isCloseTo(0.15 / 0.10, within(1e-6));
+    // 비율 보존: MOM_20D : MOM_60D = (0.12·1.25) : (0.10·1.0). 가중치가 소수 6자리로 반올림되므로 비율 오차는 ≈ 0.5e-6 / 0.08 ≈ 1e-5 까지 허용
+    assertThat(byCode.get("MOM_20D").weight() / byCode.get("MOM_60D").weight()).isCloseTo(0.15 / 0.10, within(1e-4));
   }
 
   @Test

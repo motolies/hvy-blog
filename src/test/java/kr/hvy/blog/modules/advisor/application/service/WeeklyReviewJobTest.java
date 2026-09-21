@@ -31,6 +31,7 @@ import kr.hvy.blog.modules.advisor.repository.jdbc.WeightSetRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -54,6 +55,8 @@ class WeeklyReviewJobTest {
   private final PromptInputWriter promptInputs = mock(PromptInputWriter.class);
   private final AdvisorNotifier notifier = mock(AdvisorNotifier.class);
   private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
+  private final kr.hvy.blog.modules.advisor.repository.jdbc.PickNoteRepository notes = mock(kr.hvy.blog.modules.advisor.repository.jdbc.PickNoteRepository.class);
+  private final TradingCalendar calendar = mock(TradingCalendar.class);
   private final AtomicInteger judgeCalls = new AtomicInteger();
   private final LocalDate today = LocalDate.of(2026, 9, 13);
   private WeeklyReviewJob job;
@@ -69,8 +72,12 @@ class WeeklyReviewJobTest {
     };
     ChatModel assistStub = prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage("{\"proposals\":[],\"nullResults\":[],\"retireCandidates\":[]}"))));
     job = new WeeklyReviewJob(properties, scoreJob, icService, weightSets, lessonService, kpi, adviceWriter, promptInputs, new PromptResources(),
-        new MarketJudgeClient(ChatClient.create(judgeStub), "judge"), new MarketJudgeClient(ChatClient.create(assistStub), "assist"), notifier, jdbc);
+        new MarketJudgeClient(ChatClient.create(judgeStub), "judge"), new MarketJudgeClient(ChatClient.create(assistStub), "assist"), notifier, jdbc,
+        notes, calendar);
     when(scoreJob.scoreDue(any())).thenReturn(AdviseJob.Scoreboard.empty());
+    when(calendar.previousTradingDays(any(), anyInt())).thenReturn(List.of(today.minusDays(14)));
+    when(notes.countStaleOpen(any())).thenReturn(0);
+    when(adviceWriter.findRange(any(), any(), any(), anyInt())).thenReturn(List.of());
     when(icService.computeIncremental(any())).thenReturn(Optional.empty());
     when(icService.latestScorableDate(anyInt())).thenReturn(Optional.of(today.minusDays(7)));
     WeightSet active = WeightSet.builder().weightSetId(1L).source(WeightSetSource.SEED).active(true).weights(List.of(
@@ -117,8 +124,52 @@ class WeeklyReviewJobTest {
     verify(notifier).publish(any());
     assertThat(execution.metadata("promptInputsDeleted")).isEqualTo(3);
     assertThat(execution.steps()).extracting(AdvisorExecution.StepResult::name)
-        .containsExactly("SCORE", "IC", "WEIGHTS", "LESSONS", "REPRO", "KPI", "REPORT", "CLEANUP");
+        .containsExactly("SCORE", "IC", "WEIGHTS", "LESSONS", "REPRO", "KPI", "MEMORY", "REPORT", "CLEANUP");
     assertThat(execution.steps().get(3).status()).isEqualTo("SKIPPED");
+    // note-v1: NOMEM 쌍이 없으면 "쌍 없음", 확정 지연 노트 0건
+    ArgumentCaptor<kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage> message =
+        ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage.class);
+    verify(notifier).publish(message.capture());
+    assertThat(message.getValue().toBlocks().toString()).contains("LIVE vs NOMEM(최근 4주): 쌍 없음").contains("OPEN 노트 10영업일 초과: 0건");
+    verify(notes).countStaleOpen(today.minusDays(14));
+  }
+
+  @Test
+  @DisplayName("note-v1: 같은 기준일의 LIVE·LLM_NOMEM 쌍이 있으면 픽 Jaccard 평균·공통 티커 |Δconviction| 평균을 보고하고, 확정 지연 노트 수를 경보 줄로 낸다")
+  void memoryComparisonLines() {
+    when(icService.proposeWeightSet(any(), any(), any())).thenReturn(Optional.empty());
+    LocalDate d1 = today.minusDays(3);
+    LocalDate d2 = today.minusDays(2);
+    when(adviceWriter.findRange(any(), any(), org.mockito.ArgumentMatchers.eq(AdviceVariant.LIVE), anyInt())).thenReturn(List.of(
+        AdviceHeader.builder().adviceId(10L).baseDate(d1).variant(AdviceVariant.LIVE).build(),
+        AdviceHeader.builder().adviceId(11L).baseDate(d2).variant(AdviceVariant.LIVE).build(),
+        AdviceHeader.builder().adviceId(12L).baseDate(today.minusDays(1)).variant(AdviceVariant.LIVE).build()));   // NOMEM 없는 날 → 제외
+    when(adviceWriter.findRange(any(), any(), org.mockito.ArgumentMatchers.eq(AdviceVariant.LLM_NOMEM), anyInt())).thenReturn(List.of(
+        AdviceHeader.builder().adviceId(20L).baseDate(d1).variant(AdviceVariant.LLM_NOMEM).build(),
+        AdviceHeader.builder().adviceId(21L).baseDate(d2).variant(AdviceVariant.LLM_NOMEM).build()));
+    // d1: {A 0.8, B 0.7} vs {A 0.7, B 0.7, C 0.6} → Jaccard 2/3, |Δ| (0.1+0)/2 ; d2: {A 0.6} vs {A 0.6} → 1, 0
+    when(adviceWriter.picks(10L)).thenReturn(List.of(pick("A", 0.8), pick("B", 0.7)));
+    when(adviceWriter.picks(20L)).thenReturn(List.of(pick("A", 0.7), pick("B", 0.7), pick("C", 0.6)));
+    when(adviceWriter.picks(11L)).thenReturn(List.of(pick("A", 0.6)));
+    when(adviceWriter.picks(21L)).thenReturn(List.of(pick("A", 0.6)));
+    when(notes.countStaleOpen(any())).thenReturn(3);
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat((Double) execution.metadata("nomemJaccard")).isCloseTo((2.0 / 3 + 1) / 2, org.assertj.core.data.Offset.offset(0.001));
+    assertThat((Double) execution.metadata("nomemDeltaConviction")).as("(0.1 + 0 + 0) / 3 공통 티커").isCloseTo(0.1 / 3, org.assertj.core.data.Offset.offset(0.001));
+    assertThat(execution.metadata("staleNotes")).isEqualTo(3);
+    ArgumentCaptor<kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage> message =
+        ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage.class);
+    verify(notifier).publish(message.capture());
+    assertThat(message.getValue().toBlocks().toString()).contains("LIVE vs NOMEM(최근 4주): 픽 Jaccard 평균 0.83 · |Δconviction| 평균 0.03 (n=2일)")
+        .contains("OPEN 노트 10영업일 초과: 3건");
+  }
+
+  private static kr.hvy.blog.modules.advisor.domain.model.PickRow pick(String ticker, double conviction) {
+    return kr.hvy.blog.modules.advisor.domain.model.PickRow.builder().ticker(ticker).pickRank(1)
+        .direction(kr.hvy.blog.modules.advisor.domain.code.PickDirection.LONG).conviction(conviction).build();
   }
 
   @Test

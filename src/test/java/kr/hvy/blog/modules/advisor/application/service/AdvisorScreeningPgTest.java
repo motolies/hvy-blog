@@ -2,7 +2,6 @@ package kr.hvy.blog.modules.advisor.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.time.DayOfWeek;
@@ -11,7 +10,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import kr.hvy.blog.modules.advisor.AdvisorSyntheticData;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.SignalCode;
 import kr.hvy.blog.modules.advisor.domain.code.WeightSetSource;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
@@ -42,6 +43,8 @@ import org.testcontainers.utility.DockerImageName;
  * <p>
  * adj_close(t) = 100 + i·t 라 5일 초과수익이 종목 번호 i 에 단조 증가하고, MOM_20D = i/40, FOREIGN_FLOW ∝ (i−20) 도 단조라
  * 두 시그널의 rank-IC 는 정확히 1 이어야 한다. 지수는 상수(2500)라 벤치마크 수익률 0. 룩어헤드는 기준일 뒤 행을 넣어도 결과가 같은지로 검사한다.
+ * <p>
+ * 데이터는 {@link AdvisorSyntheticData} 공용 시드(advice-v6 부터 업종 지수 S0~S3 포함, 30영업일이라 rs60 은 null — non-null 경로는 MarketFeaturePgTest).
  */
 @Testcontainers
 class AdvisorScreeningPgTest {
@@ -118,7 +121,17 @@ class AdvisorScreeningPgTest {
       assertThat(candidates.get(i).signals().get("MOM_20D").w()).isEqualTo(0.12);
       assertThat(candidates.get(i).features()).containsKeys("r20", "tvRatio", "close");
       assertThat(candidates.get(i).benchIndexCode()).isIn("0001", "1001");
+      // advice-v6: 업종 지수 30행 → rs5·rs20 은 있고 rs60 은 없다(키 생략) → secCons null, SECTOR_MOM_60D 는 중립 0.5
+      assertThat(candidates.get(i).features()).containsKeys("secRs5", "secRs20").doesNotContainKey("secRs60");
+      assertThat(AdvicePromptBuilder.secCons(candidates.get(i).features())).isNull();
+      assertThat(candidates.get(i).signals().get("SECTOR_MOM_20D").raw()).isNotNull();
+      assertThat(candidates.get(i).signals().get("SECTOR_MOM_60D").pct()).isEqualTo(0.5);
+      assertThat(candidates.get(i).signals().get("SECTOR_MOM_60D").raw()).isNull();
     }
+    CandidateRow s0 = candidates.stream().filter(c -> c.sectorCode().equals("S0")).findFirst().orElseThrow();
+    CandidateRow s1 = candidates.stream().filter(c -> c.sectorCode().equals("S1")).findFirst().orElseThrow();
+    assertThat((Double) s0.features().get("secRs20")).as("S0 업종 지수 +0.5%/일, KOSPI 상수 → 양수").isPositive();
+    assertThat((Double) s1.features().get("secRs20")).as("S1 −0.5%/일 → 음수").isNegative();
     CandidateRow top = candidates.stream().filter(c -> c.ticker().equals("T39")).findFirst().orElseThrow();
     assertThat(top.signals().get("MOM_20D").pct()).as("가장 큰 모멘텀은 백분위 1.0").isEqualTo(1.0);
     assertThat(top.signals().get("MOM_20D").raw()).isCloseTo(39 / 40.0, org.assertj.core.data.Offset.offset(1e-6));
@@ -172,7 +185,8 @@ class AdvisorScreeningPgTest {
     assertThat(mom).hasSize(25);
     assertThat(mom).allMatch(r -> r.rankIc() > 0.999 && r.n() == 40);
     assertThat(rows.stream().filter(r -> r.signalCode().equals("FOREIGN_FLOW"))).allMatch(r -> r.rankIc() > 0.999);
-    assertThat(rows.stream().map(SignalIcRow::signalCode).collect(Collectors.toSet())).doesNotContain("VALUE_RANK", "GLOBAL_LINK");
+    assertThat(rows.stream().map(SignalIcRow::signalCode).collect(Collectors.toSet())).doesNotContain("VALUE_RANK", "GLOBAL_LINK")
+        .as("값이 전부 NULL 인 시그널(rs60 없음)은 IC 행이 생기지 않고 게이트도 막지 않는다").doesNotContain("SECTOR_MOM_60D");
     assertThat(icService.latestScorableDate(5)).contains(to);
 
     assertThat(icService.computeAndStore(DATES.getFirst(), to)).isEqualTo(rows.size());
@@ -184,7 +198,9 @@ class AdvisorScreeningPgTest {
     assertThat(byCode.get("MOM_20D").icMean()).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-6));
     assertThat(byCode.get("VALUE_RANK").multiplier()).isEqualTo(1.0);
     double sum = proposed.weights().stream().filter(SignalWeightRow::enabled).mapToDouble(SignalWeightRow::weight).sum();
-    assertThat(sum).as("가중치는 소수 6자리로 반올림되므로 합 오차 ≤ 1e-5").isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-5));
+    double baseSum = SignalCode.scorable().stream().mapToDouble(SignalCode::getBaseWeight).sum();
+    assertThat(sum).as("재정규화로 Σweight = Σbase(1.10, advice-v6 시드) — 소수 6자리 반올림이라 오차 ≤ 1e-5").isCloseTo(baseSum, org.assertj.core.data.Offset.offset(1e-5));
+    assertThat(byCode.get("SECTOR_MOM_60D").multiplier()).as("IC 없음 → 배수 1.0 유지").isEqualTo(1.0);
     assertThat(proposed.source()).isEqualTo(WeightSetSource.BACKFILL);
   }
 
@@ -231,6 +247,16 @@ class AdvisorScreeningPgTest {
     assertThat(f.sigma5d().get("0001")).isEqualTo(0.0);
     assertThat(f.topSectors()).isNotEmpty().hasSizeLessThanOrEqualTo(8);
     assertThat(f.topSectors().getFirst().members()).isEqualTo(10);
+    // advice-v6 null 경로: 업종 지수 30행 → rs5·rs20 은 있고 rs60·mom 은 null, consistent 는 false. mom 이 전부 null 이면 v5 처럼 cw5 순(동률은 코드 순)
+    assertThat(f.topSectors()).extracting(MarketFeatures.SectorFeature::code).containsExactly("S0", "S1", "S2", "S3");
+    assertThat(f.topSectors()).allMatch(s -> s.rs5() != null && s.rs20() != null && s.rs60() == null && s.mom() == null && !s.consistent());
+    assertThat(f.topSectors().getFirst().rs5()).as("S0 +0.5%/일 vs KOSPI 상수").isPositive();
+    assertThat(f.topSectors().get(1).rs5()).as("S1 −0.5%/일").isNegative();
+    assertThat(f.topSectors().get(1).overheated()).isFalse();
+    assertThat(f.topSectors().getFirst().overheated()).as("KOSPI σ_5d 가 0(상수)이라 양수 5일 수익률은 전부 과열로 판정된다 — 합성 데이터의 퇴화 경계").isTrue();
+    assertThat(f.bottomSectors()).as("섹터 4개 ≤ top 8 이라 bottom 은 비어 있다").isEmpty();
+    assertThat(f.sectorIndexAsOf()).isEqualTo(BASE);
+    assertThat(f.dataAsOf()).containsEntry("sectorIndex", BASE.toString());
     assertThat(f.flows()).isEmpty();
     assertThat(f.global()).isEmpty();
     // advice-v2: 관측 기준일·적용 구간·규칙 추세
@@ -257,39 +283,14 @@ class AdvisorScreeningPgTest {
     assertThat(f.links()).as("해외 데이터 없음 → 쌍 4개 모두 n=0").hasSize(4).allMatch(l -> l.n() == 0 && l.beta() == null);
   }
 
-  // ---------- 합성 데이터 ----------
+  // ---------- 합성 데이터 (공용 시드 AdvisorSyntheticData 와 같은 40종목 × 30영업일, DATES 도 동일) ----------
 
   static void seedStockData(JdbcTemplate jdbc) {
-    jdbc.update("INSERT INTO tb_stock_index_master (index_code, index_name) VALUES ('0001', 'KOSPI'), ('1001', 'KOSDAQ')");
-    for (LocalDate d : DATES) {
-      jdbc.update("INSERT INTO tb_stock_index_daily (index_code, trade_date, open_price, high_price, low_price, close_price) VALUES ('0001', ?, 2500, 2500, 2500, 2500), ('1001', ?, 2500, 2500, 2500, 2500)", d, d);
-    }
-    for (int i = 0; i < TICKERS; i++) {
-      String t = ticker(i);
-      jdbc.update("INSERT INTO tb_stock_master (ticker, stock_name, market_type, security_group, created_at, updated_at) VALUES (?, ?, ?, 'ST', NOW(), NOW())",
-          t, "종목" + i, i % 2 == 0 ? "KOSPI" : "KOSDAQ");
-      jdbc.update("INSERT INTO tb_stock_sector_map (ticker, sector_code, valid_from, sector_name, source) VALUES (?, ?, ?, ?, 'KRX')",
-          t, "S" + (i % 4), DATES.getFirst(), "섹터" + (i % 4));
-      for (int k = 0; k < DATES.size(); k++) {
-        double close = 100 + i * k;
-        insertPrice(jdbc, t, DATES.get(k), close);
-        jdbc.update("INSERT INTO tb_stock_daily_metric (ticker, trade_date, adj_close, ret_1d, ret_20d, ret_60d, ma_5, ma_20, ma_60, ma_120, "
-                + "dist_ma20, dist_ma60, high_52w, dist_high_52w, tv_avg_5d, tv_avg_60d, tv_ratio_5_60, vol_avg_20d, foreign_net_5d, institution_net_5d) "
-                + "VALUES (?, ?, ?, ?, ?, ?, 90, 90, 90, 90, 0.1, 0.1, ?, ?, 2e9, 2e9, ?, 1000, ?, ?)",
-            t, DATES.get(k), close, ((i * k) % 7) / 1000.0, i / 40.0, ((i * 3) % 40) / 40.0, close * 1.1, -(i % 10) / 100.0,
-            1.0 + ((i * 7) % 40) / 40.0, (i - 20) * 1e8, (((i * 11) % 40) - 20) * 1e8);
-      }
-    }
-    jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_adjust_factor");
-    jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_index_metric");
-    jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_sector_daily");
-    jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_market_breadth_daily");
+    AdvisorSyntheticData.seedStockData(jdbc);
   }
 
   static void insertPrice(JdbcTemplate jdbc, String ticker, LocalDate date, double close) {
-    BigDecimal price = BigDecimal.valueOf(close);
-    jdbc.update("INSERT INTO tb_stock_daily_price (ticker, trade_date, open_price, high_price, low_price, close_price, volume, trading_value, change_rate) "
-        + "VALUES (?, ?, ?, ?, ?, ?, 1000, 2000000000, 0.5)", ticker, date, price, price, price, price);
+    AdvisorSyntheticData.insertPrice(jdbc, ticker, date, close);
   }
 
   static String ticker(int i) {

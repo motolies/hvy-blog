@@ -19,18 +19,22 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /**
- * 판단 모델 입력 JSON 조립. 키는 짧게, null 은 생략, 실수는 4자리 반올림, 후보는 columns/rows 표 형태로 넣어 토큰을 아낀다(30×14 ≈ 2,500 토큰).
+ * 판단 모델 입력 JSON 조립. 키는 짧게, null 은 생략, 실수는 4자리 반올림, 후보는 columns/rows 표 형태로 넣어 토큰을 아낀다(30×16 ≈ 2,700 토큰).
  * <p>
  * 길이 상한(advisor.prompt.max-input-chars ≈ 8k 토큰)을 넘으면 후보를 뒤에서(점수 낮은 순) 잘라내고 truncated 를 표시한다.
  * 완성된 JSON 문자열을 ChatClient.user(String) 에 그대로 넘긴다 — 템플릿 변수로 넘기면 JSON 의 {} 가 변수로 해석돼 조용히 깨진다.
+ * <p>
+ * 표 컬럼(SECTOR_COLUMNS·CANDIDATE_COLUMNS)은 위치 배열이라 재현성 측정(동결 페이로드 재실행)·테스트가 위치로 읽는다 — 새 열은 맨 뒤에만 붙인다.
+ * advice-v6: sectors 에 업종 지수 rs5/rs20/rs60·mom·consistent·overheated, candidates 에 소속 섹터의 secRs60·secCons(LLM 이 두 표를 조인하지 않게).
  */
 @Component
 @RequiredArgsConstructor
 public class AdvicePromptBuilder {
 
   static final List<String> CANDIDATE_COLUMNS = List.of("tkr", "name", "sec", "score", "r20", "r60", "distHigh", "tvRatio", "frgnFlow",
-      "instFlow", "rsIdx", "per", "pbr", "vol20");
-  static final List<String> SECTOR_COLUMNS = List.of("code", "name", "cw5", "rising", "nearHigh", "frgn5", "members");
+      "instFlow", "rsIdx", "per", "pbr", "vol20", "secRs60", "secCons");
+  static final List<String> SECTOR_COLUMNS = List.of("code", "name", "cw5", "rising", "nearHigh", "frgn5", "members",
+      "rs5", "rs20", "rs60", "mom", "consistent", "overheated");
 
   private final AdvisorProperties properties;
 
@@ -51,16 +55,23 @@ public class AdvicePromptBuilder {
    */
   public PromptPayload build(MarketFeatures market, ScreeningResult screening, Map<String, Object> scoreboard, List<LessonRow> lessons,
       Map<String, Double> weights, DataQuality quality, NewsBlock news) {
+    return build(market, screening, scoreboard, lessons, weights, quality, news, null);
+  }
+
+  /**
+   * @param recentOutcomes 12:00 노트의 T+5 확정 빈도표(note-v1, 없으면 null) — RecentOutcomesService 가 만든 결정론 표만. 루트 키는 scoreboard 뒤·lessons 앞
+   */
+  public PromptPayload build(MarketFeatures market, ScreeningResult screening, Map<String, Object> scoreboard, List<LessonRow> lessons,
+      Map<String, Double> weights, DataQuality quality, NewsBlock news, Map<String, Object> recentOutcomes) {
     NewsBlock fitted = fitNews(news);
     int limit = screening.candidates().size();
     while (true) {
       List<CandidateRow> included = screening.candidates().subList(0, limit);
-      String json = AdvisorJson.write(payload(market, screening, included, scoreboard, lessons, weights, quality, fitted));
+      String json = AdvisorJson.write(payload(market, screening, included, scoreboard, lessons, weights, quality, fitted, recentOutcomes));
       if (json.length() <= properties.getPrompt().getMaxInputChars() || limit <= Math.max(properties.getPickMin(), 5)) {
         List<String> tickers = included.stream().map(CandidateRow::ticker).toList();
+        // 주도 섹터 enum 은 후보가 있는 섹터만(advice-v6) — top·bottom 표는 맥락으로 남지만 후보 없는 섹터(특히 bottom)를 고를 수 없게 스키마에서 막는다
         LinkedHashSet<String> sectors = new LinkedHashSet<>();
-        market.topSectors().forEach(s -> sectors.add(s.code()));
-        market.bottomSectors().forEach(s -> sectors.add(s.code()));
         included.stream().map(CandidateRow::sectorCode).filter(c -> c != null).forEach(sectors::add);
         return new PromptPayload(json, tickers, new ArrayList<>(sectors), included.size(), limit < screening.candidates().size(),
             json.length() / 3, fitted == null ? List.of() : fitted.ids());
@@ -117,6 +128,11 @@ public class AdvicePromptBuilder {
 
   Map<String, Object> payload(MarketFeatures market, ScreeningResult screening, List<CandidateRow> candidates, Map<String, Object> scoreboard,
       List<LessonRow> lessons, Map<String, Double> weights, DataQuality quality, NewsBlock news) {
+    return payload(market, screening, candidates, scoreboard, lessons, weights, quality, news, null);
+  }
+
+  Map<String, Object> payload(MarketFeatures market, ScreeningResult screening, List<CandidateRow> candidates, Map<String, Object> scoreboard,
+      List<LessonRow> lessons, Map<String, Double> weights, DataQuality quality, NewsBlock news, Map<String, Object> recentOutcomes) {
     Map<String, Object> root = new LinkedHashMap<>();
     root.put("asOf", screening.baseDate().toString());
     root.put("horizonDays", properties.getHorizonDays());
@@ -213,6 +229,10 @@ public class AdvicePromptBuilder {
     if (scoreboard != null && !scoreboard.isEmpty()) {
       root.put("scoreboard", scoreboard);
     }
+    // note-v1: 확정 빈도표는 scoreboard(느린 층 실적) 뒤·lessons(규칙) 앞 — 둘 사이의 "관찰 표" 자리
+    if (recentOutcomes != null && !recentOutcomes.isEmpty()) {
+      root.put("recentOutcomes", recentOutcomes);
+    }
     if (lessons != null && !lessons.isEmpty()) {
       List<Map<String, Object>> list = new ArrayList<>();
       for (LessonRow l : lessons) {
@@ -272,6 +292,9 @@ public class AdvicePromptBuilder {
     return date == null ? null : date.toString();
   }
 
+  /**
+   * 섹터 1행(SECTOR_COLUMNS 순). cw5 는 %p, rs·mom 은 소수. consistent/overheated 는 불리언 그대로(null 이면 위치 보존을 위해 null).
+   */
   private static List<Object> sectorRow(MarketFeatures.SectorFeature s) {
     List<Object> row = new ArrayList<>();
     row.add(s.code());
@@ -281,9 +304,18 @@ public class AdvicePromptBuilder {
     row.add(round(s.nearHigh()));
     row.add(s.frgn5());
     row.add(s.members());
+    row.add(round(s.rs5()));
+    row.add(round(s.rs20()));
+    row.add(round(s.rs60()));
+    row.add(round(s.mom()));
+    row.add(s.consistent());
+    row.add(s.overheated());
     return row;
   }
 
+  /**
+   * 후보 1행(CANDIDATE_COLUMNS 순). secRs60·secCons(advice-v6) 는 후보 features 의 secRs5/20/60(스크리닝 feat CTE) 에서 온다.
+   */
   private static List<Object> candidateRow(CandidateRow c) {
     Map<String, Object> f = c.features();
     List<Object> row = new ArrayList<>();
@@ -301,7 +333,26 @@ public class AdvicePromptBuilder {
     row.add(round(num(f.get("per")), 2));
     row.add(round(num(f.get("pbr")), 2));
     row.add(round(num(f.get("vol20d"))));
+    row.add(round(num(f.get("secRs60"))));
+    row.add(secCons(f));
     return row;
+  }
+
+  /**
+   * 후보 소속 섹터의 세 구간 연속 초과(advice-v6): secRs5·secRs20·secRs60 이 모두 있고 전부 > 0 이면 1, 모두 있지만 하나라도 ≤ 0 이면 0,
+   * 하나라도 없으면(업종 지수 없음·창 부족) null. 가드의 확신 클램프(AdviceGuard)도 같은 정의를 쓴다.
+   */
+  static Integer secCons(Map<String, Object> features) {
+    if (features == null) {
+      return null;
+    }
+    Double rs5 = num(features.get("secRs5"));
+    Double rs20 = num(features.get("secRs20"));
+    Double rs60 = num(features.get("secRs60"));
+    if (rs5 == null || rs20 == null || rs60 == null) {
+      return null;
+    }
+    return rs5 > 0 && rs20 > 0 && rs60 > 0 ? 1 : 0;
   }
 
   private static Double num(Object value) {

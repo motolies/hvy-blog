@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS tb_advisor_advice
     active_lesson_ids  JSONB                   DEFAULT NULL,
     data_quality       VARCHAR(20)    NOT NULL DEFAULT 'OK',
     guard_json         JSONB                   DEFAULT NULL,
+    memory_json        JSONB                   DEFAULT NULL,
     published_at       TIMESTAMPTZ(6)          DEFAULT NULL,
     created_at         TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
     CONSTRAINT uk_advisor_advice UNIQUE (base_date, advice_kind, variant)
@@ -198,6 +199,7 @@ COMMENT ON COLUMN tb_advisor_advice.weight_set_id      IS '스크리닝에 쓴 �
 COMMENT ON COLUMN tb_advisor_advice.active_lesson_ids  IS '프롬프트에 넣은 활성 교훈 id 목록';
 COMMENT ON COLUMN tb_advisor_advice.data_quality       IS '입력 품질: OK | DEGRADED (DAILY 단계 결손일 — 학습에서 제외)';
 COMMENT ON COLUMN tb_advisor_advice.guard_json         IS 'AdviceGuard 가 제거·보정한 내역';
+COMMENT ON COLUMN tb_advisor_advice.memory_json        IS '프롬프트에 실린 메모리 요약 {recentOutcomes 행수, lessons [id], scoreboard bool} (note-v1, 2026-09-21). 하나도 실리지 않은 판단·LLM_NOMEM 섀도는 NULL — LIVE 의 MIN(base_date) WHERE NOT NULL 이 NOMEM 섀도 창 시작점';
 COMMENT ON COLUMN tb_advisor_advice.published_at       IS 'Slack 발행 시각 (NULL = 미발행)';
 COMMENT ON COLUMN tb_advisor_advice.created_at         IS '생성일시';
 
@@ -451,7 +453,7 @@ CREATE TABLE IF NOT EXISTS tb_advisor_intraday_check
     CONSTRAINT uk_advisor_intraday UNIQUE (advice_id, checked_at)
 );
 
-COMMENT ON TABLE  tb_advisor_intraday_check                 IS '장중 점검 (보고 전용 — 학습에 쓰지 않는다)';
+COMMENT ON TABLE  tb_advisor_intraday_check                 IS '장중 점검 — 보고 전용 + 픽 노트(tb_advisor_pick_note)의 원천. 특징·IC·채점·교훈 SQL 은 참조 금지(12:00 정보 소급 금지)';
 COMMENT ON COLUMN tb_advisor_intraday_check.check_id        IS '점검 식별자';
 COMMENT ON COLUMN tb_advisor_intraday_check.advice_id       IS '점검 대상 판단 (전 영업일 LIVE)';
 COMMENT ON COLUMN tb_advisor_intraday_check.run_id          IS '점검 run';
@@ -577,6 +579,76 @@ CREATE INDEX IF NOT EXISTS idx_advisor_chat_created ON tb_advisor_chat (created_
 CREATE INDEX IF NOT EXISTS idx_advisor_chat_user ON tb_advisor_chat (slack_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_advisor_chat_thread ON tb_advisor_chat (channel_id, thread_ts, created_at);
 
+
+-- =============================================
+-- 9. 12:00 픽 노트 — 오답노트 (note-v1, 2026-09-21). INTRADAY 가 픽별 편차를 정량·분류하고 보조 모델 회고를 붙여 append-only 로 남긴다.
+--    12:00 관측값은 이 테이블에만 산다 — 픽·후보·채점·IC·교훈 SQL 은 참조하지 않는다(룩어헤드 경계). T+5 채점(ScoreJob)이 OPEN → CONFIRMED|REFUTED 로 확정한다.
+--    다음 판단 프롬프트에는 확정 노트의 결정론 빈도표(recentOutcomes)만 들어가고 deviation·why·hypothesis 문장은 어떤 경로로도 들어가지 않는다.
+-- =============================================
+CREATE TABLE IF NOT EXISTS tb_advisor_pick_note
+(
+    note_id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    advice_id        BIGINT           NOT NULL REFERENCES tb_advisor_advice (advice_id) ON DELETE CASCADE,
+    check_id         BIGINT           NOT NULL REFERENCES tb_advisor_intraday_check (check_id) ON DELETE CASCADE,
+    ticker           VARCHAR(10)      NOT NULL,
+    base_date        DATE             NOT NULL,
+    noted_at         TIMESTAMPTZ(6)   NOT NULL,
+    direction        VARCHAR(10)      NOT NULL,
+    conviction       DOUBLE PRECISION NOT NULL,
+    open_price       NUMERIC(18,2)             DEFAULT NULL,
+    current_price    NUMERIC(18,2)             DEFAULT NULL,
+    change_rate      DOUBLE PRECISION          DEFAULT NULL,
+    gap_rate         DOUBLE PRECISION          DEFAULT NULL,
+    since_open_rate  DOUBLE PRECISION          DEFAULT NULL,
+    bench_rate       DOUBLE PRECISION          DEFAULT NULL,
+    excess_rate      DOUBLE PRECISION          DEFAULT NULL,
+    z_score          DOUBLE PRECISION          DEFAULT NULL,
+    note_class       VARCHAR(20)      NOT NULL,
+    deviation        VARCHAR(300)              DEFAULT NULL,
+    why              VARCHAR(600)              DEFAULT NULL,
+    hypothesis       VARCHAR(300)              DEFAULT NULL,
+    tags_json        JSONB                     DEFAULT NULL,
+    status           VARCHAR(20)      NOT NULL DEFAULT 'OPEN',
+    final_excess     DOUBLE PRECISION          DEFAULT NULL,
+    finalized_at     TIMESTAMPTZ(6)            DEFAULT NULL,
+    model            VARCHAR(80)               DEFAULT NULL,
+    run_id           BIGINT                    DEFAULT NULL,
+    created_at       TIMESTAMPTZ(6)   NOT NULL DEFAULT NOW(),
+    CONSTRAINT uk_advisor_pick_note UNIQUE (check_id, ticker)
+);
+
+COMMENT ON TABLE  tb_advisor_pick_note                 IS '12:00 픽 노트(오답노트, note-v1). 점검 1회 = 픽마다 1행, append-only. 12:00 값은 여기만 — 픽·채점·IC·교훈 SQL 참조 금지';
+COMMENT ON COLUMN tb_advisor_pick_note.note_id         IS '노트 식별자';
+COMMENT ON COLUMN tb_advisor_pick_note.advice_id       IS '점검 대상 판단 (직전 영업일 LIVE)';
+COMMENT ON COLUMN tb_advisor_pick_note.check_id        IS '원천 장중 점검 (tb_advisor_intraday_check)';
+COMMENT ON COLUMN tb_advisor_pick_note.ticker          IS '단축 종목코드 (픽)';
+COMMENT ON COLUMN tb_advisor_pick_note.base_date       IS '판단 기준일 (점검일 = 다음 영업일 = 픽 진입일)';
+COMMENT ON COLUMN tb_advisor_pick_note.noted_at        IS '관측 시각 (KST 11:30~12:30 밖이면 tags_json.offHours=true — 장외 점검은 현재가=종가라 반나절 해석이 깨진다)';
+COMMENT ON COLUMN tb_advisor_pick_note.direction       IS 'LONG | AVOID (픽 그대로)';
+COMMENT ON COLUMN tb_advisor_pick_note.conviction      IS '판단 시 확신도 (픽 그대로)';
+COMMENT ON COLUMN tb_advisor_pick_note.open_price      IS '당일 시가 (KIS stck_oprc, 진입가 근사)';
+COMMENT ON COLUMN tb_advisor_pick_note.current_price   IS '관측 시각 현재가 (KIS stck_prpr)';
+COMMENT ON COLUMN tb_advisor_pick_note.change_rate     IS '전일 대비율 % (KIS prdy_ctrt 그대로, 예: 1.2)';
+COMMENT ON COLUMN tb_advisor_pick_note.gap_rate        IS '시가/기준가(stck_sdpr, 권리락 반영) − 1 (소수, 기록 전용 — MORNING 축)';
+COMMENT ON COLUMN tb_advisor_pick_note.since_open_rate IS '현재가/시가 − 1 (소수) — 진입가 대비 1차 지표';
+COMMENT ON COLUMN tb_advisor_pick_note.bench_rate      IS '소속 지수(bench_index_code) 전일 대비율 % (KIS bstp_nmix_prdy_ctrt)';
+COMMENT ON COLUMN tb_advisor_pick_note.excess_rate     IS '지수 대비 초과 (소수). tags_json.excessBasis 가 OPEN 이면 sinceOpen − 지수 sinceOpen, PREV_CLOSE 면 (change_rate − bench_rate)/100 폴백';
+COMMENT ON COLUMN tb_advisor_pick_note.z_score         IS 'excess_rate / 반나절 σ. OPEN: vol20 × √(3/6.5), PREV_CLOSE: vol20 (후보 feature_json.vol20, 없으면 NULL → FLAT)';
+COMMENT ON COLUMN tb_advisor_pick_note.note_class      IS 'FLAT | ON_TRACK | MARKET_DRAG | IDIOSYNCRATIC | OVERSHOOT (PickNoteClass, 결정론 — AVOID 는 부호 반전)';
+COMMENT ON COLUMN tb_advisor_pick_note.deviation       IS '회고: 얼마나·어떻게 (≤120자 목표, FLAT·LLM 실패는 NULL)';
+COMMENT ON COLUMN tb_advisor_pick_note.why             IS '회고: thesis 의 어떤 가정이 흔들렸는지·risk 첫 신호 발동 여부 (≤200자 목표, 입력 숫자만 인용)';
+COMMENT ON COLUMN tb_advisor_pick_note.hypothesis      IS '회고: 종목·날짜 없는 일반화 가설 (≤120자 목표). 티커·종목명·날짜 언급은 가드가 NULL 로 바꾼다. 프롬프트 미주입';
+COMMENT ON COLUMN tb_advisor_pick_note.tags_json       IS '{signals:[SignalCode], sector, regime, excessBasis:OPEN|PREV_CLOSE, offHours:bool, benchCode, benchSinceOpen, secCons:1|0|null(후보 secRs5/20/60 → AdvicePromptBuilder.secCons)}';
+COMMENT ON COLUMN tb_advisor_pick_note.status          IS 'OPEN 미확정 | CONFIRMED 12:00 초과 부호 == T+5 초과 부호 | REFUTED 불일치 (PickNoteStatus, T+5 잠정 채점 저장 직후 1회 확정)';
+COMMENT ON COLUMN tb_advisor_pick_note.final_excess    IS 'T+5 채점 excess_ret (tb_advisor_candidate_score, 소수) — 반나절 신호가 T+5 를 맞혔는지의 정직한 기록';
+COMMENT ON COLUMN tb_advisor_pick_note.finalized_at    IS '확정 시각 (recentOutcomes 는 finalized_at ≤ 기준일 20:00 KST 만 — bitemporal)';
+COMMENT ON COLUMN tb_advisor_pick_note.model           IS '회고 모델 ID (assist). 회고가 없으면 NULL';
+COMMENT ON COLUMN tb_advisor_pick_note.run_id          IS '점검 run';
+COMMENT ON COLUMN tb_advisor_pick_note.created_at      IS '생성일시';
+
+CREATE INDEX IF NOT EXISTS idx_advisor_pick_note_final ON tb_advisor_pick_note (finalized_at, base_date);
+CREATE INDEX IF NOT EXISTS idx_advisor_pick_note_advice ON tb_advisor_pick_note (advice_id, ticker, noted_at);
+
 -- =============================================
 -- 마이그레이션 (advice-v2, 2026-09-13). 신규 설치는 위 CREATE 본문에 이미 포함돼 있고, 기존 설치는 아래가 컬럼을 보탠다. 재실행 안전.
 -- CREATE TABLE IF NOT EXISTS 는 있는 테이블에 컬럼을 넣지 않으므로 본문과 이 블록을 함께 고친다. varchar 확대는 메타데이터 변경이라 재작성 없음.
@@ -594,3 +666,5 @@ ALTER TABLE tb_advisor_call_score ADD COLUMN IF NOT EXISTS event_date DATE DEFAU
 -- advice-v4 (뉴스): 인용 헤드라인
 ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS news_ids   JSONB DEFAULT NULL;
 ALTER TABLE tb_advisor_pick   ADD COLUMN IF NOT EXISTS cited_news JSONB DEFAULT NULL;
+-- note-v1 (12:00 오답노트, 2026-09-21): 프롬프트에 실린 메모리 요약. tb_advisor_pick_note 는 위 CREATE TABLE IF NOT EXISTS 가 새로 만든다
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS memory_json JSONB DEFAULT NULL;

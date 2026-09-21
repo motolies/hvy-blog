@@ -102,9 +102,9 @@ class AdvisorSchemaPgTest {
   }
 
   @Test
-  @DisplayName("advisor 스키마는 tb_advisor_ 접두 테이블 14개를 만들고 stock 25개는 그대로다")
+  @DisplayName("advisor 스키마는 tb_advisor_ 접두 테이블 15개를 만들고 stock 25개는 그대로다")
   void schemaCreatesAdvisorTables() {
-    assertThat(count("tb\\_advisor\\_%")).isEqualTo(14);
+    assertThat(count("tb\\_advisor\\_%")).isEqualTo(15);
     assertThat(count("tb\\_stock\\_%")).isEqualTo(25);
   }
 
@@ -122,10 +122,11 @@ class AdvisorSchemaPgTest {
   void seedActivatesWeightSet() {
     WeightSet active = weightSets.active().orElseThrow();
     assertThat(active.source()).isEqualTo(WeightSetSource.SEED);
-    assertThat(active.weights()).hasSize(12);
-    assertThat(active.enabledWeights()).hasSize(11).doesNotContainKey("GLOBAL_LINK");
+    // advice-v6: SECTOR_MOM_20D/60D 시드 2행 추가 → 14행·활성 13·사전 합 1.10 (점수는 Σw 정규화라 합 1.0 을 지킬 필요 없음)
+    assertThat(active.weights()).hasSize(14);
+    assertThat(active.enabledWeights()).hasSize(13).doesNotContainKey("GLOBAL_LINK").containsKeys("SECTOR_MOM_20D", "SECTOR_MOM_60D");
     double sum = active.enabledWeights().values().stream().mapToDouble(Double::doubleValue).sum();
-    assertThat(sum).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-9));
+    assertThat(sum).isCloseTo(1.10, org.assertj.core.data.Offset.offset(1e-9));
 
     long id = weightSets.insert(active.toBuilder().source(WeightSetSource.WEEKLY).asOf(LocalDate.of(2026, 9, 12)).reason("test").build(), true);
     assertThat(weightSets.active().orElseThrow().weightSetId()).isEqualTo(id);
@@ -166,6 +167,9 @@ class AdvisorSchemaPgTest {
 
     adviceWriter.markPublished(adviceId, Instant.parse("2026-09-11T10:31:00Z"));
     assertThat(adviceWriter.findById(adviceId).orElseThrow().publishedAt()).isEqualTo(Instant.parse("2026-09-11T10:31:00Z"));
+    // note-v1: memory_json 왕복 — 헤더 픽스처는 메모리 요약을 싣고, 첫 메모리 판단일은 LIVE 만 본다
+    assertThat(read.memoryJson()).containsEntry("recentOutcomes", 2).containsEntry("scoreboard", false).containsEntry("lessons", List.of(3, 7));
+    assertThat(adviceWriter.firstMemoryAdviceDate()).contains(LocalDate.of(2026, 9, 11));
 
     assertThatThrownBy(() -> adviceWriter.insertPicks(adviceId, List.of(pick("999999", 2))))
         .as("후보 밖 티커는 복합 FK 가 막는다")
@@ -174,13 +178,15 @@ class AdvisorSchemaPgTest {
         .as("같은 (base_date, kind, variant) 는 유니크")
         .isInstanceOf(DataIntegrityViolationException.class);
 
-    long shadow = adviceWriter.insertHeader(header(runId, LocalDate.of(2026, 9, 11), AdviceVariant.QUANT_TOPN));
+    long shadow = adviceWriter.insertHeader(header(runId, LocalDate.of(2026, 9, 11), AdviceVariant.QUANT_TOPN).toBuilder().memoryJson(null).build());
     assertThat(adviceWriter.findByBaseDate(LocalDate.of(2026, 9, 11))).extracting(AdviceHeader::variant)
         .containsExactly(AdviceVariant.LIVE, AdviceVariant.QUANT_TOPN);
     assertThat(shadow).isNotEqualTo(adviceId);
+    assertThat(adviceWriter.findById(shadow).orElseThrow().memoryJson()).as("메모리 없는 헤더는 NULL 그대로(빈 맵이 아니다)").isNull();
 
     assertThat(adviceWriter.delete(adviceId)).isEqualTo(1);
     assertThat(adviceWriter.candidates(adviceId)).as("CASCADE 로 후보·픽도 지워진다").isEmpty();
+    assertThat(adviceWriter.firstMemoryAdviceDate()).as("LIVE 가 지워지면 섀도의 NULL 만 남아 empty").isEmpty();
   }
 
   @Test
@@ -282,7 +288,8 @@ class AdvisorSchemaPgTest {
         .regimeCode(MarketRegimeCode.RISK_ON).kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.NEUTRAL).pUp(0.65)
         .regimeRationale("반도체 수급").leadingSectors(List.of(new SectorCall("G2510", "반도체", "외인 순매수")))
         .summary("요약").promptVersion("advice-v1").model("judge").systemFingerprint("fp_1").weightSetId(null)
-        .activeLessonIds(List.of(3L, 7L)).dataQuality(DataQuality.OK).guard(Map.of("removed", 1)).build();
+        .activeLessonIds(List.of(3L, 7L)).dataQuality(DataQuality.OK).guard(Map.of("removed", 1))
+        .memoryJson(Map.of("recentOutcomes", 2, "lessons", List.of(3L, 7L), "scoreboard", false)).build();
   }
 
   private static CandidateRow candidate(String ticker, int rank, double score) {

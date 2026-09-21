@@ -23,6 +23,8 @@ FROM tb_advisor_weight_set s,
              ('RS_INDEX',        0.08, '지수 대비 20일 상대강도'),
              ('VALUE_RANK',      0.05, 'PBR 낮을수록 (당일 스냅샷, IC 갱신 대상 아님)'),
              ('VOL_20D',         0.03, '20일 변동성 낮을수록'),
+             ('SECTOR_MOM_20D',  0.05, '섹터(업종 지수) 20일 시장 대비 초과 (advice-v6, 2026-09-21)'),
+             ('SECTOR_MOM_60D',  0.05, '섹터(업종 지수) 60일 시장 대비 초과 (advice-v6, 2026-09-21)'),
              ('GLOBAL_LINK',     0.00, '해외 연동 — 국면 특징 전용, 종목 점수 제외')) AS v(code, base, note)
 WHERE s.source = 'SEED'
 ON CONFLICT (weight_set_id, signal_code) DO NOTHING;

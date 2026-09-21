@@ -30,6 +30,8 @@ import kr.hvy.blog.modules.advisor.domain.model.CandidateScoreRow;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
 import kr.hvy.blog.modules.advisor.repository.jdbc.AdviceWriter;
+import kr.hvy.blog.modules.advisor.repository.jdbc.IntradayCheckWriter;
+import kr.hvy.blog.modules.advisor.repository.jdbc.PickNoteRepository;
 import kr.hvy.blog.modules.advisor.repository.jdbc.ScoreWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.SignalIcWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.WeightSetRepository;
@@ -69,6 +71,8 @@ class AdviceScoringPgTest {
   private ScoreJob scoreJob;
   private AdvisorProperties properties;
   private kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter morningChecks;
+  private PickNoteRepository pickNotes;
+  private IntradayCheckWriter intradayChecks;
   private long runId;
 
   @BeforeAll
@@ -92,7 +96,9 @@ class AdviceScoringPgTest {
     StockCollectRunRepository collectRuns = mock(StockCollectRunRepository.class);
     when(collectRuns.findAllByJobTypeOrderByStartedAtDesc(any(), any())).thenReturn(List.of());
     SignalIcService icService = new SignalIcService(named, new SignalIcWriter(new BatchUpsertSupport(jdbc), jdbc), new WeightSetRepository(jdbc), properties);
-    scoreJob = new ScoreJob(scoring, adviceWriter, scoreWriter, icService, kpi, collectRuns, jdbc, properties);
+    pickNotes = new PickNoteRepository(jdbc);
+    intradayChecks = new IntradayCheckWriter(jdbc);
+    scoreJob = new ScoreJob(scoring, adviceWriter, scoreWriter, icService, kpi, collectRuns, jdbc, properties, pickNotes);
 
     jdbc.update("TRUNCATE tb_advisor_advice CASCADE");
     jdbc.update("TRUNCATE tb_advisor_run CASCADE");
@@ -161,11 +167,27 @@ class AdviceScoringPgTest {
     assertThat(kospi.hit()).isFalse();
     assertThat(kospi.brier()).isCloseTo(0.49, within(1e-9));
     assertThat(kospi.stage()).isEqualTo(ScoreStage.PROVISIONAL);
-    // 섹터: 업종 지수 없음 → MV 동일가중 폴백 (change_rate 0.5 × 5일 / 100), 시장 0 대비 초과 → 적중
+    // 섹터: 업종 지수(S1, −0.5%/일)가 있으면 지수 종가 D10 → D15 로 채점 — 시장 0 대비 미달 → 빗나감 (advice-v6 합성 데이터부터 업종 지수 포함)
     CallScoreRow sector = calls.stream().filter(c -> c.subjectType() == CallSubject.SECTOR).findFirst().orElseThrow();
     assertThat(sector.subjectCode()).isEqualTo("S1");
-    assertThat(sector.actualRet()).isCloseTo(0.025, within(1e-9));
-    assertThat(sector.hit()).isTrue();
+    double sectorExpected = AdvisorSyntheticData.sectorIndexClose(1, 15) / AdvisorSyntheticData.sectorIndexClose(1, 10) - 1;
+    assertThat(sector.actualRet()).as("NUMERIC(18,4) 반올림 오차 허용").isCloseTo(sectorExpected, within(1e-6));
+    assertThat(sector.baseValue()).isNotNull();
+    assertThat(sector.exitValue()).isNotNull();
+    assertThat(sector.hit()).isFalse();
+    // 폴백: 청산일 업종 지수 행이 없으면 MV 동일가중 등락 합(change_rate 0.5 × 5일 / 100)으로 채점 → 시장 0 대비 초과 → 적중
+    java.math.BigDecimal exitClose = jdbc.queryForObject("SELECT close_price FROM tb_stock_index_daily WHERE index_code = 'S1' AND trade_date = ?",
+        java.math.BigDecimal.class, D.get(15));
+    jdbc.update("DELETE FROM tb_stock_index_daily WHERE index_code = 'S1' AND trade_date = ?", D.get(15));
+    try {
+      CallScoreRow fallback = scoring.sectorScores(advice, 5, ScoreStage.PROVISIONAL).getFirst();
+      assertThat(fallback.exitValue()).isNull();
+      assertThat(fallback.actualRet()).isCloseTo(0.025, within(1e-9));
+      assertThat(fallback.hit()).isTrue();
+    } finally {
+      jdbc.update("INSERT INTO tb_stock_index_daily (index_code, trade_date, open_price, high_price, low_price, close_price) VALUES ('S1', ?, ?, ?, ?, ?)",
+          D.get(15), exitClose, exitClose, exitClose, exitClose);
+    }
 
     // 확정 재채점은 같은 키를 덮어쓴다
     scoring.score(advice, 5, ScoreStage.CONFIRMED);
@@ -174,11 +196,18 @@ class AdviceScoringPgTest {
   }
 
   @Test
-  @DisplayName("ScoreJob: 청산일이 확보된 미채점 판단만 찾아 잠정 채점하고 스코어보드를 만든다. KPI 는 LONG 픽·후보군·AVOID·보정을 나눈다")
+  @DisplayName("ScoreJob: 청산일이 확보된 미채점 판단만 찾아 잠정 채점하고 스코어보드를 만든다. h=5 잠정 채점 직후 12:00 노트를 T+5 부호로 확정한다. KPI 는 LONG 픽·후보군·AVOID·보정을 나눈다")
   void scoreJobAndKpi() {
     long a1 = insertAdvice(D.get(10), AdviceVariant.LIVE, List.of(1, 5, 10, 30), Map.of(5, PickDirection.LONG, 30, PickDirection.LONG, 10, PickDirection.AVOID));
     long a2 = insertAdvice(D.get(26), AdviceVariant.LIVE, List.of(3, 7), Map.of(3, PickDirection.LONG)); // D+5 = D31 없음 → 미도래
     long shadow = insertAdvice(D.get(10), AdviceVariant.QUANT_TOPN, List.of(1, 5, 10, 30), Map.of(1, PickDirection.LONG, 30, PickDirection.LONG));
+    // a1 의 12:00 노트: T05 는 +(T+5 도 + → CONFIRMED), T30 은 −(T+5 는 + → REFUTED), 후보만인 T01 은 노트 없음
+    long checkId = intradayChecks.insert(kr.hvy.blog.modules.advisor.domain.model.IntradayCheckRow.builder().adviceId(a1).runId(runId)
+        .checkedAt(java.time.Instant.parse("2026-08-18T03:00:00Z")).indexJson(Map.of()).pickJson(List.of()).agreementRatio(0.5)
+        .verdict(kr.hvy.blog.modules.advisor.domain.code.IntradayVerdict.MIXED).comment("c").build());
+    pickNotes.insertAll(List.of(
+        note(a1, checkId, AdvisorSyntheticData.ticker(5), 0.01, kr.hvy.blog.modules.advisor.domain.code.PickNoteClass.ON_TRACK),
+        note(a1, checkId, AdvisorSyntheticData.ticker(30), -0.01, kr.hvy.blog.modules.advisor.domain.code.PickNoteClass.IDIOSYNCRATIC)));
 
     assertThat(scoreJob.unscored(5)).extracting(AdviceHeader::adviceId).containsExactlyInAnyOrder(a1, shadow);
     assertThat(scoreJob.unscored(1)).extracting(AdviceHeader::adviceId).containsExactlyInAnyOrder(a1, a2, shadow);
@@ -191,6 +220,34 @@ class AdviceScoringPgTest {
     assertThat(scoreJob.unscored(1)).isEmpty();
     assertThat(scoreJob.unscored(20)).as("D+20 은 청산일이 캘린더에 없어 후보 목록에서 빠진다").isEmpty();
     assertThat(execution.metadata("scoring")).isNotNull();
+    @SuppressWarnings("unchecked")
+    Map<String, Object> scoringMeta = (Map<String, Object>) execution.metadata("scoring");
+    assertThat(scoringMeta).containsEntry("notesFinalized", 2);
+    Map<String, kr.hvy.blog.modules.advisor.domain.model.PickNoteRow> finalizedNotes = new java.util.HashMap<>();
+    pickNotes.findByAdvice(a1).forEach(n -> finalizedNotes.put(n.ticker(), n));
+    double e5Note = AdvisorSyntheticData.close(5, 15) / AdvisorSyntheticData.close(5, 11) - 1;
+    assertThat(finalizedNotes.get(AdvisorSyntheticData.ticker(5)).status()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.PickNoteStatus.CONFIRMED);
+    assertThat(finalizedNotes.get(AdvisorSyntheticData.ticker(5)).finalExcess()).isCloseTo(e5Note, within(1e-9));
+    assertThat(finalizedNotes.get(AdvisorSyntheticData.ticker(5)).finalizedAt()).isNotNull();
+    assertThat(finalizedNotes.get(AdvisorSyntheticData.ticker(30)).status()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.PickNoteStatus.REFUTED);
+    assertThat(execution.failures()).as("확정은 격리돼 있고 실패가 없다").isEmpty();
+    assertThat(scoringMeta).containsEntry("notesSwept", 0);
+
+    // 확정 누락 보충: 채점이 이미 끝난 a1 에 뒤늦게 OPEN 노트(T10 AVOID, 12:00 초과 +)가 생기면 다음 run 의 scoreDue 가 h=5 채점으로 확정한다(e10 > 0 → CONFIRMED)
+    long lateCheck = intradayChecks.insert(kr.hvy.blog.modules.advisor.domain.model.IntradayCheckRow.builder().adviceId(a1).runId(runId)
+        .checkedAt(java.time.Instant.parse("2026-08-18T03:05:00Z")).indexJson(Map.of()).pickJson(List.of()).agreementRatio(0.5)
+        .verdict(kr.hvy.blog.modules.advisor.domain.code.IntradayVerdict.MIXED).comment("c").build());
+    pickNotes.insertAll(List.of(note(a1, lateCheck, AdvisorSyntheticData.ticker(10), 0.01, kr.hvy.blog.modules.advisor.domain.code.PickNoteClass.ON_TRACK)));
+    AdvisorExecution second = new AdvisorExecution(run, D.getLast(), properties);
+    scoreJob.scoreDue(second);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> secondMeta = (Map<String, Object>) second.metadata("scoring");
+    assertThat(secondMeta).containsEntry("provisional", 0).containsEntry("notesFinalized", 0).containsEntry("notesSwept", 1);
+    kr.hvy.blog.modules.advisor.domain.model.PickNoteRow swept = pickNotes.findByAdvice(a1).stream().filter(n -> n.checkId() == lateCheck).findFirst().orElseThrow();
+    assertThat(swept.status()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.PickNoteStatus.CONFIRMED);
+    assertThat(swept.finalExcess()).isCloseTo(AdvisorSyntheticData.close(10, 15) / AdvisorSyntheticData.close(10, 11) - 1, within(1e-9));
+    assertThat(pickNotes.findAdviceIdsWithOpenNotes()).isEmpty();
+    assertThat(second.failures()).isEmpty();
     assertThat(board.slackLines()).isNotEmpty();
     assertThat(board.slackLines().getFirst()).contains("5일 픽 2개").contains("승률 100.0%");
     assertThat(board.promptBlock()).as("min-picks=1 이라 블록 생성").isNotNull().containsKeys("picks", "regime", "calibration");
@@ -357,6 +414,13 @@ class AdviceScoringPgTest {
     }
     adviceWriter.insertPicks(id, pickRows);
     return id;
+  }
+
+  private kr.hvy.blog.modules.advisor.domain.model.PickNoteRow note(long adviceId, long checkId, String ticker, double excess,
+      kr.hvy.blog.modules.advisor.domain.code.PickNoteClass cls) {
+    return kr.hvy.blog.modules.advisor.domain.model.PickNoteRow.builder().adviceId(adviceId).checkId(checkId).ticker(ticker).baseDate(D.get(10))
+        .notedAt(java.time.Instant.parse("2026-08-18T03:00:00Z")).direction(PickDirection.LONG).conviction(0.7).excessRate(excess).zScore(excess * 100)
+        .noteClass(cls).tags(Map.of("excessBasis", "OPEN", "offHours", false)).status(kr.hvy.blog.modules.advisor.domain.code.PickNoteStatus.OPEN).runId(runId).build();
   }
 
   private void restore(int i, int k) {

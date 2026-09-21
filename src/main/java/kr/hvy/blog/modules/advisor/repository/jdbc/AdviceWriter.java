@@ -54,7 +54,7 @@ public class AdviceWriter {
   private static final String HEADER_COLUMNS = "advice_id, run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, "
       + "kosdaq_dir, p_up, regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, "
       + "entry_date, exit_date, news_ids, prompt_version, model, system_fingerprint, weight_set_id, "
-      + "active_lesson_ids, data_quality, guard_json, published_at, created_at";
+      + "active_lesson_ids, data_quality, guard_json, published_at, created_at, memory_json";
 
   private final JdbcTemplate jdbc;
 
@@ -66,8 +66,8 @@ public class AdviceWriter {
     return jdbc.queryForObject(
         "INSERT INTO tb_advisor_advice (run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, kosdaq_dir, p_up, "
             + "regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, entry_date, exit_date, "
-            + "news_ids, prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, data_quality, guard_json, published_at) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
+            + "news_ids, prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, data_quality, guard_json, published_at, memory_json) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
         Long.class,
         h.runId(), h.baseDate(), h.adviceKind(), h.variant().getCode(), h.horizonDays(),
         code(h.regimeCode()), code(h.kospiDir()), code(h.kosdaqDir()), h.pUp(),
@@ -76,7 +76,8 @@ public class AdviceWriter {
         h.entryDate(), h.exitDate(), AdvisorJdbc.jsonb(h.newsIds()),
         h.promptVersion(), h.model(), h.systemFingerprint(),
         h.weightSetId(), AdvisorJdbc.jsonb(h.activeLessonIds()),
-        (h.dataQuality() == null ? DataQuality.OK : h.dataQuality()).getCode(), AdvisorJdbc.jsonb(h.guard()), AdvisorJdbc.ts(h.publishedAt()));
+        (h.dataQuality() == null ? DataQuality.OK : h.dataQuality()).getCode(), AdvisorJdbc.jsonb(h.guard()), AdvisorJdbc.ts(h.publishedAt()),
+        AdvisorJdbc.jsonb(h.memoryJson()));
   }
 
   /**
@@ -223,6 +224,15 @@ public class AdviceWriter {
   }
 
   /**
+   * 메모리(recentOutcomes·lessons·scoreboard 중 하나라도)가 처음 실린 LIVE 판단의 기준일 — LLM_NOMEM 섀도 병행 기간(advisor.shadow.nomem-weeks)의 시작점. 없으면 empty.
+   * memory_json 은 주입이 하나도 없으면 NULL 로 저장되므로 IS NOT NULL 이 곧 "메모리 주입" 이다.
+   */
+  public Optional<LocalDate> firstMemoryAdviceDate() {
+    return jdbc.query("SELECT MIN(base_date) AS d FROM tb_advisor_advice WHERE variant = 'LIVE' AND memory_json IS NOT NULL",
+        rs -> rs.next() ? Optional.ofNullable(rs.getObject("d", LocalDate.class)) : Optional.<LocalDate>empty());
+  }
+
+  /**
    * 누적 LIVE 픽 수 (피드백 게이트 판정용).
    */
   public int countLivePicks() {
@@ -266,7 +276,16 @@ public class AdviceWriter {
       .guard(AdvisorJdbc.jsonMap(rs, "guard_json"))
       .publishedAt(AdvisorJdbc.instant(rs, "published_at"))
       .createdAt(AdvisorJdbc.instant(rs, "created_at"))
+      .memoryJson(readNullableMap(rs, "memory_json"))
       .build();
+
+  /**
+   * JSONB 맵 컬럼을 그대로 읽되 NULL 은 null 로 둔다(AdvisorJdbc.jsonMap 은 빈 맵) — memory_json 은 "주입 없음" 과 "빈 요약" 을 구분해야 한다.
+   */
+  private static Map<String, Object> readNullableMap(ResultSet rs, String column) throws SQLException {
+    String json = rs.getString(column);
+    return json == null || json.isBlank() ? null : AdvisorJson.readMap(json);
+  }
 
   private static List<SectorCall> readSectors(ResultSet rs) throws SQLException {
     String json = rs.getString("leading_sectors");

@@ -71,6 +71,7 @@ public class AdvisorProperties {
   private Shadow shadow = new Shadow();
   private Model model = new Model();
   private Cost cost = new Cost();
+  private Note note = new Note();
 
   /** 프롬프트 입력 스냅샷·원본 출력 보존 일수 */
   private int retentionDays = 180;
@@ -136,6 +137,15 @@ public class AdvisorProperties {
 
     /** DAILY 수집 완료를 기다리는 마감 시각(KST). 이후에도 미완료면 SKIPPED + #hvy-error */
     private LocalTime deadline = LocalTime.of(19, 55);
+
+    /**
+     * advice-v6 섹터 규칙의 기계 클램프: 후보 secCons=0(소속 업종 지수가 1주·1개월·3개월 중 하나라도 시장에 미달) 또는 overheated 섹터의 LONG 픽 확신 상한.
+     * 프롬프트 문구만으로는 준수가 보장되지 않아 AdviceGuard 가 내리고 stats capNonConsistent/capOverheated 로 준수율을 관찰한다. CONVICTIONS 값 중 하나여야 한다
+     */
+    private double nonConsistentConvictionCap = 0.70;
+
+    /** 섹터 과열(overheated) 판정: 업종 지수 5일 수익률 > 이 배수 × σ_5d(KOSPI, market.sigma5d) — 모멘텀 crash·평균회귀 경고 플래그 */
+    private double overheatedSigma = 2.0;
   }
 
   @Data
@@ -360,5 +370,37 @@ public class AdvisorProperties {
 
     /** 출력 100만 토큰당 USD (추론 토큰 포함) */
     private BigDecimal outputPer1mUsd = BigDecimal.ZERO;
+  }
+
+  /**
+   * 12:00 픽 노트(오답노트, note-v1 2026-09-21). INTRADAY 가 픽별 편차를 정량·분류하고 FLAT 이 아닌 픽만 보조 모델에 회고를 물어 tb_advisor_pick_note 에 남긴다.
+   * 다음 판단(ADVISE)에는 T+5 채점으로 확정된 결정론 빈도표(recentOutcomes)만 들어가고 LLM 회고 문장은 기록·보고용이다(사용자 결정 ①).
+   */
+  @Data
+  public static class Note {
+
+    /** false 면 회고 LLM 호출(REFLECT)을 건너뛴다. 정량·분류 노트는 그대로 저장된다(무료·결정론) */
+    private boolean enabled = true;
+
+    /** 분류 임계 |z|. z = 지수 대비 초과 / (vol20 × √(3/6.5)) — 미만이면 FLAT 로 회고를 생략한다 */
+    private double zThreshold = 1.0;
+
+    /** 회고 호출 1건에 넣는 픽 상한 (|z| 큰 순) */
+    private int maxReflectPicks = 10;
+
+    /** recentOutcomes 집계 창(거래일) — 이 안의 base_date 확정 노트만 */
+    private int windowTradingDays = 20;
+
+    /** 확정 노트가 이보다 적으면 recentOutcomes 블록을 프롬프트에 넣지 않는다 */
+    private int minFinalized = 10;
+
+    /** recentOutcomes 빈도표 최대 행 수 (class × secCons 중 n 상위) */
+    private int maxRows = 5;
+
+    /**
+     * recentOutcomes 확정 마감 시각(KST) — 기준일의 이 시각 이후에 확정(finalized_at)·관측(noted_at)된 노트는 넣지 않는다.
+     * 사후 재실행(?baseDate=)에서 미래 확정이 새어 들지 않게 하는 상한으로, advisor.news.cutoff 와 같은 뜻이다(bitemporal)
+     */
+    private LocalTime cutoff = LocalTime.of(20, 0);
   }
 }

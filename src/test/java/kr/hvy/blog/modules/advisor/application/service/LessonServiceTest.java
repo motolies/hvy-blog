@@ -65,8 +65,48 @@ class LessonServiceTest {
     assertThat(regime.n()).isEqualTo(4);
     assertThat(regime.meanExcess()).isCloseTo(0.025, org.assertj.core.data.Offset.offset(1e-9));
     assertThat(regime.tStat()).isPositive();
+    assertThat(regime.nDays()).as("4픽이 서로 다른 4일").isEqualTo(4);
     assertThat(regime.from()).isEqualTo(LocalDate.of(2026, 9, 1));
     assertThat(regime.to()).isEqualTo(LocalDate.of(2026, 9, 4));
+  }
+
+  @Test
+  @DisplayName("클러스터 se: 같은 날 5픽 전부 양수여도 D=1 이라 t=0 이고, 여러 날에 분산되면 일별 평균의 se 로 유한한 t 가 나온다")
+  void clusterStandardErrorByBaseDate() {
+    // 같은 날 5픽 — 픽 단위 se 로는 t≈5.7(0.02 평균, sd 0.0079) 이지만 하루치라 공통 요인을 분리할 수 없다
+    List<Map<String, Object>> sameDay = new ArrayList<>();
+    double[] excess = {0.01, 0.02, 0.03, 0.02, 0.02};
+    for (double e : excess) {
+      sameDay.add(pickRow("RISK_ON", "G2510", "{}", e, LocalDate.of(2026, 9, 1)));
+    }
+    when(jdbc.queryForList(anyString(), anyMap())).thenReturn(sameDay);
+    LessonService.Cell one = service.cells(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 9, 30)).stream()
+        .filter(c -> c.signal() == null && c.sector() == null).findFirst().orElseThrow();
+    assertThat(one.n()).isEqualTo(5);
+    assertThat(one.nDays()).isEqualTo(1);
+    assertThat(one.meanExcess()).isCloseTo(0.02, org.assertj.core.data.Offset.offset(1e-9));
+    assertThat(one.tStat()).as("D < 2 → t = 0").isZero();
+
+    // 4일 × 2픽: 일별 평균 0.015, 0.025, 0.035, 0.025 → sd 0.00816, se = sd/√4 = 0.00408, t = 0.025/0.00408 ≈ 6.1
+    List<Map<String, Object>> spread = new ArrayList<>();
+    double[][] byDay = {{0.01, 0.02}, {0.02, 0.03}, {0.03, 0.04}, {0.02, 0.03}};
+    for (int d = 0; d < byDay.length; d++) {
+      for (double e : byDay[d]) {
+        spread.add(pickRow("RISK_ON", "G2510", "{}", e, LocalDate.of(2026, 9, 1 + d)));
+      }
+    }
+    when(jdbc.queryForList(anyString(), anyMap())).thenReturn(spread);
+    LessonService.Cell many = service.cells(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 9, 30)).stream()
+        .filter(c -> c.signal() == null && c.sector() == null).findFirst().orElseThrow();
+    assertThat(many.n()).isEqualTo(8);
+    assertThat(many.nDays()).isEqualTo(4);
+    assertThat(many.meanExcess()).isCloseTo(0.025, org.assertj.core.data.Offset.offset(1e-9));
+    assertThat(many.tStat()).isCloseTo(0.025 / (0.008165 / 2), org.assertj.core.data.Offset.offset(0.05));
+
+    Map<String, Object> payload = service.reviewPayload(List.of(many), List.of(), 0);
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> cells = (List<Map<String, Object>>) payload.get("cells");
+    assertThat(cells.getFirst()).containsEntry("n", 8).containsEntry("nDays", 4).containsKey("t");
   }
 
   @Test

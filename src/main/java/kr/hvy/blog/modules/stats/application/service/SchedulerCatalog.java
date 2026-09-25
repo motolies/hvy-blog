@@ -98,6 +98,13 @@ public class SchedulerCatalog {
       new Definition("scheduler.advisor-h20-advise.lock-name", "AI 주간 20거래일 판단",
           "scheduler.advisor-h20-advise.cron-expression", List.of("0 10 20 * * FRI"), "scheduler.advisor-h20-advise.enabled", "Asia/Seoul",
           ManualTrigger.advisor("ADVISE_H20")),
+      // 장기 규칙 추천(M8): cron 은 후보일마다 깨고 주기(격주·월초)는 스케줄러 코드가 판정하므로 cron 간격(7일·1일)이 실제 주기보다 짧다 — 대표 주기만 표시한다
+      new Definition("scheduler.advisor-h60-advise.lock-name", "AI 60거래일 규칙 추천(격주)",
+          null, List.of("0 20 20 * * FRI"), "scheduler.advisor-h60-advise.enabled", "Asia/Seoul",
+          ManualTrigger.advisor("ADVISE_H60")),
+      new Definition("scheduler.advisor-h180-advise.lock-name", "AI 180거래일 규칙 추천(월초)",
+          null, List.of("0 30 20 1 * *"), "scheduler.advisor-h180-advise.enabled", "Asia/Seoul",
+          ManualTrigger.advisor("ADVISE_H180")),
       new Definition("scheduler.advisor-weekly-review.lock-name", "AI 주간 검토(가중치·교훈·보고)",
           "scheduler.advisor-weekly-review.cron-expression", List.of("0 0 8 * * SUN"), "scheduler.advisor-weekly-review.enabled", "Asia/Seoul",
           ManualTrigger.advisor("WEEKLY_REVIEW")));

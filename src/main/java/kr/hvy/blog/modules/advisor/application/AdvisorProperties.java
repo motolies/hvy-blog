@@ -104,6 +104,7 @@ public class AdvisorProperties {
   private Regime regime = new Regime();
   private Theme theme = new Theme();
   private H20 h20 = new H20();
+  private LongTerm longTerm = new LongTerm();
 
   /** 프롬프트 입력 스냅샷·원본 출력 보존 일수 */
   private int retentionDays = 180;
@@ -133,6 +134,7 @@ public class AdvisorProperties {
     validateHorizons();
     validateRegime();
     validateH20();
+    validateLongTerm();
     if (!enabled) {
       log.info("advisor 비활성(advisor.enabled=false) — AI 판단 잡·ChatClient 미등록");
       return;
@@ -255,6 +257,48 @@ public class AdvisorProperties {
   void validateH20() {
     if (h20.getPickMin() < 1 || h20.getPickMin() > h20.getPickMax() || h20.getPickMax() > 36) {
       throw new IllegalStateException("advisor.h20 은 1 ≤ pick-min(" + h20.getPickMin() + ") ≤ pick-max(" + h20.getPickMax() + ") ≤ 36 이어야 합니다");
+    }
+  }
+
+  /**
+   * advisor.long-term 검증(M8). 가중치 키는 장기 팩터(SignalCode.longTerm)만, 값은 0 이상이고 합이 양수여야 한다 — 사전 고정 가중치라 오타가 조용히
+   * "팩터 하나 빠진 점수" 가 되느니 기동을 거부한다. 창은 skip < lookback, 변동성 최소 표본 ≤ 창, 커버리지는 (0, 1], 픽 수 ≤ 후보 수 ≤ 36(Slack).
+   */
+  void validateLongTerm() {
+    LongTerm lt = longTerm;
+    if (lt.getWeights() == null || lt.getWeights().isEmpty()) {
+      throw new IllegalStateException("advisor.long-term.weights 가 비어 있습니다");
+    }
+    Set<String> allowed = new java.util.HashSet<>();
+    kr.hvy.blog.modules.advisor.domain.code.SignalCode.longTerm().forEach(c -> allowed.add(c.getCode()));
+    double sum = 0;
+    for (Map.Entry<String, Double> e : lt.getWeights().entrySet()) {
+      if (!allowed.contains(e.getKey())) {
+        throw new IllegalStateException("advisor.long-term.weights 에 장기 팩터가 아닌 키 '" + e.getKey() + "' — 허용: " + allowed);
+      }
+      if (e.getValue() == null || e.getValue() < 0) {
+        throw new IllegalStateException("advisor.long-term.weights." + e.getKey() + " 는 0 이상이어야 합니다");
+      }
+      sum += e.getValue();
+    }
+    if (sum <= 0) {
+      throw new IllegalStateException("advisor.long-term.weights 의 합이 0 입니다");
+    }
+    if (lt.getMomSkipDays() < 1 || lt.getMomSkipDays() >= lt.getMomLookbackDays()) {
+      throw new IllegalStateException("advisor.long-term 은 1 ≤ mom-skip-days < mom-lookback-days 여야 합니다");
+    }
+    if (lt.getVolMinDays() < 2 || lt.getVolMinDays() > lt.getVolWindowDays()) {
+      throw new IllegalStateException("advisor.long-term 은 2 ≤ vol-min-days ≤ vol-window-days 여야 합니다");
+    }
+    if (lt.getMinCoverage() <= 0 || lt.getMinCoverage() > 1) {
+      throw new IllegalStateException("advisor.long-term.min-coverage 는 (0, 1] 이어야 합니다: " + lt.getMinCoverage());
+    }
+    if (lt.getPickMin() < 1 || lt.getPickMin() > lt.getPickCount() || lt.getPickCount() > lt.getCandidateLimit() || lt.getPickCount() > 36
+        || lt.getMaxPerSector() < 1) {
+      throw new IllegalStateException("advisor.long-term 은 1 ≤ pick-min ≤ pick-count ≤ candidate-limit, pick-count ≤ 36, max-per-sector ≥ 1 이어야 합니다");
+    }
+    if (!"Y".equals(lt.getFinancialPeriodType()) && !"Q".equals(lt.getFinancialPeriodType())) {
+      throw new IllegalStateException("advisor.long-term.financial-period-type 은 Y 또는 Q: " + lt.getFinancialPeriodType());
     }
   }
 
@@ -718,5 +762,64 @@ public class AdvisorProperties {
 
     /** 픽 상한 — 초과분은 확신 내림차순으로 자른다. 주 1회 20일 보유라 DAILY(10) 보다 좁게 둔다 */
     private int pickMax = 8;
+  }
+
+  /**
+   * 장기(H60·H180) 규칙 선택(M8). 60·180거래일은 겹치는 코호트로 n_eff 가 ≈23·≈7 이라 IC 학습이 불가능하므로 **사전 고정 가중치**로 장기 팩터의 횡단면 백분위를 가중합한다.
+   * LLM(advice-longterm-v1)은 확정된 상위 N 의 종목별 thesis/risk 서술만 쓰고 선택·순위는 바꿀 수 없다(LongTermNarrativeGuard 가 강제).
+   * <ul>
+   *   <li>백분위 모집단: advisor.markets 유니버스 전체(스크리닝과 같은 관례) → 후보 필터: advisor.pick-universe(KOSPI200 PIT) → 섹터당 max-per-sector</li>
+   *   <li>결측: 팩터 값이 없으면 중립(기여 0). 값이 있는 팩터의 가중치 합 / 전체 가중치 합(커버리지)이 min-coverage 미만이면 후보에서 뺀다</li>
+   *   <li>재무 팩터: tb_stock_financial 의 financial-period-type(기본 Y 연간) 최신 결산기, available_from ≤ 기준일 AND first_seen_at(KST 날짜) ≤ 기준일 — bitemporal PIT</li>
+   *   <li>판정: 60일 격주·180일 월간 표본으로는 2년 안에 판정할 수 없다 — Slack·KPI 에 "판정 불가: 표본 부족, 2년 이상 필요" 를 붙인다</li>
+   * </ul>
+   * 가중치·창을 바꾸면 사후 분리를 위해 prompt 버전과 별개로 guard_json.weights 스냅샷이 판단마다 남는다.
+   */
+  @Data
+  public static class LongTerm {
+
+    /** 팩터 코드 → 사전 고정 가중치 (합으로 정규화). 키는 SignalCode.longTerm() 만 */
+    private Map<String, Double> weights = defaultLongTermWeights();
+
+    /** 12-1 모멘텀의 긴 창(거래일): ret_lookback − ret_skip */
+    private int momLookbackDays = 250;
+
+    /** 12-1 모멘텀에서 빼는 최근 창(거래일) — 단기 반전 효과 제거 */
+    private int momSkipDays = 20;
+
+    /** 저변동 팩터의 창(거래일): 직전 창 ret_1d 표본 표준편차 */
+    private int volWindowDays = 60;
+
+    /** 저변동 팩터 최소 표본(거래일). 미만이면 결측 */
+    private int volMinDays = 45;
+
+    /** 재무 팩터 결산 구분: Y 연간(기본, 종목 간 비교 가능) | Q 분기 */
+    private String financialPeriodType = "Y";
+
+    /** 값이 있는 팩터의 가중치 비율 하한 — 미만이면 후보 제외 */
+    private double minCoverage = 0.6;
+
+    /** 후보(프롬프트·후보 스냅샷) 상한 — 픽−후보군 평가의 모집단 */
+    private int candidateLimit = 30;
+
+    /** 픽 수 = 점수 상위 N */
+    private int pickCount = 10;
+
+    /** 후보가 이보다 적으면 FAILED(미발행) */
+    private int pickMin = 3;
+
+    /** 후보 안 섹터당 최대 종목 수 */
+    private int maxPerSector = 3;
+
+    /** 기본 가중치: MOM_12_1 0.30, QUALITY_ROE 0.20, QUALITY_DEBT 0.15, OP_GROWTH 0.15, LOW_VOL_60 0.20 */
+    static Map<String, Double> defaultLongTermWeights() {
+      Map<String, Double> w = new LinkedHashMap<>();
+      w.put("MOM_12_1", 0.30);
+      w.put("QUALITY_ROE", 0.20);
+      w.put("QUALITY_DEBT", 0.15);
+      w.put("OP_GROWTH", 0.15);
+      w.put("LOW_VOL_60", 0.20);
+      return w;
+    }
   }
 }

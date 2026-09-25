@@ -368,6 +368,18 @@ advisor:
   h20:                            # 주간 20거래일 판단(M7, advice-h20-v1). 뉴스·메모리 없이 H20 가중치 세트로만(없으면 SKIP). 정책 표는 이 범위로 재계산
     pick-min: 3                   # 가드 후 픽이 이보다 적으면 FAILED(미발행)
     pick-max: 8                   # 픽 상한(확신 내림차순 절단)
+  long-term:                      # 장기(H60·H180) 규칙 선택(M8, longterm-v1). 사전 고정 가중치 — 학습 안 함(n_eff 60≈23·180≈7). LLM 은 서술만
+    weights: { MOM_12_1: 0.30, QUALITY_ROE: 0.20, QUALITY_DEBT: 0.15, OP_GROWTH: 0.15, LOW_VOL_60: 0.20 }   # ★ 바꾸면 guard_json.weights 로 사후 분리
+    mom-lookback-days: 250        # MOM_12_1 = ret_250 − ret_20
+    mom-skip-days: 20
+    vol-window-days: 60           # LOW_VOL_60 = 직전 60거래일 ret_1d σ (낮을수록 좋음)
+    vol-min-days: 45
+    financial-period-type: Y      # 재무 팩터 결산 구분(Y 연간 | Q 분기). available_from·first_seen_at ≤ 기준일(PIT)
+    min-coverage: 0.6             # 값 있는 팩터 가중치 비율 하한 — 미만이면 후보 제외
+    candidate-limit: 30           # 후보 스냅샷(픽−후보군 모집단)
+    pick-count: 10                # 규칙 상위 N
+    pick-min: 3
+    max-per-sector: 3
   theme:                          # 테마 블록(M6): KOSPI200 구성(PIT) 종목을 kospi200_sector 대분류별로 집계. CUSTOM 매핑 보류
     strong-rs20: 0.02             # rs20 ≥ +0.02 & rs60 > 0 → STRONG, rs20 ≤ −0.02 & rs60 < 0 → WEAK
     min-members: 3                # 지표 있는 구성 종목이 이보다 적은 대분류는 제외
@@ -463,6 +475,14 @@ scheduler:
   advisor-h20-advise:             # M7 금요일 20:10 주간 20거래일 판단(ADVISE 19:30~19:55 뒤). 휴장·H20 가중치 세트 없음이면 SKIPPED
     lock-name: ADVISOR-H20-ADVISE-TEST
     cron-expression: "0 10 20 * * FRI"
+    enabled: false
+  advisor-h60-advise:             # M8 60거래일 규칙 추천. 금요일마다 깨고 짝수 ISO 주만 실행(코드 판정, 아니면 run 없음)
+    lock-name: ADVISOR-H60-ADVISE-TEST
+    cron-expression: "0 20 20 * * FRI"
+    enabled: false
+  advisor-h180-advise:            # M8 180거래일 규칙 추천. 평일마다 깨고 그 달 첫 거래일만 실행(코드 판정, 아니면 run 없음)
+    lock-name: ADVISOR-H180-ADVISE-TEST
+    cron-expression: "0 30 20 * * MON-FRI"
     enabled: false
   advisor-weekly-review:
     lock-name: ADVISOR-WEEKLY-REVIEW-TEST
@@ -567,6 +587,14 @@ scheduler:
   advisor-h20-advise:             # M7 주간 20거래일 판단. H20 활성 가중치 세트(IC_BACKFILL?horizon=20 → WEEKLY_REVIEW)가 생기기 전까지는 SKIPPED
     lock-name: ADVISOR-H20-ADVISE-PROD
     cron-expression: "0 10 20 * * FRI"
+    enabled: true
+  advisor-h60-advise:             # M8 60거래일 규칙 추천(격주 금요일 20:20, 짝수 ISO 주)
+    lock-name: ADVISOR-H60-ADVISE-PROD
+    cron-expression: "0 20 20 * * FRI"
+    enabled: true
+  advisor-h180-advise:            # M8 180거래일 규칙 추천(매월 첫 거래일 20:30)
+    lock-name: ADVISOR-H180-ADVISE-PROD
+    cron-expression: "0 30 20 * * MON-FRI"
     enabled: true
   advisor-weekly-review:
     lock-name: ADVISOR-WEEKLY-REVIEW-PROD

@@ -147,6 +147,45 @@
   - SQL 은 `AdvisorKpiService.variantSummaries(from, to, H20, 20)` 의 LIVE·QUANT_TOPN 두 행과 같은 필터(data_quality='OK', LONG, MISSING 제외)를 쓴다.
 - **적용 순서**: `20260925_04` SQL(주석만) → 앱 배포 → `IC_BACKFILL?horizon=20` → 다음 WEEKLY_REVIEW 가 h=20 세트 활성(n_eff ≥ 24) → 금요일 20:10 자동 또는 `POST /api/advisor/admin/jobs/ADVISE_H20?baseDate=`.
 
+### 1.9 장기 규칙 추천 H60·H180 (longterm-v1, M8, 2026-09-25)
+
+브랜치 `feat/advisor-longterm-factors`. **규칙이 고르고 LLM 은 서술만** 붙인다. 60·180거래일은 겹치는 코호트라 n_eff 가 ≈23·≈7 이어서 IC 학습이 불가능하다. 그래서 가중치는 **사전 고정**이다.
+
+- **팩터**(`SignalCode` 장기 5종, 표현식 null → 스크리닝·IC 에 들어가지 않는다. 값은 `LongTermScreeningService.FACTOR_SQL` 이 기준일 하루치로 만든다)
+
+  | 코드 | 정의 | 방향 | 기본 가중치 |
+  |---|---|---|---|
+  | MOM_12_1 | ret_250 − ret_20 (adj_close, 기준일 행 필수) | 클수록 | 0.30 |
+  | QUALITY_ROE | ROE(%) | 클수록 | 0.20 |
+  | QUALITY_DEBT | 부채비율(%) | 낮을수록 | 0.15 |
+  | OP_GROWTH | 영업이익 증가율(%) | 클수록 | 0.15 |
+  | LOW_VOL_60 | 직전 60거래일 ret_1d σ(표본 ≥ 45) | 낮을수록 | 0.20 |
+
+  - **재무 PIT**: `tb_stock_financial` LATERAL, `period_type = Y`(설정), `available_from ≤ d AND (first_seen_at AT TIME ZONE 'Asia/Seoul')::date ≤ d`, 최신 결산기·최신 정정 회차 1행. `LongTermFactorPgTest` 가 미래 공시·미래 관측(정정 회차)·분기 행·KST 자정 경계를 검증한다.
+  - **IC 판단**: 학습·모니터링 IC 모두 넣지 않았다. IC 는 feat CTE 를 공유해서, 250일 창과 재무 LATERAL 을 넣으면 매일 스크리닝과 IC 백필 청크 전부가 그 비용을 진다. 60·180일 모니터링 IC 는 n_eff 때문에 판정 근거도 되지 못한다. 필요하면 별도 백필 잡으로 뒤에 붙인다.
+- **점수**(`LongTermScorer`, 순수 함수·결정론): 팩터마다 유니버스 전체(advisor.markets)의 PERCENT_RANK를 구하고, 가중합 Σw·±(2p−1)/Σw 를 낸다.
+  - 결측 팩터는 중립(0)으로 둔다.
+  - 커버리지(값이 있는 가중치 비율)가 0.6 미만이면 후보에서 뺀다. 재무 3종이 전부 없으면 0.5 라서 빠진다.
+  - 백분위를 먼저 매긴 뒤 KOSPI200 PIT 로 거른다.
+  - 정렬은 점수 내림차순, 같으면 티커 오름차순이다.
+  - 섹터당 3개까지 담고, 후보 30 중 상위 10 을 픽으로 한다.
+- **서술**(advice-longterm-v1, judge 모델): 스키마 `picks[{ticker enum = 규칙 픽 N, thesis, risk}], summary`.
+  - **가드**(`LongTermNarrativeGuard`): 저장 순서는 항상 규칙 순서다. 규칙 밖·중복 서술은 버리고, 빠진 서술은 "서술 없음"으로 채운다. `guard_json.ruleOverride` 는 LLM 이 순서·집합을 바꾸려 했는지의 관측치다.
+  - **fail-open**: LLM 이 실패해도 규칙 픽을 "서술 없음"으로 발행한다. 이때 NARRATE 단계는 FAILED, run 은 PARTIAL, `model='rule-only'`, `guard_json.narrative='FAILED'` 가 된다.
+  - 픽은 전부 LONG·확신 0.55 고정이다. 규칙 선택이라 확신 보정을 쓰지 않는다.
+- **저장**
+  - 헤더: `advice_kind='H60'|'H180'`, `horizon_days=60|180`, `weight_set_id=NULL`.
+  - `regime_json` 은 맥락 스냅샷이다. **policy 는 NULL** — 정책 표로 규칙 선택을 깎으면 규칙 성과를 잴 수 없다.
+  - `guard_json` 에는 weights·minCoverage·financialPeriodType·verdict 가 남는다. 가중치를 바꾸면 이 값으로 사후 분리한다.
+  - 후보는 규칙 상위 30이고, 픽−후보군 평가의 모집단이다. 섀도는 없다(LIVE 자체가 규칙).
+  - 채점은 ScoreJob 이 M5 인프라로 60·180 창 하나로만 한다.
+- **주기**(`LongTermCadence`): cron 은 후보일마다 깨어나고, 주기가 아니면 run 없이 돌아간다.
+  - H60 `ADVISE_H60`: 금 20:20, 짝수 ISO 주. 53주가 있는 해는 52주 → 2주 사이가 3주가 된다.
+  - H180 `ADVISE_H180`: 평일 20:30, 그 달 첫 거래일.
+  - 수동 API 는 주기와 무관하게 돈다. 잡 유형을 둘로 나눈 이유는 월초가 짝수 주 금요일이면 같은 저녁에 둘 다 돌기 때문이다(RUNNING 유니크가 유형 단위).
+- **판정 불가 라벨**: Slack 과 `AdvisorKpiService.VariantSummary.verdictLabel` 에 "판정 불가: 표본 부족, 2년 이상 필요" 가 붙는다. 조건은 결정 호라이즌이 learn=false(설정 맵 기반)인 종류다.
+- **적용 순서**: `20260925_04` SQL(주석만) → 앱 배포. 선행 백필은 없다. 재무 수집(WEEKLY)이 비어 있으면 커버리지 미달로 FAILED 가 나므로, 첫 실행 전에 `tb_stock_financial` 연간 행 수를 확인한다(migrate 파일의 확인 SQL).
+
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
 19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.

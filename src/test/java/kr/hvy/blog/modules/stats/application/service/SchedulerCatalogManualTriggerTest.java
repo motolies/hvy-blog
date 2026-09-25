@@ -21,8 +21,8 @@ import org.springframework.mock.env.MockEnvironment;
  * 스케줄러 ↔ 수동 실행 잡 매핑({@link ManualTrigger})을 고정한다.
  * <p>
  * 잡 이름이 문자열이라 컴파일러가 오타를 못 잡는다 — 여기서 모든 값을 {@code CollectJobType}/{@code AdvisorJobType.valueOf} 로 대조하고,
- * stock·advisor 13행(eventfeed am/pm 별도)만 매핑을 갖고 나머지(공인 IP·핫딜·로그 정리·Jira·Claude)는 null 임을 못 박는다.
- * {@code resolve()} 가 lock-name 프로퍼티 없는 정의를 카탈로그에서 제외하므로 MockEnvironment 에 18개 키를 전부 채운다.
+ * stock·advisor 15행(eventfeed am/pm 별도)만 매핑을 갖고 나머지(공인 IP·핫딜·로그 정리·Jira·Claude)는 null 임을 못 박는다.
+ * {@code resolve()} 가 lock-name 프로퍼티 없는 정의를 카탈로그에서 제외하므로 MockEnvironment 에 20개 키를 전부 채운다.
  */
 class SchedulerCatalogManualTriggerTest {
 
@@ -33,7 +33,8 @@ class SchedulerCatalogManualTriggerTest {
       "scheduler.stock-macro.lock-name", "scheduler.stock-eventfeed.lock-name-am", "scheduler.stock-eventfeed.lock-name-pm",
       "scheduler.stock-weekly.lock-name",
       "scheduler.advisor-advise.lock-name", "scheduler.advisor-intraday.lock-name", "scheduler.advisor-morning-check.lock-name",
-      "scheduler.advisor-morning-advise.lock-name", "scheduler.advisor-h20-advise.lock-name", "scheduler.advisor-weekly-review.lock-name");
+      "scheduler.advisor-morning-advise.lock-name", "scheduler.advisor-h20-advise.lock-name", "scheduler.advisor-h60-advise.lock-name",
+      "scheduler.advisor-h180-advise.lock-name", "scheduler.advisor-weekly-review.lock-name");
 
   /** 정본은 infra/scheduler/*Scheduler 가 부르는 잡 — 스케줄러 본문이 바뀌면 이 표와 SchedulerCatalog 를 함께 고친다 */
   private static final Map<String, ManualTrigger> EXPECTED = Map.ofEntries(
@@ -49,6 +50,8 @@ class SchedulerCatalogManualTriggerTest {
       entry("scheduler.advisor-morning-check.lock-name", ManualTrigger.advisor("MORNING_CHECK")),
       entry("scheduler.advisor-morning-advise.lock-name", ManualTrigger.advisor("MORNING_ADVISE")),
       entry("scheduler.advisor-h20-advise.lock-name", ManualTrigger.advisor("ADVISE_H20")),
+      entry("scheduler.advisor-h60-advise.lock-name", ManualTrigger.advisor("ADVISE_H60")),
+      entry("scheduler.advisor-h180-advise.lock-name", ManualTrigger.advisor("ADVISE_H180")),
       entry("scheduler.advisor-weekly-review.lock-name", ManualTrigger.advisor("WEEKLY_REVIEW")));
 
   private Map<String, ResolvedJob> jobsByLockName;
@@ -63,13 +66,13 @@ class SchedulerCatalogManualTriggerTest {
   }
 
   @Test
-  @DisplayName("lock-name 을 전부 채우면 18개 정의가 모두 해석된다 (정의 누락·중복 감지)")
+  @DisplayName("lock-name 을 전부 채우면 20개 정의가 모두 해석된다 (정의 누락·중복 감지)")
   void allDefinitionsResolve() {
     assertThat(jobsByLockName).containsOnlyKeys(LOCK_NAME_KEYS);
   }
 
   @Test
-  @DisplayName("stock·advisor 13행(eventfeed am/pm 포함)만 manualTrigger 를 갖고 나머지는 null")
+  @DisplayName("stock·advisor 15행(eventfeed am/pm 포함)만 manualTrigger 를 갖고 나머지는 null")
   void onlyStockAndAdvisorRowsHaveManualTrigger() {
     jobsByLockName.forEach((lockName, job) -> {
       if (EXPECTED.containsKey(lockName)) {

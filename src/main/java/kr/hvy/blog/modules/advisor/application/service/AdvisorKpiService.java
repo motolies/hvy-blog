@@ -24,9 +24,23 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AdvisorKpiService {
 
-  /** 변형 1개의 요약 */
+  /**
+   * 판정 불가 라벨(M8): 가중치를 학습하지 않는(learn=false) 호라이즌의 판단 — 60·180거래일은 격주·월간 표본에 겹치는 코호트라 n_eff 가 작아 2년 안에 판정할 수 없다.
+   * Slack(LongTermAdviceMessage)과 KPI 요약(VariantSummary.verdictLabel)이 같은 문구를 쓴다.
+   */
+  public static final String UNJUDGEABLE_LABEL = "판정 불가: 표본 부족, 2년 이상 필요";
+
+  /**
+   * 변형 1개의 요약. verdictLabel(M8)은 판정 불가 종류(H60·H180)일 때만 {@link #UNJUDGEABLE_LABEL}, 그 밖은 null — 컴포넌트는 맨 뒤에 추가했다.
+   */
   public record VariantSummary(AdviceVariant variant, int advices, int picks, Double hitRate, Double meanExcess, Double seExcess, Double meanCostAdj,
-                               Double poolMeanExcess, Double valueAdd, Double avoidMeanExcess, int avoidPicks) {
+                               Double poolMeanExcess, Double valueAdd, Double avoidMeanExcess, int avoidPicks, String verdictLabel) {
+
+    /** M8 이전 모양(라벨 없음) — 기존 호출·테스트 호환용 */
+    public VariantSummary(AdviceVariant variant, int advices, int picks, Double hitRate, Double meanExcess, Double seExcess, Double meanCostAdj,
+        Double poolMeanExcess, Double valueAdd, Double avoidMeanExcess, int avoidPicks) {
+      this(variant, advices, picks, hitRate, meanExcess, seExcess, meanCostAdj, poolMeanExcess, valueAdd, avoidMeanExcess, avoidPicks, null);
+    }
   }
 
   /** 국면 콜 요약 */
@@ -106,7 +120,17 @@ public class AdvisorKpiService {
     Double se = mean == null || sd == null || n < 2 ? null : sd / Math.sqrt(n);
     Double poolMean = d(pool.get("mean_excess"));
     return new VariantSummary(variant, ((Number) pick.get("advices")).intValue(), n, d(pick.get("hit_rate")), mean, se, d(pick.get("mean_cost_adj")),
-        poolMean, mean == null || poolMean == null ? null : mean - poolMean, d(avoid.get("mean_excess")), ((Number) avoid.get("n")).intValue());
+        poolMean, mean == null || poolMean == null ? null : mean - poolMean, d(avoid.get("mean_excess")), ((Number) avoid.get("n")).intValue(),
+        verdictLabel(kind));
+  }
+
+  /**
+   * 종류의 판정 라벨: 결정 호라이즌이 advisor.horizons 에서 learn=false(모니터링 전용 — 기본 H60·H180)면 {@link #UNJUDGEABLE_LABEL}, 아니면 null.
+   * 설정 맵 기반이라 호라이즌을 학습 대상으로 바꾸면 라벨도 함께 사라진다.
+   */
+  public String verdictLabel(AdviceKind kind) {
+    java.util.OptionalInt h = properties.horizonOf(kind);
+    return h.isPresent() && !properties.isLearnHorizon(h.getAsInt()) ? UNJUDGEABLE_LABEL : null;
   }
 
   /**

@@ -33,7 +33,14 @@ public enum AdvisorJobType implements EnumCode<String> {
    * 금요일 20:10 주간 20거래일 판단(advice_kind=H20, M7). 파이프라인은 ADVISE 와 공유하되(AdviseJob.advise(kind)) 뉴스·메모리 없이 H20 가중치 세트로만 돈다.
    * ADVISE 와 유형을 나눈 이유는 ADVISE_ADHOC 과 같다 — RUNNING 부분 유니크가 잡 유형 단위라 같은 유형이면 서로를 "이미 실행 중" 으로 막는다.
    */
-  ADVISE_H20("ADVISE_H20", "20거래일 주간 판단", true);
+  ADVISE_H20("ADVISE_H20", "20거래일 주간 판단", true),
+  /**
+   * 60거래일 규칙 추천(advice_kind=H60, M8) — 짝수 ISO 주 금요일 20:20. 장기 팩터 규칙 상위 N 을 확정하고 LLM 은 서술만(LongTermAdviseJob).
+   * H180 과 유형을 나눈 이유: 월초 첫 거래일이 짝수 주 금요일이면 둘이 같은 저녁에 돌고, RUNNING 부분 유니크가 유형 단위라 한 유형이면 서로를 막는다
+   */
+  ADVISE_H60("ADVISE_H60", "60거래일 규칙 추천(격주)", true),
+  /** 180거래일 규칙 추천(advice_kind=H180, M8) — 매월 첫 거래일 20:30 */
+  ADVISE_H180("ADVISE_H180", "180거래일 규칙 추천(월간)", true);
 
   private final String code;
   private final String desc;

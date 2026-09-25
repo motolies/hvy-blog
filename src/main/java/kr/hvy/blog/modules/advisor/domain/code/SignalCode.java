@@ -14,6 +14,10 @@ import lombok.Getter;
  * 라이브와 IC 가 같은 정의를 써야 학습이 성립한다(2026-09-13).
  * VALUE_RANK 는 과거 값이 없어 IC 학습 대상이 아니고(multiplier 1.0 고정), GLOBAL_LINK 는 국면 특징 전용이라 표현식이 없다.
  * <p>
+ * 장기 팩터(M8: MOM_12_1·LOW_VOL_60·QUALITY_ROE·QUALITY_DEBT·OP_GROWTH)도 표현식이 없다 — 250일 창·재무 LATERAL 을 feat CTE 에 넣으면 매일 스크리닝과
+ * IC 백필 청크 전부가 그 비용을 치르므로 {@code LongTermFactorSql} 이 기준일 하루치만 따로 만든다. IC 학습 대상도 아니다: 60·180일은 겹치는 코호트로
+ * n_eff 가 ≈23·≈7 이라 학습이 불가능하고, 가중치는 사전 고정(advisor.long-term.weights)이다. 학습 세트(시드)에 행이 없어 DAILY·H20 점수와 무관하다.
+ * <p>
  * SECTOR_MOM_20D/60D(advice-v6, 2026-09-21)는 종목 소속 업종 지수(mv_stock_index_metric, tb_stock_sector_map.sector_code = 업종 코드)의
  * 20·60일 수익률에서 KOSPI(0001) 같은 창 수익률을 뺀 시장 대비 초과다. KOSPI 업종 지수는 KOSPI 종목만으로 구성된 시총가중 공식 지수라
  * 양시장 동일가중 MV(SECTOR_STRENGTH) 와 달리 KOSPI 후보의 구성과 어긋나지 않는다. 업종 지수가 없는 섹터는 NULL(점수 기여 0).
@@ -38,7 +42,16 @@ public enum SignalCode implements EnumCode<String> {
   VOL_20D("VOL_20D", "20일 변동성 (낮을수록)", "f.vol_20d", false, 0.03, true),
   SECTOR_MOM_20D("SECTOR_MOM_20D", "섹터(업종 지수) 20일 시장 대비 초과", "f.sector_rs_20d", true, 0.05, true),
   SECTOR_MOM_60D("SECTOR_MOM_60D", "섹터(업종 지수) 60일 시장 대비 초과", "f.sector_rs_60d", true, 0.05, true),
-  GLOBAL_LINK("GLOBAL_LINK", "해외 연동 (국면 특징 전용)", null, true, 0.00, false);
+  GLOBAL_LINK("GLOBAL_LINK", "해외 연동 (국면 특징 전용)", null, true, 0.00, false),
+  // ----- 장기 팩터(M8, H60·H180 규칙 선택 전용). feat CTE 표현식이 없어 스크리닝·IC 에 들어가지 않고 LongTermFactorSql 이 값을 만든다 -----
+  MOM_12_1("MOM_12_1", "12-1 모멘텀 (250일 수익률 − 20일 수익률)", null, true, 0.00, false),
+  LOW_VOL_60("LOW_VOL_60", "60일 변동성 (낮을수록)", null, false, 0.00, false),
+  QUALITY_ROE("QUALITY_ROE", "ROE (연간 재무, PIT)", null, true, 0.00, false),
+  QUALITY_DEBT("QUALITY_DEBT", "부채비율 (낮을수록, 연간 재무, PIT)", null, false, 0.00, false),
+  OP_GROWTH("OP_GROWTH", "영업이익 증가율 (연간 재무, PIT)", null, true, 0.00, false);
+
+  /** 장기 팩터(M8) — 사전 고정 가중치(advisor.long-term.weights)로 H60·H180 을 규칙 선택한다. 학습·IC 대상이 아니다 */
+  private static final List<SignalCode> LONG_TERM = List.of(MOM_12_1, LOW_VOL_60, QUALITY_ROE, QUALITY_DEBT, OP_GROWTH);
 
   private final String code;
   private final String desc;
@@ -63,6 +76,11 @@ public enum SignalCode implements EnumCode<String> {
   /** IC 를 계산하는 시그널 (표현식 있고 학습 대상) */
   public static List<SignalCode> learnable() {
     return Arrays.stream(values()).filter(s -> s.expression != null && s.icLearnable).toList();
+  }
+
+  /** 장기 팩터 목록(M8, 선언 순) */
+  public static List<SignalCode> longTerm() {
+    return LONG_TERM;
   }
 
   /** 백분위를 점수[-1,1] 로 바꾸는 부호 */

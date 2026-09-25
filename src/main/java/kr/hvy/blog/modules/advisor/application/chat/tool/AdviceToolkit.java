@@ -190,6 +190,8 @@ public class AdviceToolkit {
     ToolJson.put(m, "dataAsOf", h.dataAsOf() == null || h.dataAsOf().isEmpty() ? null : h.dataAsOf());
     ToolJson.put(m, "dataQuality", h.dataQuality() == null ? null : h.dataQuality().getCode());
     ToolJson.put(m, "summary", h.summary());
+    // M8: 판정 불가 종류(H60·H180 — 학습하지 않는 호라이즌)는 라벨을 싣는다. 모델이 이 판단의 성과를 단정하지 않게
+    ToolJson.put(m, "verdict", h.adviceKind() == null ? null : kpi.verdictLabel(h.adviceKind()));
     ToolJson.put(m, "model", h.model());
     ToolJson.put(m, "promptVersion", h.promptVersion());
     m.put("candidates", candidates.size());

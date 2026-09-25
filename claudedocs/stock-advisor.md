@@ -2,9 +2,34 @@
 
 - 모듈 `kr.hvy.blog.modules.advisor`, 테이블 `tb_advisor_*` 15개(`db/advisor-schema.sql`, 시드 `db/advisor-seed.sql`; 13번째 `tb_advisor_morning_check` 는 advice-v3, 14번째 `tb_advisor_chat` 은 chat-v1 §11, 15번째 `tb_advisor_pick_note` 는 note-v1 §1.6), REST `/api/advisor/admin/**`(ROLE_ADMIN)
 - 작성 2026-09-13. 계획 원문 `~/.claude/plans/elegant-singing-glade.md`. 수집 계층은 `claudedocs/stock-collect.md`.
+- 2026-09-25 갱신(M1~M8 멀티 호라이즌·아침 재판정·KOSPI200·채팅 도구·국면 정책·H20·H60/H180): 잡 스케줄 §1, 종류·변형·호라이즌 §1.10, 사전 등록 판정 목록 §8, 배포 절차 §10.1, 알려진 한계 §10.2, 채팅 도구 18종 §11.2. 원인 측정 SQL(M0)은 `claudedocs/advisor-m0-measurements.md`.
 - **투자 자문이 아니다.** 개인 실험이며 모든 Slack 메시지에 면책 문구가 고정된다.
 
 ## 1. 한 바퀴 (선순환)
+
+시각 순서다(2026-09-25, M1~M8 반영). cron 은 전부 `zone=Asia/Seoul` 이고, 켜고 끄는 키는 `scheduler.<키>.enabled`(기동 시 평가)다. advisor 잡은 `advisor.enabled` 도 true 여야 등록된다.
+
+| 시각(KST) | 잡(`AdvisorJobType`) | 스케줄러 키 · cron | 종류(kind) | 요약 |
+|---|---|---|---|---|
+| 05:30 평일 | stock MASTER | `stock-master` `0 30 5 * * MON-FRI` | — | 종목 마스터·이력(`tb_stock_master_history`, KOSPI200 PIT 의 원천) |
+| 06:30 화~토 | stock OVERSEAS | `stock-overseas` `0 30 6 * * TUE-SAT` | — | 미국 지수·환율(밤사이 블록의 원천) |
+| 07:30 평일 | **MORNING_CHECK** | `advisor-morning-check` `0 30 7 * * MON-FRI` | (DAILY 를 점검) | 규칙 점검, LLM 없음, 원 판단 불변 |
+| 07:40 평일 | **MORNING_ADVISE** (M4) | `advisor-morning-advise` `0 40 7 * * MON-FRI` | MORNING | 저녁 LIVE 를 밤사이 정보로 KEEP/DROP/ADD, 08:50 이후 SKIPPED |
+| 12:00 평일 | **INTRADAY** | `advisor-intraday` `0 0 12 * * MON-FRI` | (DAILY 를 점검) | 일치율·픽 노트(note-v1) |
+| 18:30 평일 | stock DAILY | `stock-daily` `0 30 18 * * MON-FRI` | — | 일봉·지표 수집 (advisor 의 입력) |
+| 19:30~19:55 5분 간격 | **ADVISE** | `advisor-advise` `0 30/5 19 * * MON-FRI` | DAILY | 일일 판단(T+5) |
+| 금 20:10 | **ADVISE_H20** (M7) | `advisor-h20-advise` `0 10 20 * * FRI` | H20 | 20거래일 LLM 판단, h=20 세트 없으면 SKIPPED |
+| 금 20:20 (짝수 ISO 주만) | **ADVISE_H60** (M8) | `advisor-h60-advise` `0 20 20 * * FRI` | H60 | 규칙 선택 + LLM 서술. 홀수 주는 run 없이 반환 |
+| 평일 20:30 (그 달 첫 거래일만) | **ADVISE_H180** (M8) | `advisor-h180-advise` `0 30 20 * * MON-FRI` | H180 | 규칙 선택 + LLM 서술. 그 외 날은 run 없이 반환 |
+| 일 03:00 | stock WEEKLY | `stock-weekly` `0 0 3 * * SUN` | — | 재무(`tb_stock_financial`, M8 장기 팩터의 원천) 등 |
+| 일 08:00 | **WEEKLY_REVIEW** | `advisor-weekly-review` `0 0 8 * * SUN` | (DAILY 학습) | 학습 호라이즌(5·20)마다 가중치 세트, 교훈, 보고 |
+| 수동 | SCORE / IC_BACKFILL / ADVISE_ADHOC | — | ADHOC(채팅) | 채점 보충 / IC 사전 추정(`?horizon=`) / 채팅 `requestAdvice`(§1.10) |
+
+- prod 는 위 advisor 스케줄러가 전부 `true` 다(`application.yml` prod 문서).
+- default(로컬) 문서는 전부 `false` 다.
+- `stock-macro`·`stock-eventfeed` 는 prod 에서도 아직 `false` 다(§1.5).
+
+아래 표는 원래 일일 흐름의 상세다.
 
 | 시각(KST) | 잡 | 내용 |
 |---|---|---|
@@ -145,7 +170,7 @@
   - 통계: t = mean(d) / (sd(d) / √(n/4)). 보유 20거래일·간격 5거래일이라 창이 4배 겹쳐 유효 표본을 n/4 로 본다.
   - 판정: **t ≥ 2 면 LLM 선택 유지**, t < 2 면 H20 을 QUANT_TOPN 규칙으로 대체하는 안을 검토한다(판정 전 규칙·프롬프트를 바꾸면 창을 다시 연다).
   - SQL 은 `AdvisorKpiService.variantSummaries(from, to, H20, 20)` 의 LIVE·QUANT_TOPN 두 행과 같은 필터(data_quality='OK', LONG, MISSING 제외)를 쓴다.
-- **적용 순서**: `20260925_04` SQL(주석만) → 앱 배포 → `IC_BACKFILL?horizon=20` → 다음 WEEKLY_REVIEW 가 h=20 세트 활성(n_eff ≥ 24) → 금요일 20:10 자동 또는 `POST /api/advisor/admin/jobs/ADVISE_H20?baseDate=`.
+- **적용 순서**: `20260925_04` SQL(주석만) → 앱 배포 → `IC_BACKFILL?horizon=20`(n_eff ≥ 24 면 이 run 이 h=20 BACKFILL 세트를 바로 활성화, 미달이면 warning) → 다음 WEEKLY_REVIEW 가 h=20 세트 갱신·활성 확인(§10.1 5단계) → 금요일 20:10 자동 또는 `POST /api/advisor/admin/jobs/ADVISE_H20?baseDate=`.
 
 ### 1.9 장기 규칙 추천 H60·H180 (longterm-v1, M8, 2026-09-25)
 
@@ -186,6 +211,98 @@
 - **판정 불가 라벨**: Slack 과 `AdvisorKpiService.VariantSummary.verdictLabel` 에 "판정 불가: 표본 부족, 2년 이상 필요" 가 붙는다. 조건은 결정 호라이즌이 learn=false(설정 맵 기반)인 종류다.
 - **적용 순서**: `20260925_04` SQL(주석만) → 앱 배포. 선행 백필은 없다. 재무 수집(WEEKLY)이 비어 있으면 커버리지 미달로 FAILED 가 나므로, 첫 실행 전에 `tb_stock_financial` 연간 행 수를 확인한다(migrate 파일의 확인 SQL).
 
+### 1.10 판단 종류·변형·호라이즌 한눈에 (M1~M5, 2026-09-25)
+
+M1~M8 은 브랜치 스택 한 줄이다: `e9dc4f2`(M1) → `07dd2d2`(M2) → `3047075`(M3) → `4c0184d`(M4) → `723eac1`(M5) → `7d7106d`(M6) → `48a4ec7`(M7) → `bcecc62`(M8). 계획 원문은 `~/.claude/plans/moto-planner-agent-pasted-content-id-6a-swirling-crab.md`, 원인 측정 SQL(M0)은 `claudedocs/advisor-m0-measurements.md` 에 있다. M6~M8 은 §1.7~§1.9 에 있다.
+
+**종류(kind) × 변형(variant).** `tb_advisor_advice` 유니크 키는 `(base_date, advice_kind, variant)` 다. 같은 기준일에 종류별로 한 행씩 공존한다.
+
+| 종류 `advice_kind` | 잡 | 호라이즌 `horizon_days` | 저장되는 변형 | 채점 창(ScoreJob) | KPI·300 게이트·교훈·IC |
+|---|---|---|---|---|---|
+| DAILY | ADVISE 19:30 | 5 | LIVE · QUANT_TOPN · QUANT_TOPN_BROAD(M3) · LLM_NOMEM(조건) · LLM_NONEWS(조건) | 5 + 진단 1·20 | ○ (전부 DAILY 기준) |
+| MORNING | MORNING_ADVISE 07:40 | 5 (저녁과 같은 창) | LIVE | 5 + 진단 1·20 | MORNING−DAILY 대응 KPI 만(`/scores/morning-vs-daily`) |
+| ADHOC | ADVISE_ADHOC (채팅) | 5 | LIVE | 없음 | × (전부 제외) |
+| H20 | ADVISE_H20 금 20:10 | 20 | LIVE · QUANT_TOPN(kind=H20) | 20 | `/scores/summary?kind=H20&horizon=20` |
+| H60 | ADVISE_H60 격주 금 20:20 | 60 | LIVE(규칙 선택) | 60 | "판정 불가: 표본 부족, 2년 이상 필요" |
+| H180 | ADVISE_H180 월초 20:30 | 180 | LIVE(규칙 선택) | 180 | 〃 |
+
+| 변형 `variant` | 뜻 | 비용 |
+|---|---|---|
+| LIVE | 발행본. Slack 은 이것만 발행한다 | LLM |
+| QUANT_TOPN | 같은 가중치·후보의 정량 top-N(`shadow.quant-top-n` 7) 동일가중. LLM 부가가치의 대조군 | 0 |
+| QUANT_TOPN_BROAD | 픽 유니버스 필터 없는(`advisor.markets` 전체) 정량 top-N. `pick-universe=ALL` 이면 QUANT_TOPN 과 같아 생략 | 0 |
+| LLM_NOMEM | 메모리 없는 LLM 섀도. 첫 메모리 주입부터 `shadow.nomem-weeks`(8) 동안만 | LLM |
+| LLM_NONEWS | 뉴스 없는 LLM 섀도. 뉴스 on 뒤 `shadow.nonews-weeks`(8) 동안만 | LLM |
+
+**M1 kind 안전화.** `AdviceKind` enum 을 도입했다(code==상수명). 종류 없이 조회하던 곳에 전부 kind 를 명시했다.
+
+- `AdviceWriter.findLatest`·`countLivePicks`·`firstMemoryAdviceDate`·`firstNewsAdviceDate`·`findRange`
+- KPI·교훈·주간 보고 SQL 은 `advice_kind='DAILY'` 로 거른다.
+- 관리자 `GET /advices` 는 `kind` 기본값이 DAILY 다.
+- 그래서 MORNING·H20 행이 생겨도 MORNING_CHECK·INTRADAY·300 게이트·교훈 셀이 오염되지 않는다(`AdviceScoringPgTest`).
+
+**M2 채팅 chat-v2.** 도구 4개를 추가해 18종이 됐다(§11.2).
+
+- `latestAdvice(kind)`·`horizonPicks(h)`·`compareAdvice(baseDate)`·`requestAdvice`
+- `requestAdvice` 순서
+  1. 요청자가 허용 사용자인지 다시 확인한다.
+  2. 같은 기준일 ADHOC 이 이미 있으면 그 id 를 돌려준다.
+  3. 일 상한 `advisor.chat.adhoc-daily-limit`(3)을 본다. 조회에 실패하면 거부한다.
+  4. `ADVISE_ADHOC` 를 CHAT 트리거로 비동기 실행하고 runId 를 돌려준다.
+- ADHOC 은 채점·IC·QUANT·LLM 섀도·교훈 카운트를 전부 생략한다.
+- 시스템 프롬프트 `chat-system-v2.md` 의 규칙 1 이 "맞는 도구 먼저, no_data 면 없다고" 로 바뀌었다.
+  - chat-v1 은 "도구가 없으면 없다고" 였고, 생성 도구가 실제로 없어 "어드바이스 툴이 없다" 로 답했다.
+
+**M3 KOSPI200 픽 유니버스(advice-v7).** `advisor.pick-universe: KOSPI200|ALL`, 기본값은 KOSPI200 이다.
+
+- feat CTE 의 `is_kospi200` 은 `tb_stock_master_history` 의 그날 유효 행(PIT)이다. 이력 시작 전 날짜는 NULL 이고 현재 마스터로 채우지 않는다.
+- 필터는 **백분위 계산 뒤 후보에만** 건다. universe·cut·IC 는 KOSPI 전체 그대로다(이력이 짧아 IC 까지 좁히면 룩어헤드가 된다).
+- 스크리닝 로그 `스크리닝: base=…, pickUniverse=KOSPI200, universe=…, cut=…, eligible=…, candidates=…` 의 `eligible` 이 필터 뒤 후보 수다.
+- Slack 종목 헤딩에 "유니버스: KOSPI200" 이 붙고, run 메타에 `pickUniverse` 가 남는다.
+
+**M4 아침 재판정(advice-morning-v1).** 저녁 DAILY LIVE 를 **같은 base_date·같은 진입/청산 창**으로 다시 본다. 그래서 `MORNING − DAILY` 가 밤사이 정보의 가치를 재는 대응 비교가 된다(섀도 불필요).
+
+- 입력: 저녁 입력 스냅샷 + 밤사이 블록(미국 r1·β 갭·환율·섹터 연동 심볼 z·07:30 점검). 미국 데이터는 현지일 < 오늘만 쓴다.
+- LLM 은 **매일** 호출한다. 트리거(|예상 갭| ≥ σ₁d, 섹터 연동 |z| ≥ `morning.sector-sigma-multiple`(2.0), CAUTION)는 호출 여부를 가르지 않고 `diff_json.triggers` 에만 남긴다.
+- 가드 `MorningAdviceGuard`
+  - KEEP/DROP 은 저녁 픽 안에서, ADD 는 저녁 후보 − 픽 안에서만 허용한다.
+  - 결정이 빠진 픽은 KEEP 으로 채운다.
+  - 하한 미달이면 DROP 을 되돌린다.
+  - 상한·AVOID 초과는 ADD 부터 뺀다.
+  - 저녁 `regime_json.policy` 를 그대로 적용한다(§1.7).
+- 저장
+  - `parent_advice_id`(저녁 id)
+  - `diff_json{parentAdviceId, keep, add, drop, triggers, usDate}`
+  - 픽 `action`(KEEP|ADD)·`action_reason`. DROP 은 `diff_json.drop` 에만 남는다.
+  - 후보는 저녁 스냅샷을 복사한다. `regime_json` 은 NULL 이다.
+- 게이트: 08:50(`morning.advise-deadline`) 이후, 저녁 판단 없음, 중복이면 SKIPPED. 개장 뒤 발행은 D+1 시가 진입과 모순이기 때문이다.
+- KPI `GET /scores/morning-vs-daily?from=&to=`: 날짜 단위 대응 차이의 평균·se·t 를 전체·트리거일·비트리거일로 나눠 준다.
+- Slack `MorningAdviceMessage` 는 저녁 대비 diff 표다. 채팅 `compareAdvice` 가 같은 데이터를 읽는다.
+
+**M5 멀티 호라이즌 인프라.** `advisor.horizons` 맵이 호라이즌 → 종류·학습 여부·IC 창을 정한다(기동 시 검증).
+
+| 키 h | kind | learn | IC 창 | n_eff = 창/h | 쓰임 |
+|---|---|---|---|---|---|
+| 5 | DAILY | true | `ic.window-days` 120 | 24 | DAILY·MORNING·ADHOC 스크리닝 가중치 |
+| 20 | H20 | true | 480 | 24 | H20 스크리닝 가중치 |
+| 60 | H60 | false | (120) | — | 모니터링 IC 만(`IC_BACKFILL?horizon=60`) |
+| 180 | H180 | false | (120) | — | 모니터링 IC 만 |
+
+- `advisor.horizon-days`(5)는 DAILY **결정** 호라이즌이다. `horizons` 에 같은 키가 DAILY 로 있어야 한다.
+- `diagnostic-horizons`(1·20)는 DAILY·MORNING 진단 채점 전용이다.
+- 스키마
+  - `tb_advisor_signal_ic_daily` PK 에 `horizon_days` 가 들어갔다.
+  - `tb_advisor_weight_set.horizon_days`(맨 뒤)가 생겼고, 활성 유니크는 호라이즌마다 1개다(migrate `_02`).
+- 학습
+  - `SignalIcService` 는 IC 대상 호라이즌마다 증분을 따로 돈다(서로 격리).
+  - `proposeWeightSet(h)` 는 그 호라이즌 창·n_eff 게이트를 쓴다. 첫 학습은 DAILY 사전 가중치에서 출발한다.
+  - WEEKLY_REVIEW 는 학습 호라이즌마다 WEIGHTS 단계를 돈다.
+- 스크리닝 `screen(kind)` 는 그 호라이즌 세트가 없으면 empty 를 돌려준다. H20 은 SKIPPED 로 닫히고, **DAILY 세트로 폴백하지 않는다**.
+- API
+  - `POST /jobs/IC_BACKFILL?horizon=`: 생략하면 학습 호라이즌 전부(5·20). 각 호라이즌의 BACKFILL 세트를 만들어 **그 호라이즌 안에서 즉시 활성화**한다(n_eff 미달이면 warning 만 남기고 세트는 없다).
+  - `GET /weights?horizon=`, `/weights/sets?horizon=`, `/scores/ic?horizon=`
+  - `GET /scores/summary?kind=&horizon=`: 기본 DAILY·5 로 기존 결과와 같다.
+
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
 19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.
@@ -204,7 +321,7 @@
 | `advisor.model.judge-max-completion-tokens` / `assist-max-completion-tokens` | 8000 / 2000 (yml 20000 / 10000) | Responses `max_output_tokens`(추론 토큰 포함, 비용 손잡이). 잘리면 잡 FAILED `"max_output_tokens 에서 잘렸습니다"` — 상한을 올린다 |
 | `advisor.model.max-retries` / `timeout-seconds` | 3 / 120 | `OpenAiResponsesClient` 재시도(429·408·409·5xx·네트워크, Retry-After ≤30s) / `openAiRestClient` 응답 타임아웃. 세 모델 공통 |
 | `advisor.cost.*` | 0 | 100만 토큰당 USD. 채우면 run.cost_usd 계산 |
-| `advisor.prompt.version` | `advice-v6` | 프롬프트 버전(표기용 — 실제 로드는 `PromptResources.ADVICE_VERSION`·파일명 `prompts/advisor/advice-system-v6.md`). 파일을 고치면 둘을 같이 올린다 |
+| `advisor.prompt.version` | `advice-v8` | 프롬프트 버전(표기용 — 실제 로드는 `PromptResources.ADVICE_VERSION`·파일명 `prompts/advisor/advice-system-v8.md`). 파일을 고치면 둘을 같이 올린다. 종류별 프롬프트는 따로 있다: MORNING `advice-morning-v1`, H20 `advice-h20-v1`, H60·H180 `advice-longterm-v1`, 채팅 `chat-system-v2` |
 | `advisor.advise.non-consistent-conviction-cap` / `overheated-sigma` | 0.70 / 2.0 | advice-v6 가드 클램프: `secCons=0`(소속 업종 지수가 1주·1개월·3개월 중 하나라도 시장 미달) 또는 `overheated` 섹터 LONG 픽의 확신 상한(CONVICTIONS 값 중 하나) / 섹터 과열 = 업종 지수 5일 수익률 > 배수 × σ_5d(KOSPI). stats `capNonConsistent`·`capOverheated` 로 준수율 관찰(§1.6) |
 | `advisor.note.enabled` | `${ADVISOR_NOTE_ENABLED:true}` | false 면 12:00 회고 LLM 호출(REFLECT)만 건너뛴다 — 정량·분류 노트는 그대로 저장(무료·결정론) |
 | `advisor.note.z-threshold` / `max-reflect-picks` | 1.0 / 10 | \|z\| 미만이면 FLAT(회고 생략) / 회고 호출 1건에 넣는 픽 상한(\|z\| 큰 순, assist 1회/일) |
@@ -225,7 +342,18 @@
 | `macro.series` / `lookback-days` / `available-lag-days` / `timeout-seconds` | VIX(CBOE)·UST10Y·UST2Y(재무부) / 10 / 1 / 30 | 거시 시리즈 "시리즈:원천:URL"(§1.5). 원천 추가는 `MacroCsvSource` 구현 1개, 시리즈 추가는 `MacroSeries` 상수(원천 열 이름) + yml 1줄 |
 | `gdelt.themes` / `timeline-days` / `window-hours` / `max-records` / `min-interval-ms` / `max-retries` / `retry-backoff-ms` | 테마 6 / 30 / 36 / 60 / 6000 / 3 / 30000 | 사건 피드(§1.5). 테마 추가는 yml 1줄(코드 10자 이내), 호출 간격은 GDELT 5초 제한보다 여유 있게 |
 | `scheduler.stock-macro.enabled` / `scheduler.stock-eventfeed.enabled` | false (default·prod 모두) | `MacroSourceManualTest`·`GdeltDocManualTest` 실측 뒤 prod true 로. eventfeed 는 `cron-am`/`cron-pm` 두 cron·`lock-name-am`/`-pm` 두 락 |
-| `advisor.horizon-days` | 5 | 결정 호라이즌. 채점·KPI·학습 전부 이 값 |
+| `advisor.horizon-days` | 5 | DAILY·MORNING 결정 호라이즌. `horizons` 에 같은 키가 DAILY 로 있어야 한다(기동 검증) |
+| `advisor.horizons` | `5:{DAILY,learn}` `20:{H20,learn,ic-window 480}` `60:{H60}` `180:{H180}` | 호라이즌 → 종류·가중치 학습·IC 창(비면 `ic.window-days`). IC 는 전부 저장하고 학습은 learn 만 한다(§1.10 M5) |
+| `advisor.diagnostic-horizons` | `[1, 20]` | DAILY·MORNING 진단 채점만(학습·KPI 미포함). `trend.score-horizon-days` 를 포함해야 한다 |
+| `advisor.pick-universe` | `KOSPI200` (yml 미기재, 코드 기본값) | 추천 후보 필터 `KOSPI200`(PIT) \| `ALL`. 백분위·IC 는 영향 없음. `ALL` 이면 QUANT_TOPN_BROAD 생략(§1.10 M3) |
+| `advisor.morning.advise-deadline` / `sector-sigma-multiple` | 08:50 / 2.0 | 아침 재판정 발행 마감(이후 SKIPPED) / 섹터 연동 트리거 플래그 배수(기록용) |
+| `advisor.regime.*` | index 0001, σ20, 5년, 표본 ≥250, LOW <0.30, HIGH ≥0.80 | 변동성 국면(§1.7) |
+| `advisor.regime.policy.*` | `regime-policy-v1` | 사전 등록 정책 표. **수치를 바꾸면 version 을 올린다**(§1.7) |
+| `advisor.theme.strong-rs20` / `min-members` / `leaders` | 0.02 / 3 / 3 | 테마 강약 임계 / 대분류 최소 구성 수 / 대표 종목 수(§1.7) |
+| `advisor.h20.pick-min` / `pick-max` | 3 / 8 | H20 픽 범위. 정책 표를 이 범위로 다시 계산한다(§1.8) |
+| `advisor.long-term.*` | weights MOM_12_1 .30·ROE .20·DEBT .15·OP_GROWTH .15·LOW_VOL_60 .20, coverage 0.6, 후보 30·픽 10·섹터 3, 재무 Y | H60·H180 규칙 선택. **가중치를 바꾸면 guard_json.weights 로 사후 분리**한다(§1.9) |
+| `advisor.chat.adhoc-daily-limit` | 3 (yml 미기재, 코드 기본값) | 채팅 `requestAdvice` 일 상한. 오늘(KST) 시작한 `ADVISE_ADHOC` run 수(SKIPPED 제외, 사용자 구분 없음)로 센다. 0 이면 끔, 조회 실패는 거부 |
+| `scheduler.advisor-{morning-advise,h20-advise,h60-advise,h180-advise}.enabled` | default false / prod true | M4·M7·M8 잡. 기동 시 평가. cron 은 §1 표 |
 | `advisor.candidate-limit` / `max-per-sector` / `pick-min` / `pick-max` | 30 / 4 / 3 / 10 | 깔때기 |
 | `advisor.advise.deadline` | 19:55 | 이후에도 DAILY 미완료면 SKIPPED + #hvy-error |
 | `advisor.lesson.min-picks` | 300 | 실적 블록·보정 표·교훈 게이트(누적 LIVE 픽) |
@@ -332,6 +460,20 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 - 교훈: 기계 판정 `condition`({regime, trend, signal, op, pct, sector}) + evidence(n≥20, |t|≥2) 필수, 종목코드 금지, 활성 ≤8, 활성 4주/적용 20건 후 (적용 − 비적용) ≤0 이면 폐기, 프롬프트에서는 **확신 조정만**. 생성기엔 누적 셀 집계표·보정 표·활성 교훈 사후 성과만 준다. `trend` 키(lesson-v2)는 스키마·판정에 있지만 생성기의 셀 집계는 아직 regime×시그널×섹터라 trend 조건 교훈은 수동 등록으로만 생긴다(후속). **셀의 t 는 base_date 클러스터 se**(2026-09-21, 사용자 결정 ③): 셀 안 픽을 기준일로 묶은 일별 평균 초과의 표본 표준편차/√D 를 se 로 쓰고 D(서로 다른 기준일 수) < 2 면 t=0 — 같은 날 5픽이 전부 +2% 여도 유의해지지 않는다. `Cell.n` 은 픽 수 그대로, `nDays` 가 생성기 입력에 추가(스키마·`LESSON_VERSION` 불변). 게이트 값(n≥20·|t|≥2·300) 은 그대로고 판정만 보수화된다.
 - recentOutcomes(빠른 층, note-v1): 프롬프트에는 **T+5 로 확정된 결정론 빈도표만**(≤5행, 창 20 거래일, `finalized_at·noted_at ≤ 기준일 20:00 KST`, 확정 ≥10 이면), 지시는 확신 **±0.05 한 단계 안**·underpowered(n<30) 참고만·종목 추가/제거/순위 변경 금지. LLM 회고 문장(deviation·why·hypothesis)·OPEN 노트·12:00 원문은 어떤 경로로도 프롬프트에 넣지 않는다(DB·Slack·관리자 기록용). 가드가 recentOutcomes 있는 날 conviction 변화폭을 검사하지는 않는다(원래 확신을 모름) — 대신 NOMEM 대조로 |Δconviction| 을 잰다. 빠른 층은 "규칙 문장" 이 아니라 "관찰 빈도표" 라서 교훈 게이트의 우회가 아니다.
 - **사전 등록 판정(NOMEM 8주, 2026-09-21 등록)**: 첫 메모리 주입 LIVE(`memory_json IS NOT NULL` 의 MIN(base_date)) + 8주 뒤 `GET /scores/summary` 변형 표와 주간 보고 `LIVE vs NOMEM` 줄로 판정한다. (a) 픽 Jaccard ≥ 0.9 ∧ 평균 |Δconviction| < 0.05 → 노트가 행동을 바꾸지 않음(inert) → `recentOutcomes` 주입 off(`note.min-finalized` 를 크게 올려 끈다). (b) 짝지은 일별 차 d̄(LIVE − NOMEM 초과) < −1se → 해침 → off. (c) 그 외 → 300 게이트(느린 층 시작)까지 유지, 그때 3요인 분리가 필요하면 `LLM_NONOTES` 4번째 변형을 검토. 8주로는 "바꾸는가·크게 해치는가" 만 답할 수 있음(σ≈2%/5일·n_eff≈N/3 → se≈0.55%/5일, 탐지 가능 효과 ≈1%/5일) — 0.2%/5일 을 t=2 로 보려면 약 1,200일이므로 8주 뒤 "효과 있음" 을 선언하지 않는다. 판정 규칙을 결과를 본 뒤 바꾸지 않는다.
+- **사전 등록 판정 목록(2026-09-25 취합).** 판정 규칙은 결과를 본 뒤 바꾸지 않는다. 판정 전에 해당 규칙·프롬프트·가중치를 바꾸면 창을 다시 연다(시작일을 새로 잡는다). 날짜는 배포일을 D₀ 라 할 때의 추정이다. 정확한 시작일은 아래 "시작일" SQL 로 확정해 이 표에 적는다.
+
+  | # | 판정 | 등록 | 시작일(창 시작) | 판정 시점 | 지표 d_i | 통계 | 기준 → 조치 |
+  |---|---|---|---|---|---|---|---|
+  | 1 | **NOMEM 8주**(note-v1) | 2026-09-21 | 첫 메모리 주입 LIVE: `SELECT MIN(base_date) FROM tb_advisor_advice WHERE advice_kind='DAILY' AND variant='LIVE' AND memory_json IS NOT NULL` | 시작 + 8주(확정 노트 ≥10 이 먼저라 ≈2026-12) | 같은 기준일 LIVE − LLM_NOMEM 픽 평균 초과(h=5), 픽 Jaccard, \|Δconviction\| | d̄ / se, se = sd(d)/√n (주간 보고 `LIVE vs NOMEM` 줄 + `/scores/summary`) | 위 항목 (a) inert → recentOutcomes off, (b) d̄ < −1se → off, (c) 그 외 유지 |
+  | 2 | **M3 QUANT_TOPN_BROAD 8주** | 2026-09-25 (이 문서에서 수치 확정) | 첫 BROAD 행: `SELECT MIN(base_date) FROM tb_advisor_advice WHERE advice_kind='DAILY' AND variant='QUANT_TOPN_BROAD'` | 시작 + 8주(≈40거래일, D₀=09-28 이면 ≈2026-11 말) | 같은 기준일 QUANT_TOPN(K200) 픽 평균 초과 − QUANT_TOPN_BROAD 픽 평균 초과(h=5) | t = d̄ / (sd(d)/√(n/5)) — h=5 창이 매일 겹치므로 유효 표본 n/5 (M0-1b 쿼리) | t ≤ −2 → K200 제한이 비용 → `pick-universe: ALL` 검토. t ≥ 2 → K200 확정. 그 외 → K200 유지(기본값, 유동성·설명 가능성) |
+  | 3 | **M4 아침 재판정 40거래일** | 2026-09-25 | 첫 MORNING LIVE: `SELECT MIN(base_date) FROM tb_advisor_advice WHERE advice_kind='MORNING' AND variant='LIVE'` | 시작 + 40거래일(D₀=09-28 이면 ≈2026-11 말) | 같은 기준일 MORNING − DAILY LONG 픽 평균 초과(h=5), **트리거일만**(`diff_json.triggers.any`) | `GET /scores/morning-vs-daily` 의 `triggered.t` = d̄ / (sd/√n). 날짜 단위 짝이지만 창 겹침 보정은 없다 — 참고로 t/√5 도 함께 적는다 | t > 2 → MORNING_ADVISE 유지. t ≤ 2 → 스케줄 off(`scheduler.advisor-morning-advise.enabled=false`) 검토, 비트리거일 t 는 참고만 |
+  | 4 | **M7 H20 26주** | 2026-09-25 | 첫 H20 LIVE: `SELECT MIN(base_date) FROM tb_advisor_advice WHERE advice_kind='H20' AND variant='LIVE'` | 시작 + 26주(≈2027-03 말~04 초) | 같은 금요일 H20 LIVE − H20 QUANT_TOPN 픽 평균 초과(h=20) | t = d̄ / (sd(d)/√(n/4)) — 보유 20·간격 5거래일이라 4배 겹침 | t ≥ 2 → LLM 선택 유지. t < 2 → H20 을 QUANT_TOPN 규칙으로 대체 검토(§1.8) |
+  | — | H60·H180 | 2026-09-25 | — | **판정하지 않음** | — | n_eff ≈ 23·≈7 | "판정 불가: 표본 부족, 2년 이상 필요" 라벨만(§1.9) |
+  | — | M6(b) 국면별 가중치 착수 | 2026-09-25 | — | M0 측정 즉시 | 국면 라벨별 IC 차이 | `advisor-m0-measurements.md` M0-3 | \|t\|≥2 ∧ 전후반 부호 일치 ∧ 에피소드 ≥5 인 비중 큰 시그널이 있으면 착수 |
+
+  - #2 의 수치 기준은 코드 주석(`AdviceVariant.QUANT_TOPN_BROAD`: "8주 뒤 날짜 대응 비교로 판정")에 없던 것을 **여기서 처음 명문화**했다. BROAD 는 비용 0 섀도라 판정이 늦어도 손해가 없으므로, 첫 BROAD 결과를 보기 전에 이 기준으로 고정한다.
+  - #3 의 `morningVsDaily` se 는 날짜 단위라 같은 날 픽 상관은 걸러내지만, h=5 창이 인접 날짜와 겹치는 것은 보정하지 않는다. 그래서 t 가 과대일 수 있다. 판정은 등록대로 API 의 t 로 하되, t/√5 가 2 미만이면 "유지하되 재확인" 으로 적는다.
+  - 판정 결과는 이 문서 §8 끝에 날짜·n·통계값과 함께 덧붙인다.
 - 재현성: 주 1회 직전 LIVE 입력 동결 재실행, Jaccard <0.7 이면 경고(LLM 랭킹 관여 축소 검토).
 - 룩어헤드 불변식: 특징 SQL 은 기준일 이하만(`FeatureSqlTest.noLookahead`, `AdvisorScreeningPgTest.futureRowsDoNotChangeScreening`), LEAD 는 IC·채점에만, 밸류에이션은 당일 스냅샷만(과거 IC 제외), 12:00 정보 소급 금지 — `tb_advisor_pick_note`·`tb_advisor_intraday_check` 를 `FeatureSql`·`SignalIcService`·`AdviceScoringService`·`LessonService`·`CandidateScreeningService`·`MarketFeatureService` 가 참조하지 않음을 `AdvisorSqlBoundaryTest` 가 소스 문자열로 단언한다.
 
@@ -377,6 +519,173 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
   6. 실측 `KisIndexPriceManualTest`(키 필요): 지수 현재가 응답에 `bstp_nmix_oprc`(업종 지수 시가) 가 채워지는지 — 없으면 excess 가 PREV_CLOSE 폴백으로만 계산된다(run 메타 `excessBasis`).
   7. 롤백: `PromptResources.ADVICE_VERSION` 을 v5 로 되돌리고 재배포(테이블·컬럼은 남겨도 무해). 노트 회고만 끄려면 `ADVISOR_NOTE_ENABLED=false`.
 
+### 10.1 M1~M8 배포 절차 (2026-09-25)
+
+한 번에 배포한다(브랜치 스택 `feat/advisor-longterm-factors` bcecc62 까지). migrate 파일은 전부 **재실행 안전**이고, 신규 설치는 `db/advisor-schema.sql` 하나로 충분하다(아래는 기존 운영 DB 용). 테이블 수는 15 그대로다.
+
+**1. 선행 확인 SQL (배포 전, 읽기 전용)**
+
+```sql
+-- (a) KOSPI200 이력 현재 행: ≈200 이어야 한다. 0 이면 MASTER 수집이 is_kospi200 을 못 채운 것 → 후보가 0 이 되어 ADVISE 가 FAILED(pick-min 미달)
+SELECT COUNT(*) FILTER (WHERE is_kospi200) AS k200_now, COUNT(*) AS current_rows, MIN(valid_from) AS history_from
+FROM tb_stock_master_history WHERE valid_to IS NULL;
+-- (b) KOSPI200 중 KOSPI 시장 비율(대부분이어야 한다 — 후보는 advisor.markets=[KOSPI] 안에서만 나온다)
+SELECT h.market_type, COUNT(*) FROM tb_stock_master_history h WHERE h.valid_to IS NULL AND h.is_kospi200 GROUP BY 1;
+-- (c) 재무 연간 행 커버리지(M8): KOSPI200 현재 구성 중 연간 재무가 오늘 기준 관측 가능한 종목 수와 팩터별 비NULL 수.
+--     with_fin 이 k200 의 60% 미만이면 H60·H180 이 커버리지(min-coverage 0.6) 미달로 후보 부족 → FAILED("너무 적습니다")
+SELECT COUNT(*)                                        AS k200,
+       COUNT(f.ticker)                                 AS with_fin,
+       COUNT(f.roe)                                    AS roe,
+       COUNT(f.debt_ratio)                             AS debt_ratio,
+       COUNT(f.operating_profit_growth)                AS op_growth
+FROM tb_stock_master_history h
+         LEFT JOIN LATERAL (
+    SELECT x.ticker, x.roe, x.debt_ratio, x.operating_profit_growth
+    FROM tb_stock_financial x
+    WHERE x.ticker = h.ticker AND x.period_type = 'Y' AND x.available_from <= CURRENT_DATE
+      AND (x.first_seen_at AT TIME ZONE 'Asia/Seoul')::date <= CURRENT_DATE
+    ORDER BY x.fiscal_period DESC, x.revision_seq DESC LIMIT 1
+    ) f ON TRUE
+WHERE h.valid_to IS NULL AND h.is_kospi200;
+-- (d) 현재 IC 행이 전부 h=5 인지(_02 의 새 PK 가 기존 행과 충돌하지 않는 전제)
+SELECT horizon_days, COUNT(*) FROM tb_advisor_signal_ic_daily GROUP BY 1;
+```
+
+**2. migrate 적용 (`psql "$DATABASE_URL" -f src/main/resources/db/migrate/<파일>`, 번호 순서대로, 앱 배포 직전)**
+
+| 순서 | 파일 | 내용 | 왜 필요한가 |
+|---|---|---|---|
+| 1 | `20260925_01_advisor_morning.sql` | `tb_advisor_advice.parent_advice_id`·`diff_json`, `tb_advisor_pick.action`·`action_reason` (맨 뒤), 주석 | 새 앱의 INSERT 가 이 컬럼을 나열한다. 없으면 **ADVISE 를 포함한 모든 판단 저장이 실패**한다. `CREATE TABLE IF NOT EXISTS` 로는 기존 테이블에 컬럼이 생기지 않는다 |
+| 2 | `20260925_02_advisor_multi_horizon.sql` | IC PK → `(signal_code, trade_date, horizon_days)`, `tb_advisor_weight_set.horizon_days` + 호라이즌별 활성 유니크 | 새 앱의 IC upsert 는 `ON CONFLICT (signal_code, trade_date, horizon_days)` 다. 반대로 **옛 앱은 새 PK 로 IC 저장이 실패**하므로 적용과 배포 사이를 짧게 둔다(19:30 ADVISE·일 08:00 WEEKLY_REVIEW 를 피한다) |
+| 3 | `20260925_03_advisor_regime_policy.sql` | `tb_advisor_advice.regime_json` (맨 뒤), 주석 | 새 앱(advice-v8)이 저장한다. 옛 앱은 이 컬럼을 모르므로 먼저 적용해도 안전하다 |
+| 4 | `20260925_04_advisor_h20_longterm.sql` | 주석만(job_type·horizon_days·regime_json) | 스키마 변경 없음. 운영 DB 주석을 코드와 맞춘다. 순서 무관 |
+
+확인:
+```sql
+SELECT column_name FROM information_schema.columns
+WHERE table_name IN ('tb_advisor_advice', 'tb_advisor_pick')
+  AND column_name IN ('parent_advice_id', 'diff_json', 'regime_json', 'action', 'action_reason');   -- 5행
+SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'pk_advisor_signal_ic_daily';   -- (signal_code, trade_date, horizon_days)
+SELECT indexdef FROM pg_indexes WHERE indexname LIKE 'uk_advisor_weight_set_active%';               -- 1행, (horizon_days) WHERE is_active
+```
+
+**3. 앱 배포.**
+
+- 이미지를 교체하고 컨테이너를 재생성한다(`recreate.sh`. `restart` 로는 env 가 반영되지 않는다).
+- 기동 로그 확인
+  - `AI 판단 잡 등록: [...]` 에 `MORNING_ADVISE, ADVISE_ADHOC, ADVISE_H20, ADVISE_H60, ADVISE_H180` 이 들어 있어야 한다.
+  - `advisor 설정 확인: … horizon=5일(IC [5, 20, 60, 180]·학습 [5, 20]) … pickUniverse=KOSPI200` 가 떠야 한다.
+
+**4. `POST /api/advisor/admin/jobs/IC_BACKFILL` (horizon 생략 = 학습 호라이즌 5·20, baseDate 생략 = `ic.backfill-from` 부터).**
+
+- h=5 는 기존 행을 덮어쓰고 새 BACKFILL 세트를 활성화한다(시그널·가중치 정의가 바뀌지 않았으므로 값은 거의 같다).
+- h=20 은 첫 IC 행을 만든다. `n_eff = 480/20 = 24 ≥ min-n-eff` 이면 h=20 BACKFILL 세트를 **즉시 활성화**한다.
+- run 메타 `horizons` 에 호라이즌별 `icRows`·`weightSetId`·`weights` 가 남는다. `IC 표본이 부족해 가중치 세트를 만들지 않았습니다 (h=20 …)` warning 이 뜨면 h=20 세트가 없다는 뜻이다. 이때 금요일 ADVISE_H20 은 SKIPPED(`skip.WEIGHTS`) 다.
+- 모니터링 IC 가 필요하면 `?horizon=60`·`?horizon=180` 을 각각 1회 돌린다(선택, 가중치 없음).
+- 소요는 h=5 백필 1회분 × 2 정도다. `GET /runs/{id}` 의 `steps` 로 진행을 본다.
+
+```sql
+SELECT horizon_days, COUNT(*), MIN(trade_date), MAX(trade_date) FROM tb_advisor_signal_ic_daily GROUP BY 1 ORDER BY 1;
+SELECT weight_set_id, horizon_days, source, is_active, n_eff, as_of, reason FROM tb_advisor_weight_set ORDER BY weight_set_id DESC LIMIT 6;
+```
+
+**5. 다음 WEEKLY_REVIEW(일 08:00) 뒤 h=20 세트 확인.**
+
+- 학습 호라이즌마다 WEIGHTS 단계가 돈다(run 메타 `steps` 에 호라이즌별 단계).
+- h=20 활성 세트가 정확히 1개여야 한다. 4단계에서 세트가 없었다면 여기서 n_eff 게이트를 넘을 때 처음 생긴다.
+- 확인 경로: `GET /api/advisor/admin/weights?horizon=20`, 또는 `SELECT horizon_days, COUNT(*) FILTER (WHERE is_active) FROM tb_advisor_weight_set GROUP BY 1;` → 5→1, 20→1.
+
+**6. 첫 DAILY(19:30 ADVISE) 확인.**
+
+```sql
+SELECT advice_id, variant, prompt_version, regime_json->>'trend' trend, regime_json->>'vol' vol, regime_json->'policy' policy,
+       guard_json->'policy' guard_policy, jsonb_array_length(regime_json->'themes') themes
+FROM tb_advisor_advice WHERE advice_kind = 'DAILY' ORDER BY advice_id DESC LIMIT 6;
+-- LIVE·LLM 섀도: prompt_version advice-v8, regime_json·policy 채워짐. QUANT_TOPN·QUANT_TOPN_BROAD: regime_json NULL
+```
+
+- `guard_json.policy{version=regime-policy-v1, longMax, convictionCap, avoidMax, cappedConviction, truncatedLong}` 가 있어야 한다.
+- Slack 에 `*국면(규칙)*` 줄과 `*테마*` 줄이 떠야 하고, 종목 헤딩은 "유니버스: KOSPI200" 이어야 한다.
+- 로그(Loki `|= "스크리닝:"`)의 `pickUniverse=KOSPI200 … eligible=N` 을 본다.
+  - `eligible` 이 `pick-min`(3) 근처면 cut 뒤 K200 후보가 부족한 것이다. 첫 주 동안 매일 본다.
+  - 0 이면 1(a) 를 다시 확인한다.
+- QUANT_TOPN_BROAD 행이 생겼는지 보고, 이 날짜를 §8 판정 #2 의 시작일로 적는다.
+
+**7. 첫 MORNING(다음 영업일 07:40) 확인.**
+
+```sql
+SELECT m.advice_id, m.base_date, m.parent_advice_id, d.advice_id AS daily_id, m.prompt_version,
+       jsonb_array_length(m.diff_json->'keep') keep, jsonb_array_length(m.diff_json->'add') add, jsonb_array_length(m.diff_json->'drop') drop,
+       m.diff_json->'triggers' triggers, m.diff_json->>'usDate' us_date, m.guard_json->'violations' violations
+FROM tb_advisor_advice m JOIN tb_advisor_advice d ON d.advice_id = m.parent_advice_id
+WHERE m.advice_kind = 'MORNING' ORDER BY m.advice_id DESC LIMIT 3;
+SELECT ticker, action, left(action_reason, 60) FROM tb_advisor_pick WHERE advice_id = <morning advice_id> ORDER BY pick_rank;
+```
+
+- `m.base_date = d.base_date` 여야 한다(같은 창).
+- `usDate` 는 오늘보다 이전이어야 한다.
+- 픽 `action` 은 KEEP·ADD 만 있어야 한다.
+- Slack 에 저녁 대비 diff 표가 뜨고, 채팅 `compareAdvice` 가 같은 결과를 줘야 한다.
+- 08:50 이후 수동 실행은 SKIPPED 가 정상이다.
+- 이 날짜를 §8 판정 #3 의 시작일로 적는다.
+
+**8. 첫 금요일 확인.**
+
+- 20:10 H20: LIVE(`advice-h20-v1`)·QUANT_TOPN 각 1행, `horizon_days=20` 이어야 한다. 세트가 없으면 SKIPPED 가 정상이다.
+- 20:20 H60: 짝수 ISO 주에만 돈다.
+- 월 첫 거래일 20:30 H180.
+- 확인 SQL 은 `20260925_04` 머리 주석에 있다. 장기 행은 `guard_json->>'narrative'`·`ruleOverride`·`weights` 를 본다.
+
+**9. 롤백**
+
+| 범위 | 방법 | 비고 |
+|---|---|---|
+| 새 잡만 끄기 | `SPRING_APPLICATION_JSON={"scheduler":{"advisor-morning-advise":{"enabled":false}}}` 처럼 해당 키를 false 로 두고 재생성 | 잡별로 독립이다. 이미 저장된 행은 kind 로 격리돼 DAILY KPI·게이트에 영향이 없다(M1) |
+| 채팅 수시 판단만 막기 | `advisor.chat.adhoc-daily-limit=0` | `requestAdvice` 가 "꺼져 있다" 로 답한다 |
+| K200 후보 제한 해제 | `advisor.pick-universe=ALL` | IC 재계산 불필요(IC 는 원래 전체) |
+| 프롬프트만 되돌리기 | `PromptResources.ADVICE_VERSION` 을 v7/v6 로 바꾸고 재배포 | 정책 표 가드는 코드라 남는다. 끄려면 앱 롤백 |
+| **앱 전체 롤백(M5 이전 이미지)** | 이미지 교체 **전에** 아래 역마이그레이션을 적용한다. `_01`·`_03` 컬럼은 남겨도 무해하다(옛 INSERT 는 컬럼을 나열한다) | `_02` 의 새 PK 로는 옛 앱의 `ON CONFLICT (signal_code, trade_date)` 가 실패한다. 매칭되는 유니크 제약이 없기 때문이다 |
+
+```sql
+-- M5 역마이그레이션 (옛 앱으로 되돌릴 때만). h≠5 IC·가중치 세트는 옛 앱이 쓰지 못하므로 지운다 — 백업 먼저
+BEGIN;
+DELETE FROM tb_advisor_signal_ic_daily WHERE horizon_days <> 5;
+ALTER TABLE tb_advisor_signal_ic_daily DROP CONSTRAINT IF EXISTS pk_advisor_signal_ic_daily;
+ALTER TABLE tb_advisor_signal_ic_daily ADD CONSTRAINT pk_advisor_signal_ic_daily PRIMARY KEY (signal_code, trade_date);
+UPDATE tb_advisor_weight_set SET is_active = FALSE WHERE horizon_days <> 5;
+DROP INDEX IF EXISTS uk_advisor_weight_set_active_horizon;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_advisor_weight_set_active ON tb_advisor_weight_set (is_active) WHERE is_active;
+COMMIT;
+```
+
+- `horizon_days` 컬럼 자체는 DEFAULT 5 라 남겨 둔다. h≠5 세트 행도 비활성으로 남는다. 삭제하려면 그 세트를 참조하는 advice(H20 LIVE 의 `weight_set_id`)부터 정리해야 한다.
+- 옛 앱의 kind 미지정 조회(M1 이전)는 MORNING·H20 행이 있으면 오염된다. 그래서 M1 이전으로 되돌릴 때는 `DELETE FROM tb_advisor_advice WHERE advice_kind <> 'DAILY'` 도 필요하다(CASCADE 로 후보·픽·채점까지 지워진다).
+- 이 역마이그레이션 SQL 은 **실행해 본 적이 없다**. 쓰기 전에 스테이징 복사본에서 확인한다.
+
+### 10.2 M1~M8 알려진 한계 (2026-09-25)
+
+- **`kospi200_sector` 이력 없음.** 대분류 코드가 `tb_stock_master_history` 에 없어 테마·`features.theme` 는 현재 마스터 값을 쓴다.
+  - 과거 날짜를 재실행하면 오늘 분류로 묶인다.
+  - 지금 편출돼 코드가 NULL 인 과거 구성 종목은 빠진다(§1.7).
+- **섹터 연동 심볼·CUSTOM 매핑 대기.**
+  - 아침 재판정의 섹터 연동 심볼(`overnight.sectorSymbols`, 섹터 트리거)은 `tb_stock_global_sector_map`(MARKET 묶음 제외)의 심볼별 밤사이 r1·σ 다.
+    - 이 표의 `sector_code` 는 **CUSTOM 섹터 코드**다(`stock-seed.sql` 주석). 그런데 `tb_stock_sector_map` 에 `source='CUSTOM'` 행이 없어서, 어느 심볼이 어느 후보 종목과 이어지는지 모른다.
+    - 그래서 LLM 은 심볼과 묶음 이름(`groups`)만 보고 스스로 연결해야 한다. 섹터 트리거는 "어느 심볼이든 |z|≥2" 라는 거친 플래그다.
+  - 테마도 KIS KOSPI200 대분류만 쓴다(`sector_map` CUSTOM/THEME 미사용).
+  - 둘 다 CUSTOM 섹터 사슬(사용자 결정 대기) 한 건이 풀리면 함께 좁혀진다.
+- **BEAR LONG 상한이 약하다.** regime-policy-v1 의 BEAR LONG 상한은 `max(pick-min, pick-max − 2)` = 8(H20 은 6)이다.
+  - LLM 이 평소 8개 이하를 고르면 사실상 걸리지 않는다. 실효 제약은 확신 상한 0.70(HIGH 0.65)과 AVOID 4 쪽이다.
+  - 더 강하게 하려면 수치를 바꾼 **regime-policy-v2** 를 새 버전으로 등록해야 한다. 결정 근거는 M0-2(BEAR 칸 LIVE 성과)와 M0-3 이다.
+- **`ic.reference-ic` 0.03 이 h=20 에서 상한에 붙을 가능성.**
+  - 배수는 `m̂ = 1 + shrink·(ĪC/0.03 − 1)`, clip[0.5, 2.0] 이다.
+  - 20일 rank-IC 는 5일보다 절대값이 커지기 쉽다(겹치는 수익 창). 그래서 여러 시그널이 동시에 2.0 에 붙으면 재정규화 뒤 가중치가 사실상 base 비율로 돌아가 학습 효과가 사라진다.
+  - 첫 h=20 세트의 `multiplier` 분포를 본다. 절반 이상이 2.0 이면 호라이즌별 reference-ic 를 도입한다. 이는 코드 변경이다(`AdvisorProperties.Ic` 는 호라이즌 공통).
+- **실제 OpenAI 호출 미실측.** 아래 스키마는 테스트가 가짜 HTTP 로만 검증했다. 실제 모델의 strict 스키마 수용·토큰·지연은 첫 운영 실행이 실측이다.
+  - MORNING(`MorningAdviceSchemaFactory`), H20(v8 스키마 재사용), 장기 서술(`LongTermNarrativeSchemaFactory`, ticker enum = 규칙 픽 N)
+  - H60·H180 은 서술이 실패해도 규칙 픽이 "서술 없음" 으로 발행된다(fail-open). MORNING·H20 은 실패하면 FAILED 다.
+- **장기 팩터 SQL 의 운영 EXPLAIN 미실측.** `tb_stock_financial` LATERAL 이 `idx_stock_financial_available` 로 좁혀질 것으로 보지만 확인하지 않았다(`_04` 주석).
+- **KOSPI200 PIT 이력은 수집 시작일부터만 있다.** 그 전 날짜의 `is_kospi200` 은 NULL 이다. 과거 날짜 재실행(`baseDate=`)으로 판단하면 후보가 0 이 되어 FAILED 가 날 수 있다.
+
 ## 11. Slack 채팅 봇 (chat-v1, 2026-09-13)
 
 `#hvy-advisor` 에 **허용된 사용자**가 새 글이나 댓글로 물으면 봇이 같은 스레드에 답한다. 답은 LLM 이 쓰되 **숫자는 전부 도구가 DB 에서 읽은 값**이고, 도구가 없는 질문은 "해당 데이터가 없다" 고 답한다(임의 SQL 도구 없음 — 룩어헤드·원주가 직접 읽기를 막을 수 없기 때문). 코드는 `modules/advisor/application/chat`(+`chat/tool`), 감사 테이블 `tb_advisor_chat`.
@@ -393,14 +702,38 @@ Socket Mode(bolt-socket-mode + Java-WebSocket, 공개 URL·서명 검증 없음)
 - 도구 스키마는 Spring AI 생성 `inputSchema` 에서 루트 `$schema` 만 제거, `strict=false`(optional 파라미터가 `required` 에 없어 strict 규칙과 안 맞음). 도구 결과가 `max-total-tool-calls` 이상 쌓이면 `tool_choice=none` 으로 답을 강제(상한 초과 뒤 무한 루프 방지). `status=incomplete(max_output_tokens)` 는 WARN + 있는 텍스트만(finishReason `LENGTH`, 다른 사유는 `INCOMPLETE`), `refusal` 파트만 오면 거부 문구가 답으로(`REFUSAL`), `failed` 는 예외 → Slack 실패 한 줄. 추론 토큰은 Spring AI 의 라운드 합산이 native usage 를 버리므로 메타데이터 누적값(`openai.responses.usage.cumulative`)으로 `tb_advisor_chat.reasoning_tokens` 에 넣는다(캐시 토큰은 `cacheReadInputTokens` 슬롯으로 합산).
 - 후속: 도구 strict 스키마(모든 속성 required + nullable)·hvy-common `ApiLogInterceptor` 헤더 마스킹은 별도.
 
-### 11.2 도구 14종 (`chat/tool`)
+### 11.2 도구 18종 (`chat/tool`, chat-v2 2026-09-25)
 
-| toolkit | 도구 | 원천 |
-|---|---|---|
-| Market | `marketOverview` `marketTrend` `globalLink` | MarketFeatureService · MarketTrendService · GlobalLinkService |
-| Stock | `resolveStock` `stockSnapshot` `priceSeries` `metricTopN` `newsHeadlines` | StockLookupReader(신설 SQL 3개) · DerivedViewRefresher.adjustedCloses · StockNewsWriter |
-| Advice | `latestAdvice` `adviceChecks` `screeningTop` `performanceSummary` | AdviceWriter · Score/Morning/IntradayCheckWriter · CandidateScreeningService · AdvisorKpiService |
-| Calendar | `dataFreshness` `tradingDays` | 지표 MAX(trade_date) · MarketFeatures.dataAsOf · TradingCalendar |
+chat-v1 은 14종이었다. M2 에서 Advice 3종(`horizonPicks`·`compareAdvice`·`requestAdvice`)을, M6 에서 Market 1종(`marketRegime`)을 더해 18종이 됐다. 시스템 프롬프트는 `chat-system-v2.md` 다. 도구 선택 절이 추가됐고, 규칙 1 이 "맞는 도구 먼저, no_data 면 없다고" 로 바뀌었다. `AdvisorChatToolSchemaTest` 가 18종 스키마를 고정한다.
+
+| toolkit | 도구 | 쓰임 | 원천 |
+|---|---|---|---|
+| Market (4) | `marketOverview` | 지수·수급·미국·섹터·변동성·추세·β 한 번에 | MarketFeatureService |
+| | `marketTrend` | 규칙 추세 라벨·성분·기저율 | MarketTrendService |
+| | `marketRegime(asOf)` (M6) | 합성 국면(추세×변동성)·정책 표 한도·KOSPI200 테마 강약. 규칙 즉석 계산 | MarketRegimeService · ThemeStrengthService |
+| | `globalLink` | 국내↔미국 β·상관 | GlobalLinkService |
+| Stock (5) | `resolveStock` | 종목명·코드 확인(다른 종목 도구보다 먼저) | StockLookupReader |
+| | `stockSnapshot` | 종목 기준일 스냅샷 | StockLookupReader |
+| | `priceSeries` | 수정 종가 시계열 | DerivedViewRefresher.adjustedCloses |
+| | `metricTopN` | 지표 하나로 정렬한 상위 N | StockLookupReader(`MetricColumn` enum) |
+| | `newsHeadlines` | 최근 헤드라인(수집 off 면 빈 목록) | StockNewsWriter |
+| Advice (7) | `latestAdvice(baseDate, kind)` | 판단·픽·근거. kind = DAILY(기본)·MORNING·H20·H60·H180·ADHOC, 응답에 `ruleRegime`(M6) | AdviceWriter |
+| | `horizonPicks(h)` (M2) | 호라이즌별 최신 판단. h → kind 는 `advisor.horizons` 맵으로 해석(5 DAILY·20 H20·60 H60·180 H180). 없으면 no_data(DAILY 로 대신 답하지 않음) | AdviceWriter |
+| | `compareAdvice(baseDate)` (M2) | 같은 기준일 DAILY vs MORNING 의 KEEP/ADD/DROP·사유·방향·확신 변화 | AdviceComparison(`action`·`diff_json.drop` 선언값 우선) |
+| | `requestAdvice` (M2) | 새 수시 판단(ADHOC) 비동기 요청 → runId. 허용 사용자·일 상한·같은 기준일 중복 재사용 | AdhocAdviceRequester · ChatBudgetGuard |
+| | `adviceChecks` | 아침·장중 점검, 픽·콜 채점 | Score/Morning/IntradayCheckWriter |
+| | `screeningTop` | 정량 순위(백분위는 KOSPI 전체, 종목은 픽 유니버스 안) | CandidateScreeningService |
+| | `performanceSummary` | 변형별 성과 요약 | AdvisorKpiService |
+| Calendar (2) | `dataFreshness` | 데이터별 최신 기준일(시간 표현이 있으면 먼저) | 지표 MAX(trade_date) · MarketFeatures.dataAsOf |
+| | `tradingDays` | 거래일 달력 | TradingCalendar |
+
+**첫 질문 점검(chat-v2 배포 뒤).**
+
+- "추천 새로 뽑아줘" → `requestAdvice` 가 호출되고 runId 를 답한 뒤, 1~3분 안에 #hvy-advisor 에 "수시 판단" 이 발행돼야 한다.
+- "한 달 관점 추천은?" → `horizonPicks(20)` 가 호출돼야 한다. H20 발행 전이면 "없다" 가 정상이다.
+- (아침 메시지 댓글) "어제 저녁이랑 뭐가 바뀌었어?" → `compareAdvice` 가 호출돼야 한다.
+- "지금 약세장이야?" → `marketRegime` 가 호출돼야 한다.
+- 전후 비교는 `advisor-m0-measurements.md` M0-6 SQL 로 한다.
 
 공통(`ToolSupport`): 읽기 전용 트랜잭션 + `SET LOCAL statement_timeout`, 예외는 `{"error":…}` 로(예외가 새면 도구 루프가 죽어 무응답), **기준일은 지표 테이블의 실제 마지막 거래일로 클램프**(미래·미수집 날짜 행은 존재하지 않는다 = 룩어헤드 불변식, `AdvisorChatToolPgTest` 가 14종을 미래 날짜로 검증), 도구 호출 이름·참조 기준일은 `ToolContext` 의 `ChatRequestScope` 에 기록 → `tb_advisor_chat.tool_calls_json`·`data_as_of`. `metricTopN` 의 정렬 컬럼은 `MetricColumn` enum 만 SQL 에 보간된다.
 

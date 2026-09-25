@@ -433,6 +433,178 @@ class AdviseJobTest {
     assertThat(execution.warnings()).anySatisfy(w -> assertThat(w).contains("IC 공백(h=20)").contains("IC_BACKFILL?baseDate=2020-01-01&horizon=20"));
   }
 
+  // ----- M7 H20 (주간 20거래일) -----
+
+  /** H20 경로 스텁: H20 활성 세트·20거래일 창 특징(regime 포함)·H20 스크리닝 */
+  private void stubH20(MarketRegime regime) {
+    WeightSet h20Set = WeightSet.builder().weightSetId(2L).source(WeightSetSource.SEED).active(true)
+        .weights(List.of(SignalWeightRow.builder().signalCode("MOM_60D").baseWeight(0.10).multiplier(1).weight(0.10).enabled(true).build())).build();
+    when(screening.weightSetFor(AdviceKind.H20)).thenReturn(Optional.of(h20Set));
+    MarketFeatures m = AdvicePromptBuilderTest.market();
+    // 20거래일 창: 09-14 진입 → 10-13 청산 (featuresFor(base, 20) 이 계산한 값이라고 가정)
+    when(marketFeatures.features(base, 20)).thenReturn(new MarketFeatures(m.asOf(), m.indices(), m.flows(), m.global(), m.topSectors(),
+        m.bottomSectors(), m.sigma5d(), m.globalAsOf(), m.globalAgeTradingDays(), m.flowAsOf(), m.sectorAsOf(), LocalDate.of(2026, 9, 14),
+        LocalDate.of(2026, 10, 13), m.trends(), m.links(), m.sectorIndexAsOf(), regime));
+    kr.hvy.blog.modules.advisor.domain.model.ScreeningResult s8 = AdvicePromptBuilderTest.screening(8);
+    when(screening.screen(eq(base), eq(AdviceKind.H20), any())).thenReturn(Optional.of(
+        new kr.hvy.blog.modules.advisor.domain.model.ScreeningResult(s8.baseDate(), s8.universeSize(), s8.cutSize(), 2L, s8.candidates())));
+    when(weightSets.find(2L)).thenReturn(Optional.of(h20Set));
+  }
+
+  private AdvisorExecution h20Execution() {
+    AdvisorRun run = AdvisorRun.builder().runId(1400L).jobType(AdvisorJobType.ADVISE_H20).triggerType(AdvisorTriggerType.SCHEDULER).baseDate(base).build();
+    return new AdvisorExecution(run, base, properties);
+  }
+
+  @Test
+  @DisplayName("M7: H20 활성 가중치 세트가 없으면 DAILY 세트로 폴백하지 않고 SKIPPED — 사유가 skip.WEIGHTS 메타에 남고 LLM·스크리닝·저장 0")
+  void h20SkipsWithoutWeightSet() {
+    when(screening.weightSetFor(AdviceKind.H20)).thenReturn(Optional.empty());
+
+    AdvisorExecution execution = h20Execution();
+    new H20AdviseJob(job).execute(execution);
+
+    assertThat(execution.isSkipped()).isTrue();
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SKIPPED);
+    assertThat((String) execution.metadata("skip.WEIGHTS")).contains("H20").contains("h=20").contains("IC_BACKFILL?horizon=20");
+    assertThat(execution.skipReason()).isEqualTo(execution.metadata("skip.WEIGHTS"));
+    assertThat(llmCalls.get()).isZero();
+    verify(screening, never()).screen(any());
+    verify(screening, never()).screen(any(), any(AdviceKind.class), any());
+    verify(adviceWriter, never()).insertHeader(any());
+  }
+
+  @Test
+  @DisplayName("M7: H20 은 horizon_days=20·kind=H20 으로 LIVE 와 QUANT_TOPN 섀도를 저장하고, 뉴스·recentOutcomes·교훈·실적 블록 없이 advice-h20-v1 로 1회 판단해 '20일 관점 추천' 으로 발행한다")
+  void h20SavesTwentyDayAdviceWithoutNewsOrMemory() {
+    properties.getNews().setEnabled(true);   // 뉴스가 켜져 있어도 H20 입력에는 싣지 않는다
+    when(adviceWriter.countLivePicks(AdviceKind.DAILY)).thenReturn(10_000);   // 300 게이트를 넘겨도 메모리를 싣지 않는다
+    AdviseJob.ScoreHook hook = mock(AdviseJob.ScoreHook.class);
+    when(hookProvider.getIfAvailable()).thenReturn(hook);
+    stubH20(null);
+
+    AdvisorExecution execution = h20Execution();
+    new H20AdviseJob(job).execute(execution);
+
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SUCCESS);
+    assertThat(llmCalls.get()).as("LIVE 1회 — LLM 섀도 없음").isEqualTo(1);
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter, org.mockito.Mockito.times(2)).insertHeader(headers.capture());
+    assertThat(headers.getAllValues()).extracting(AdviceHeader::variant).containsExactly(AdviceVariant.QUANT_TOPN, AdviceVariant.LIVE);
+    assertThat(headers.getAllValues()).allSatisfy(h -> {
+      assertThat(h.adviceKind()).isEqualTo(AdviceKind.H20);
+      assertThat(h.horizonDays()).isEqualTo(20);
+      assertThat(h.weightSetId()).as("H20 가중치 세트").isEqualTo(2L);
+      assertThat(h.exitDate()).as("20거래일 창").isEqualTo(LocalDate.of(2026, 10, 13));
+    });
+    AdviceHeader live = headers.getAllValues().get(1);
+    assertThat(live.promptVersion()).isEqualTo(PromptResources.H20_VERSION).isEqualTo("advice-h20-v1");
+    assertThat(live.memoryJson()).isNull();
+    assertThat(live.activeLessonIds()).isEmpty();
+    verify(adviceWriter).find(base, AdviceKind.H20, AdviceVariant.LIVE);
+    verify(adviceWriter).find(base, AdviceKind.H20, AdviceVariant.QUANT_TOPN);
+
+    // 뉴스·메모리 조회 자체가 없다 (뉴스·빠른 층·느린 층·교훈)
+    verify(newsFeatures, never()).news(any(), any());
+    verify(recentOutcomes, never()).block(any());
+    verify(adviceWriter, never()).countLivePicks(any());
+    verify(lessons, never()).findByStatus(any());
+    verify(hook, never()).scoreDue(any());
+    verify(icService, never()).computeIncremental(any());
+    ArgumentCaptor<kr.hvy.blog.modules.advisor.domain.model.PromptInputRow> inputs = ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.domain.model.PromptInputRow.class);
+    verify(promptInputs).upsert(inputs.capture());
+    assertThat(inputs.getValue().promptVersion()).isEqualTo("advice-h20-v1");
+    assertThat(inputs.getValue().userPayload()).contains("\"horizonDays\":20").contains("20번째 영업일 종가")
+        .doesNotContain("\"news\"").doesNotContain("recentOutcomes").doesNotContain("\"scoreboard\"").doesNotContain("\"lessons\"");
+    assertThat(execution.metadata("skip.NEWS")).isEqualTo(AdviseJob.H20_SKIP);
+    assertThat(execution.metadata("skip.NOTES")).isEqualTo(AdviseJob.H20_SKIP);
+    assertThat(execution.metadata("skip.SHADOW_QUANT_BROAD")).isEqualTo(AdviseJob.H20_SKIP);
+    assertThat(execution.metadata("skip.SHADOW_NOMEM")).isEqualTo(AdviseJob.H20_SKIP);
+    assertThat(execution.metadata("horizonDays")).isEqualTo(20);
+
+    ArgumentCaptor<SlackMessage> message = ArgumentCaptor.forClass(SlackMessage.class);
+    verify(notifier).publish(message.capture());
+    assertThat(message.getValue().getFallbackText()).contains("20일 관점 추천");
+    assertThat(message.getValue().toBlocks().toString()).contains("20일 관점 추천 (20거래일)").contains("주간 20거래일 판단입니다");
+  }
+
+  @Test
+  @DisplayName("M7: 금요일이 휴장이면(게이트 tradingDay=false) H20 은 LLM 없이 SKIPPED — 마감 경보도 없다")
+  void h20SkipsOnHoliday() {
+    when(gate.decide(any(), any())).thenReturn(new AdvisorGateService.Decision(false, false, false, false, DataQuality.OK, "휴장일 " + base));
+    stubH20(null);
+
+    AdvisorExecution execution = h20Execution();
+    new H20AdviseJob(job).execute(execution);
+
+    assertThat(execution.isSkipped()).isTrue();
+    assertThat(execution.skipReason()).contains("휴장일");
+    assertThat(llmCalls.get()).isZero();
+    verify(adviceWriter, never()).insertHeader(any());
+    verify(notifier, never()).alert(any(), org.mockito.ArgumentMatchers.anyBoolean());
+  }
+
+  @Test
+  @DisplayName("M7: 같은 기준일 H20 LIVE 가 이미 있으면 SKIPPED — 같은 날 DAILY 가 있는 것(alreadyDone)은 막지 않는다")
+  void h20SkipsWhenAlreadyExists() {
+    when(gate.decide(any(), any())).thenReturn(new AdvisorGateService.Decision(true, true, true, false, DataQuality.OK, "이미 판단이 있습니다"));
+    stubH20(null);
+    when(adviceWriter.find(base, AdviceKind.H20, AdviceVariant.LIVE)).thenReturn(Optional.of(AdviceHeader.builder().adviceId(91L).build()));
+
+    AdvisorExecution execution = h20Execution();
+    new H20AdviseJob(job).execute(execution);
+    assertThat(execution.isSkipped()).isTrue();
+    assertThat(execution.skipReason()).contains("advice=91");
+    assertThat(llmCalls.get()).isZero();
+  }
+
+  @Test
+  @DisplayName("M7: 정책 표는 H20 픽 범위(3~8)로 다시 계산돼 가드가 강제한다 — BEAR 면 LONG ≤ max(3, 8−2)=6·확신 ≤ 0.70, regime_json·프롬프트도 같은 한도")
+  void h20PolicyRecomputedForOwnBounds() {
+    MarketRegime daily = new MarketRegime("0001", LocalDate.of(2026, 9, 11), MarketTrendCode.BEAR, -3, VolRegimeCode.NORMAL, 0.5, 0.01, 1200,
+        new RegimePolicy(properties).limits(MarketTrendCode.BEAR, VolRegimeCode.NORMAL), List.of());
+    assertThat(daily.policy().longMax()).as("DAILY 범위(3~10) 한도").isEqualTo(8);
+    stubH20(daily);
+
+    AdvisorExecution execution = h20Execution();
+    new H20AdviseJob(job).execute(execution);
+
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter, org.mockito.Mockito.times(2)).insertHeader(headers.capture());
+    AdviceHeader live = headers.getAllValues().get(1);
+    assertThat(live.regime().policy().longMax()).isEqualTo(6);
+    assertThat(live.regime().policy().convictionCap()).isEqualTo(0.70);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> applied = (Map<String, Object>) live.guard().get("policy");
+    assertThat(applied).containsEntry("longMax", 6).containsEntry("convictionCap", 0.70).containsEntry("cappedConviction", 1);
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<PickRow>> picks = ArgumentCaptor.forClass(List.class);
+    verify(adviceWriter, org.mockito.Mockito.times(2)).insertPicks(anyLong(), picks.capture());
+    assertThat(picks.getAllValues().get(1)).filteredOn(p -> p.ticker().equals("T00")).extracting(PickRow::conviction).containsExactly(0.70);
+    ArgumentCaptor<kr.hvy.blog.modules.advisor.domain.model.PromptInputRow> inputs = ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.domain.model.PromptInputRow.class);
+    verify(promptInputs).upsert(inputs.capture());
+    assertThat(inputs.getValue().userPayload()).contains("\"longMax\":6");
+  }
+
+  @Test
+  @DisplayName("M7: H20 가드는 H20 픽 상한으로 자른다 — pick-max 2 면 확신 상위 2개만 남는다(DAILY pick-max 와 무관)")
+  void h20GuardUsesOwnPickMax() {
+    properties.getH20().setPickMin(1);
+    properties.getH20().setPickMax(2);
+    stubH20(null);
+
+    AdvisorExecution execution = h20Execution();
+    new H20AdviseJob(job).execute(execution);
+
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<PickRow>> picks = ArgumentCaptor.forClass(List.class);
+    verify(adviceWriter, org.mockito.Mockito.times(2)).insertPicks(anyLong(), picks.capture());
+    assertThat(picks.getAllValues().get(1)).extracting(PickRow::ticker).containsExactly("T00", "T01");
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter, org.mockito.Mockito.times(2)).insertHeader(headers.capture());
+    assertThat(headers.getAllValues().get(1).guard()).containsEntry("truncated", 1);
+  }
+
   private AdvisorExecution execution() {
     AdvisorRun run = AdvisorRun.builder().runId(1284L).jobType(AdvisorJobType.ADVISE).triggerType(AdvisorTriggerType.SCHEDULER).baseDate(base).build();
     return new AdvisorExecution(run, base, properties);

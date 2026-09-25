@@ -32,6 +32,13 @@ public final class RegimePolicy {
    * 추세·변동성 국면의 한도. 추세가 없으면(지수 지표 없음) null — 호출자는 기존 가드만 적용한다.
    */
   public MarketRegime.Policy limits(MarketTrendCode trend, VolRegimeCode vol) {
+    return limits(trend, vol, properties.getPickMin(), properties.getPickMax());
+  }
+
+  /**
+   * 픽 범위를 지정한 한도(M7: H20 은 advisor.h20 의 pick-min·pick-max). LONG 상한 = max(pickMin, pickMax − 감산) 이라 같은 표가 종류별 범위에 비례해 적용된다.
+   */
+  public MarketRegime.Policy limits(MarketTrendCode trend, VolRegimeCode vol, int pickMin, int pickMax) {
     if (trend == null) {
       return null;
     }
@@ -41,7 +48,7 @@ public final class RegimePolicy {
       case SIDEWAYS -> table.getSideways();
       case BEAR -> table.getBear();
     };
-    int longMax = Math.max(properties.getPickMin(), properties.getPickMax() - rule.getLongMaxReduction());
+    int longMax = Math.max(pickMin, pickMax - rule.getLongMaxReduction());
     Double cap = rule.getConvictionCap();
     if (vol == VolRegimeCode.HIGH && table.getVolHighConvictionPenalty() > 0) {
       cap = (cap == null ? maxConviction() : cap) - table.getVolHighConvictionPenalty();

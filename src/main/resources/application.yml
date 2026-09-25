@@ -365,6 +365,9 @@ advisor:
       sideways: { long-max-reduction: 0, conviction-cap: 0.80 }          # LONG 확신 ≤ 0.80
       bear: { long-max-reduction: 2, conviction-cap: 0.70, avoid-max: 4 } # LONG ≤ max(pick-min, pick-max−2), 확신 ≤ 0.70, AVOID ≤ 4
       vol-high-conviction-penalty: 0.05                                  # 변동성 HIGH 면 확신 상한 −0.05 (상한 없던 국면은 0.90 에서)
+  h20:                            # 주간 20거래일 판단(M7, advice-h20-v1). 뉴스·메모리 없이 H20 가중치 세트로만(없으면 SKIP). 정책 표는 이 범위로 재계산
+    pick-min: 3                   # 가드 후 픽이 이보다 적으면 FAILED(미발행)
+    pick-max: 8                   # 픽 상한(확신 내림차순 절단)
   theme:                          # 테마 블록(M6): KOSPI200 구성(PIT) 종목을 kospi200_sector 대분류별로 집계. CUSTOM 매핑 보류
     strong-rs20: 0.02             # rs20 ≥ +0.02 & rs60 > 0 → STRONG, rs20 ≤ −0.02 & rs60 < 0 → WEAK
     min-members: 3                # 지표 있는 구성 종목이 이보다 적은 대분류는 제외
@@ -456,6 +459,10 @@ scheduler:
   advisor-morning-advise:         # 07:30 점검 뒤, 08:50 발행 마감 전. 전일 저녁 픽을 밤사이 정보로 KEEP/DROP/ADD (LLM 매일, 저녁과 같은 창으로 채점)
     lock-name: ADVISOR-MORNING-ADVISE-TEST
     cron-expression: "0 40 7 * * MON-FRI"
+    enabled: false
+  advisor-h20-advise:             # M7 금요일 20:10 주간 20거래일 판단(ADVISE 19:30~19:55 뒤). 휴장·H20 가중치 세트 없음이면 SKIPPED
+    lock-name: ADVISOR-H20-ADVISE-TEST
+    cron-expression: "0 10 20 * * FRI"
     enabled: false
   advisor-weekly-review:
     lock-name: ADVISOR-WEEKLY-REVIEW-TEST
@@ -556,6 +563,10 @@ scheduler:
   advisor-morning-advise:         # M4 아침 재판정. 마이그레이션 20260925_01_advisor_morning.sql 적용 뒤 기동해야 한다(새 컬럼 INSERT)
     lock-name: ADVISOR-MORNING-ADVISE-PROD
     cron-expression: "0 40 7 * * MON-FRI"
+    enabled: true
+  advisor-h20-advise:             # M7 주간 20거래일 판단. H20 활성 가중치 세트(IC_BACKFILL?horizon=20 → WEEKLY_REVIEW)가 생기기 전까지는 SKIPPED
+    lock-name: ADVISOR-H20-ADVISE-PROD
+    cron-expression: "0 10 20 * * FRI"
     enabled: true
   advisor-weekly-review:
     lock-name: ADVISOR-WEEKLY-REVIEW-PROD

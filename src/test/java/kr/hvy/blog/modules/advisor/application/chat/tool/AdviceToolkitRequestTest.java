@@ -81,9 +81,15 @@ class AdviceToolkitRequestTest {
     assertThat(AdviceToolkit.parseKind(null)).contains(AdviceKind.DAILY);
     assertThat(AdviceToolkit.parseKind(" morning ")).contains(AdviceKind.MORNING);
     assertThat(AdviceToolkit.parseKind("X")).isEmpty();
-    assertThat(AdviceToolkit.kindOfHorizon(5)).contains(AdviceKind.DAILY);
-    assertThat(AdviceToolkit.kindOfHorizon(180)).contains(AdviceKind.H180);
-    assertThat(AdviceToolkit.kindOfHorizon(10)).isEmpty();
-    assertThat(AdviceToolkit.kindOfHorizon(null)).isEmpty();
+    kr.hvy.blog.modules.advisor.application.AdvisorProperties props =
+        new kr.hvy.blog.modules.advisor.application.AdvisorProperties(new org.springframework.mock.env.MockEnvironment());
+    assertThat(AdviceToolkit.kindOfHorizon(5, props)).contains(AdviceKind.DAILY);
+    assertThat(AdviceToolkit.kindOfHorizon(20, props)).contains(AdviceKind.H20);
+    assertThat(AdviceToolkit.kindOfHorizon(180, props)).contains(AdviceKind.H180);
+    assertThat(AdviceToolkit.kindOfHorizon(10, props)).isEmpty();
+    assertThat(AdviceToolkit.kindOfHorizon(null, props)).isEmpty();
+    // 맵이 정본: 설정에서 180 을 빼면 채팅 도구도 180 을 모른다
+    props.getHorizons().remove(180);
+    assertThat(AdviceToolkit.kindOfHorizon(180, props)).isEmpty();
   }
 }

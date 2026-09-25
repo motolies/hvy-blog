@@ -89,9 +89,9 @@ public class AdviceToolkit {
   public Map<String, Object> horizonPicks(@ToolParam(description = "호라이즌 거래일 5|20|60|180") Integer h,
       @ToolParam(required = false, description = "판단 기준일 yyyy-MM-dd. 생략하면 가장 최근") String baseDate, ToolContext context) {
     return support.run("horizonPicks", context, () -> {
-      Optional<AdviceKind> kind = kindOfHorizon(h);
+      Optional<AdviceKind> kind = kindOfHorizon(h, advisor);
       if (kind.isEmpty()) {
-        return ToolJson.error(ToolJson.ERROR_BAD_ARGUMENT, "h 는 5·20·60·180 중 하나", null);
+        return ToolJson.error(ToolJson.ERROR_BAD_ARGUMENT, "h 는 " + advisor.icHorizons() + " 중 하나", null);
       }
       return adviceBody(kind.get(), baseDate, context);
     });
@@ -322,19 +322,14 @@ public class AdviceToolkit {
   }
 
   /**
-   * 호라이즌(거래일) → 판단 종류. 5 는 19:30 일일 판단이다.
+   * 호라이즌(거래일) → 판단 종류. advisor.horizons 맵이 정본이다(M7: 하드코딩 제거) — 5 는 19:30 일일 판단(DAILY), 맵에 없는 호라이즌은 empty.
    */
-  static Optional<AdviceKind> kindOfHorizon(Integer h) {
+  static Optional<AdviceKind> kindOfHorizon(Integer h, AdvisorProperties properties) {
     if (h == null) {
       return Optional.empty();
     }
-    return switch (h) {
-      case 5 -> Optional.of(AdviceKind.DAILY);
-      case 20 -> Optional.of(AdviceKind.H20);
-      case 60 -> Optional.of(AdviceKind.H60);
-      case 180 -> Optional.of(AdviceKind.H180);
-      default -> Optional.empty();
-    };
+    AdvisorProperties.Horizon spec = properties.getHorizons().get(h);
+    return spec == null ? Optional.empty() : Optional.ofNullable(spec.getKind());
   }
 
   @Tool(name = "adviceChecks", description = "일일 판단에 대한 사후 점검과 채점: 아침 점검(07:30, 미국 마감×β 예상 갭, REINFORCE/HOLD/CAUTION), 장중 점검(12:00 일치율·판정), "

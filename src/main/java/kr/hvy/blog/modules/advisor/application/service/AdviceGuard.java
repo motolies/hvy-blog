@@ -146,6 +146,25 @@ public final class AdviceGuard {
    */
   public Result validate(AdviceResponse response, List<CandidateRow> candidates, SectorContext sectors, Map<String, MarketTrendCode> trends,
       NewsBlock news, MarketRegime.Policy policy) {
+    return validate(response, candidates, sectors, trends, news, policy, PickBounds.of(properties));
+  }
+
+  /**
+   * 판단 종류별 픽 개수 범위(M7). DAILY·ADHOC 은 advisor.pick-min/max, H20 은 advisor.h20.pick-min/max.
+   */
+  public record PickBounds(int min, int max) {
+
+    /** DAILY 범위 (advisor.pick-min, advisor.pick-max) */
+    public static PickBounds of(AdvisorProperties properties) {
+      return new PickBounds(properties.getPickMin(), properties.getPickMax());
+    }
+  }
+
+  /**
+   * @param bounds 픽 개수 범위 — 전체 상한 절단과 tooFewPicks 기록에 쓴다(정책 LONG 상한은 policy 가 이미 같은 범위로 계산돼 있어야 한다)
+   */
+  public Result validate(AdviceResponse response, List<CandidateRow> candidates, SectorContext sectors, Map<String, MarketTrendCode> trends,
+      NewsBlock news, MarketRegime.Policy policy, PickBounds bounds) {
     Map<String, Object> stats = new LinkedHashMap<>();
     PolicyCounter policyCounter = new PolicyCounter(policy);
     Map<String, Set<String>> newsTickers = news == null ? Map.of() : news.tickersById();
@@ -245,15 +264,15 @@ public final class AdviceGuard {
     // 확신 내림차순, 정책 LONG 상한(확신 낮은 LONG 부터 제거), 전체 상한
     picks.sort((a, b) -> Double.compare(b.conviction(), a.conviction()));
     picks = policyCounter.limitLongs(picks);
-    if (picks.size() > properties.getPickMax()) {
-      stats.put("truncated", picks.size() - properties.getPickMax());
-      picks = new ArrayList<>(picks.subList(0, properties.getPickMax()));
+    if (picks.size() > bounds.max()) {
+      stats.put("truncated", picks.size() - bounds.max());
+      picks = new ArrayList<>(picks.subList(0, bounds.max()));
     }
     List<PickRow> ranked = new ArrayList<>();
     for (int i = 0; i < picks.size(); i++) {
       ranked.add(picks.get(i).toBuilder().pickRank(i + 1).build());
     }
-    if (ranked.size() < properties.getPickMin()) {
+    if (ranked.size() < bounds.min()) {
       stats.put("tooFewPicks", ranked.size());
     }
     stats.put("originalPicks", original);

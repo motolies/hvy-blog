@@ -56,6 +56,14 @@ public record MarketFeatures(
     return regime == null ? null : regime.policy();
   }
 
+  /**
+   * 합성 국면만 바꾼 사본(M7). H20 처럼 픽 범위가 다른 종류가 같은 정책 표를 자기 범위로 다시 계산한 국면을 프롬프트·가드·regime_json 에 한꺼번에 쓰게 한다.
+   */
+  public MarketFeatures withRegime(MarketRegime newRegime) {
+    return new MarketFeatures(asOf, indices, flows, global, topSectors, bottomSectors, sigma5d, globalAsOf, globalAgeTradingDays, flowAsOf, sectorAsOf,
+        entryDate, exitDate, trends, links, sectorIndexAsOf, newRegime);
+  }
+
   public record IndexFeature(String code, String name, double close, Double r1, Double r5, Double r20, Double r60, Double distMa20, Double distMa60) {
   }
 

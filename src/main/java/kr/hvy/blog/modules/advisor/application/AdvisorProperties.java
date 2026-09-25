@@ -103,6 +103,7 @@ public class AdvisorProperties {
   private Note note = new Note();
   private Regime regime = new Regime();
   private Theme theme = new Theme();
+  private H20 h20 = new H20();
 
   /** 프롬프트 입력 스냅샷·원본 출력 보존 일수 */
   private int retentionDays = 180;
@@ -131,6 +132,7 @@ public class AdvisorProperties {
     validateMarkets();
     validateHorizons();
     validateRegime();
+    validateH20();
     if (!enabled) {
       log.info("advisor 비활성(advisor.enabled=false) — AI 판단 잡·ChatClient 미등록");
       return;
@@ -244,6 +246,15 @@ public class AdvisorProperties {
       if (rule.getAvoidMax() != null && rule.getAvoidMax() < 0) {
         throw new IllegalStateException("advisor.regime.policy." + e.getKey() + ".avoid-max 는 음수일 수 없습니다");
       }
+    }
+  }
+
+  /**
+   * advisor.h20 검증(M7). 1 ≤ pick-min ≤ pick-max ≤ 36 — 36 을 넘으면 Slack 픽 section 이 메시지 블록 50 상한에 걸린다(pick-max 와 같은 한계).
+   */
+  void validateH20() {
+    if (h20.getPickMin() < 1 || h20.getPickMin() > h20.getPickMax() || h20.getPickMax() > 36) {
+      throw new IllegalStateException("advisor.h20 은 1 ≤ pick-min(" + h20.getPickMin() + ") ≤ pick-max(" + h20.getPickMax() + ") ≤ 36 이어야 합니다");
     }
   }
 
@@ -690,5 +701,22 @@ public class AdvisorProperties {
 
     /** 대분류마다 싣는 대표 종목명 수(60일 평균 거래대금 상위) — 코드 의미를 LLM 이 추정하는 단서 */
     private int leaders = 3;
+  }
+
+  /**
+   * 주간 20거래일 판단(M7, advice-h20-v1). 입력은 추세·섹터·테마·국면 중심이고 뉴스·오답노트·recentOutcomes 메모리는 싣지 않는다(20일 보유에 36시간 헤드라인·T+5 빈도표는
+   * 창이 맞지 않는다). 가중치는 H20 활성 세트만 — 없으면 SKIP(DAILY 세트 폴백 금지). 정책 표(RegimePolicy)는 아래 픽 범위로 다시 계산해 같은 표를 적용한다.
+   * <p>
+   * 사전 등록 판정(26주 뒤): 같은 기준일 H20 LIVE − QUANT_TOPN 픽 평균 초과수익(h=20)의 날짜 대응 차이 평균이 t ≥ 2 이면 LLM 선택을 유지, 아니면 QUANT_TOPN 규칙으로 대체를 검토한다.
+   * 주 1회 × 26주 = 대응 26쌍이고 창이 겹치므로(20거래일 보유, 5거래일 간격 → 겹침 배수 4) se 는 표본 sd / √(n/4) 로 본다(운영 문서 stock-advisor.md §H20).
+   */
+  @Data
+  public static class H20 {
+
+    /** 가드 통과 픽이 이보다 적으면 FAILED(미발행) */
+    private int pickMin = 3;
+
+    /** 픽 상한 — 초과분은 확신 내림차순으로 자른다. 주 1회 20일 보유라 DAILY(10) 보다 좁게 둔다 */
+    private int pickMax = 8;
   }
 }

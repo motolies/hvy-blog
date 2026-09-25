@@ -50,6 +50,7 @@ import lombok.Builder;
 public class DailyAdviceMessage implements SlackMessage {
 
   static final String ADHOC_NOTE = "💬 채팅 요청으로 만든 수시 판단입니다 — 19:30 일일 판단과 같은 입력·규칙이지만 성과 집계(KPI·채점·학습)에서 제외됩니다.";
+  static final String H20_NOTE = "🗓 주간 20거래일 판단입니다 — 뉴스·오답노트 없이 추세·섹터·테마·국면으로 고른 20거래일 보유 관점이며, 일일 판단과 따로 20거래일 창으로 채점됩니다.";
   public static final String DISCLAIMER = "⚠️ 투자 자문이 아닙니다. 개인 실험(정량 스크리닝 + LLM 판단) 결과이며 어떤 손실도 책임지지 않습니다.";
   static final DateTimeFormatter MMDD = DateTimeFormatter.ofPattern("MM-dd");
   /** 미국 데이터가 이 영업일 수 이상 뒤처지면 경고 표시 */
@@ -82,8 +83,7 @@ public class DailyAdviceMessage implements SlackMessage {
 
   @Override
   public String getFallbackText() {
-    return String.format("%s %s: %s, 종목 %d개", header.baseDate(), header.adviceKind() == AdviceKind.ADHOC ? "수시 판단" : "시장 판단",
-        header.regimeCode(), picks.size());
+    return String.format("%s %s: %s, 종목 %d개", header.baseDate(), kindLabel(), header.regimeCode(), picks.size());
   }
 
   /**
@@ -101,12 +101,19 @@ public class DailyAdviceMessage implements SlackMessage {
   }
 
   /**
-   * 헤더 제목. 수시 판단은 "시장 판단" 대신 "수시 판단" — 채팅 스레드 히스토리가 "📈 YYYY-MM-DD 시장 판단" 루트를 19:30 판단으로 인식하므로
-   * 같은 문구를 쓰면 수시 판단 스레드의 질문이 그날 DAILY 로 연결된다.
+   * 헤더 제목. 수시 판단·20일 판단은 "시장 판단" 대신 자기 문구 — 채팅 스레드 히스토리가 "📈 YYYY-MM-DD 시장 판단" 루트를 19:30 판단으로 인식하므로
+   * 같은 문구를 쓰면 그 스레드의 질문이 그날 DAILY 로 연결된다.
    */
   String title() {
-    String label = header.adviceKind() == AdviceKind.ADHOC ? "수시 판단" : "시장 판단";
-    return String.format("📈 %s %s (%d거래일)", header.baseDate(), label, header.horizonDays());
+    return String.format("📈 %s %s (%d거래일)", header.baseDate(), kindLabel(), header.horizonDays());
+  }
+
+  /** 종류 문구: ADHOC "수시 판단", H20 "20일 관점 추천"(M7), 그 밖 "시장 판단" */
+  String kindLabel() {
+    if (header.adviceKind() == AdviceKind.ADHOC) {
+      return "수시 판단";
+    }
+    return header.adviceKind() == AdviceKind.H20 ? "20일 관점 추천" : "시장 판단";
   }
 
   @Override
@@ -115,6 +122,8 @@ public class DailyAdviceMessage implements SlackMessage {
     blocks.add(header(h -> h.text(plainText(title()))));
     if (header.adviceKind() == AdviceKind.ADHOC) {
       blocks.add(context(List.of(markdownText(ADHOC_NOTE))));
+    } else if (header.adviceKind() == AdviceKind.H20) {
+      blocks.add(context(List.of(markdownText(H20_NOTE))));
     }
     String trend = trendText();
     if (trend != null) {

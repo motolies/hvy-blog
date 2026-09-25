@@ -28,7 +28,12 @@ public enum AdvisorJobType implements EnumCode<String> {
    * 채팅 봇 requestAdvice 가 여는 수시 판단(advice_kind=ADHOC, chat-v2). ADVISE 와 잡 유형을 나눈 이유: RUNNING 부분 유니크가 잡 유형 단위라
    * 같은 유형이면 채팅 요청이 도는 동안 19:30 스케줄 ADVISE 가 "이미 실행 중" 으로 거부된다.
    */
-  ADVISE_ADHOC("ADVISE_ADHOC", "수시 판단(채팅 요청)", true);
+  ADVISE_ADHOC("ADVISE_ADHOC", "수시 판단(채팅 요청)", true),
+  /**
+   * 금요일 20:10 주간 20거래일 판단(advice_kind=H20, M7). 파이프라인은 ADVISE 와 공유하되(AdviseJob.advise(kind)) 뉴스·메모리 없이 H20 가중치 세트로만 돈다.
+   * ADVISE 와 유형을 나눈 이유는 ADVISE_ADHOC 과 같다 — RUNNING 부분 유니크가 잡 유형 단위라 같은 유형이면 서로를 "이미 실행 중" 으로 막는다.
+   */
+  ADVISE_H20("ADVISE_H20", "20거래일 주간 판단", true);
 
   private final String code;
   private final String desc;

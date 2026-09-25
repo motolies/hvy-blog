@@ -66,11 +66,19 @@ public class AdvicePromptBuilder {
    */
   public PromptPayload build(MarketFeatures market, ScreeningResult screening, Map<String, Object> scoreboard, List<LessonRow> lessons,
       Map<String, Double> weights, DataQuality quality, NewsBlock news, Map<String, Object> recentOutcomes) {
+    return build(market, screening, scoreboard, lessons, weights, quality, news, recentOutcomes, properties.getHorizonDays());
+  }
+
+  /**
+   * @param horizonDays 판단 호라이즌(거래일) — 루트 horizonDays 와 window.exitRule 에 쓴다(M7: H20 은 20). 적용 구간 날짜 자체는 market.entryDate/exitDate 가 이미 이 값으로 계산돼 있다
+   */
+  public PromptPayload build(MarketFeatures market, ScreeningResult screening, Map<String, Object> scoreboard, List<LessonRow> lessons,
+      Map<String, Double> weights, DataQuality quality, NewsBlock news, Map<String, Object> recentOutcomes, int horizonDays) {
     NewsBlock fitted = fitNews(news);
     int limit = screening.candidates().size();
     while (true) {
       List<CandidateRow> included = screening.candidates().subList(0, limit);
-      String json = AdvisorJson.write(payload(market, screening, included, scoreboard, lessons, weights, quality, fitted, recentOutcomes));
+      String json = AdvisorJson.write(payload(market, screening, included, scoreboard, lessons, weights, quality, fitted, recentOutcomes, horizonDays));
       if (json.length() <= properties.getPrompt().getMaxInputChars() || limit <= Math.max(properties.getPickMin(), 5)) {
         List<String> tickers = included.stream().map(CandidateRow::ticker).toList();
         // 주도 섹터 enum 은 후보가 있는 섹터만(advice-v6) — top·bottom 표는 맥락으로 남지만 후보 없는 섹터(특히 bottom)를 고를 수 없게 스키마에서 막는다
@@ -136,9 +144,14 @@ public class AdvicePromptBuilder {
 
   Map<String, Object> payload(MarketFeatures market, ScreeningResult screening, List<CandidateRow> candidates, Map<String, Object> scoreboard,
       List<LessonRow> lessons, Map<String, Double> weights, DataQuality quality, NewsBlock news, Map<String, Object> recentOutcomes) {
+    return payload(market, screening, candidates, scoreboard, lessons, weights, quality, news, recentOutcomes, properties.getHorizonDays());
+  }
+
+  Map<String, Object> payload(MarketFeatures market, ScreeningResult screening, List<CandidateRow> candidates, Map<String, Object> scoreboard,
+      List<LessonRow> lessons, Map<String, Double> weights, DataQuality quality, NewsBlock news, Map<String, Object> recentOutcomes, int horizonDays) {
     Map<String, Object> root = new LinkedHashMap<>();
     root.put("asOf", screening.baseDate().toString());
-    root.put("horizonDays", properties.getHorizonDays());
+    root.put("horizonDays", horizonDays);
     root.put("pickUniverse", properties.getPickUniverse().getCode());
 
     Map<String, Object> m = new LinkedHashMap<>();
@@ -211,7 +224,7 @@ public class AdvicePromptBuilder {
       window.put("entry", market.entryDate().toString());
       window.put("exit", market.exitDate().toString());
       window.put("entryRule", "다음 영업일 시가");
-      window.put("exitRule", properties.getHorizonDays() + "번째 영업일 종가");
+      window.put("exitRule", horizonDays + "번째 영업일 종가");
       root.put("window", window);
     }
     root.put("dataQuality", (quality == null ? DataQuality.OK : quality).getCode());

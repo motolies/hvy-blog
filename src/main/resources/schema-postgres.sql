@@ -1864,7 +1864,7 @@ CREATE TABLE IF NOT EXISTS tb_advisor_run
 
 COMMENT ON TABLE  tb_advisor_run                   IS 'AI 시장 판단 잡 실행 이력';
 COMMENT ON COLUMN tb_advisor_run.run_id            IS '실행 식별자';
-COMMENT ON COLUMN tb_advisor_run.job_type          IS '잡 유형: ADVISE | SCORE | INTRADAY | MORNING_CHECK | MORNING_ADVISE | WEEKLY_REVIEW | IC_BACKFILL | ADVISE_ADHOC (AdvisorJobType)';
+COMMENT ON COLUMN tb_advisor_run.job_type          IS '잡 유형: ADVISE | SCORE | INTRADAY | MORNING_CHECK | MORNING_ADVISE | WEEKLY_REVIEW | IC_BACKFILL | ADVISE_ADHOC | ADVISE_H20 (AdvisorJobType)';
 COMMENT ON COLUMN tb_advisor_run.trigger_type      IS '트리거 출처: SCHEDULER | API | CHAT (AdvisorTriggerType)';
 COMMENT ON COLUMN tb_advisor_run.status            IS '상태: RUNNING | SUCCESS | PARTIAL | FAILED | SKIPPED | CANCELED(관리자 취소, 2026-09-13)';
 COMMENT ON COLUMN tb_advisor_run.base_date         IS '판단 기준 거래일 (ADVISE·INTRADAY) 또는 채점 기준일';
@@ -2003,7 +2003,7 @@ COMMENT ON COLUMN tb_advisor_advice.run_id             IS '생성한 run';
 COMMENT ON COLUMN tb_advisor_advice.base_date          IS '판단 기준 거래일 (특징은 이 날짜 이하만 사용)';
 COMMENT ON COLUMN tb_advisor_advice.advice_kind        IS '판단 종류: DAILY 19:30 일일 | MORNING 07:40 아침 재판정(저녁과 같은 base_date·창) | H20 | H60 | H180 | ADHOC 채팅 수시 판단 (AdviceKind)';
 COMMENT ON COLUMN tb_advisor_advice.variant            IS '변형: LIVE 발행본 | QUANT_TOPN 정량 top-N 섀도(LLM 없음) | QUANT_TOPN_BROAD 픽 유니버스 제한 없는 정량 섀도 | LLM_NOMEM 메모리 없는 LLM 섀도 | LLM_NONEWS 뉴스 없는 LLM 섀도';
-COMMENT ON COLUMN tb_advisor_advice.horizon_days       IS '결정 호라이즌(거래일)';
+COMMENT ON COLUMN tb_advisor_advice.horizon_days       IS '결정 호라이즌(거래일): DAILY·MORNING·ADHOC 5, H20 20(M7), H60 60, H180 180 — ScoreJob 이 이 창으로 채점';
 COMMENT ON COLUMN tb_advisor_advice.regime_code        IS '시장 국면: RISK_ON | NEUTRAL | RISK_OFF';
 COMMENT ON COLUMN tb_advisor_advice.kospi_dir          IS 'KOSPI 5일 방향 예측: UP | NEUTRAL | DOWN';
 COMMENT ON COLUMN tb_advisor_advice.kosdaq_dir         IS 'KOSDAQ 5일 방향 예측';
@@ -2031,7 +2031,7 @@ COMMENT ON COLUMN tb_advisor_advice.published_at       IS 'Slack 발행 시각 (
 COMMENT ON COLUMN tb_advisor_advice.created_at         IS '생성일시';
 COMMENT ON COLUMN tb_advisor_advice.parent_advice_id   IS '아침 재판정(MORNING)이 다시 본 원 저녁 판단(DAILY LIVE) advice_id. 그 밖의 종류는 NULL (M4, 2026-09-25)';
 COMMENT ON COLUMN tb_advisor_advice.diff_json          IS '아침 재판정의 저녁 대비 조치 {parentAdviceId, keep:[{ticker,reason}], add:[…], drop:[{ticker,reason,direction,conviction}], triggers:{gap,sector,caution,any,…}, usDate}. 트리거는 호출 여부가 아니라 사후 분석(트리거일/비트리거일)용';
-COMMENT ON COLUMN tb_advisor_advice.regime_json        IS '합성 국면 스냅샷 (M6, regime-policy-v1, 2026-09-25): {indexCode, tradeDate, trend, trendScore, vol LOW|NORMAL|HIGH|UNKNOWN, volPct(σ20 의 기준일 이전 최대 5년 분포 백분위), sigma20, volHistoryDays, policy{version,longMax,convictionCap,avoidMax}, themes[{code,members,rs5,rs20,rs60,breadth,strength,leaders}]}. DAILY·ADHOC LIVE 와 LLM 섀도에 저장, MORNING·QUANT 섀도·M6 이전 행은 NULL';
+COMMENT ON COLUMN tb_advisor_advice.regime_json        IS '합성 국면 스냅샷 (M6, regime-policy-v1, 2026-09-25): {indexCode, tradeDate, trend, trendScore, vol LOW|NORMAL|HIGH|UNKNOWN, volPct(σ20 의 기준일 이전 최대 5년 분포 백분위), sigma20, volHistoryDays, policy{version,longMax,convictionCap,avoidMax}, themes[{code,members,rs5,rs20,rs60,breadth,strength,leaders}]}. DAILY·ADHOC·H20 LIVE 와 LLM 섀도에 저장(H20 의 policy 는 advisor.h20 픽 범위로 재계산), MORNING·QUANT 섀도·M6 이전 행은 NULL';
 
 CREATE INDEX IF NOT EXISTS idx_advisor_advice_run ON tb_advisor_advice (run_id);
 

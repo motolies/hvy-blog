@@ -121,6 +121,32 @@
     - 신규 도구 `marketRegime(asOf)` 는 기준일 합성 국면·정책·테마를 규칙으로 즉석 계산한다. 도구는 18종이 된다.
 - **적용 순서**: `20260925_03` SQL → 앱 배포. IC 재계산은 필요 없다(시그널·가중치 불변). 배포 뒤 첫 DAILY 에서 `regime_json` 과 `guard_json.policy` 를 확인한다.
 
+### 1.8 주간 20거래일 판단 H20 (advice-h20-v1, M7, 2026-09-25)
+
+브랜치 `feat/advisor-h20`. 매주 **금요일 20:10**(`ADVISE_H20`, 일일 수집 18:30·ADVISE 19:30~19:55 뒤) LLM 이 20거래일 보유 관점으로 고른다.
+
+- **파이프라인 공유**: `AdviseJob.advise(execution, H20)`. 종류별 차이는 `AdviseJob.KindPlan` 한 곳에 모았다.
+
+  | 종류 | 호라이즌 | 픽 범위 | 채점·IC·BROAD·LLM 섀도 | QUANT_TOPN 섀도 | 메모리(노트·교훈·실적) | 뉴스 |
+  |---|---|---|---|---|---|---|
+  | DAILY | 5 | pick-min~max | ○ | ○ | ○ | ○(설정) |
+  | ADHOC | 5 | pick-min~max | × | × | ○ | ○(설정) |
+  | H20 | 20 | `advisor.h20` 3~8 | × | ○(kind=H20·h=20) | × | × |
+
+- **게이트**: 영업일·입력 준비(DAILY 완료)·같은 기준일 H20 LIVE 없음. **금요일이 휴장이면 SKIPPED** — 다음 영업일로 옮기지 않는다(주간 표본 간격 고정).
+- **가중치**: `weightSetFor(H20)`(h=20 활성 세트)만 쓴다. **없으면 SKIPPED + `skip.WEIGHTS` 메타**, DAILY 세트로 폴백하지 않는다(폴백하면 H20 성과를 5일 점수와 분리할 수 없다).
+- **입력**: advice-v8 과 같은 모양에서 news·scoreboard·recentOutcomes·lessons 를 뺐다. `horizonDays=20`, window 는 20번째 영업일 종가 청산. 섹터 rs120 은 H60 이상에서만이라 H20 에는 없다.
+- **정책 표**: 같은 regime-policy-v1 을 H20 픽 범위로 다시 계산한다(`RegimePolicy.limits(trend, vol, 3, 8)` → BEAR LONG ≤ 6). 프롬프트 regime 블록·가드·`regime_json` 이 같은 한도를 본다.
+- **저장**: `advice_kind='H20'`, `horizon_days=20`, `prompt_version='advice-h20-v1'`, `regime_json`. ScoreJob 이 M5 인프라로 20거래일 창 하나로만 채점한다.
+- **Slack**: 별도 메시지 `📈 날짜 20일 관점 추천 (20거래일)` + 안내 문구. 채팅 스레드 히스토리가 "시장 판단" 루트를 DAILY 로 인식하므로 문구를 나눴다.
+- **채팅**: `horizonPicks(h)` 의 호라이즌 → 종류 해석을 `advisor.horizons` 맵 기반으로 바꿨다(하드코딩 제거).
+- ★ **사전 등록 판정(26주 뒤, 2027-03 말)**
+  - 지표: 같은 기준일 `H20 LIVE 픽 평균 초과(h=20) − H20 QUANT_TOPN 픽 평균 초과(h=20)` 의 날짜 대응 차이 d_i (i = 금요일, n ≈ 26).
+  - 통계: t = mean(d) / (sd(d) / √(n/4)). 보유 20거래일·간격 5거래일이라 창이 4배 겹쳐 유효 표본을 n/4 로 본다.
+  - 판정: **t ≥ 2 면 LLM 선택 유지**, t < 2 면 H20 을 QUANT_TOPN 규칙으로 대체하는 안을 검토한다(판정 전 규칙·프롬프트를 바꾸면 창을 다시 연다).
+  - SQL 은 `AdvisorKpiService.variantSummaries(from, to, H20, 20)` 의 LIVE·QUANT_TOPN 두 행과 같은 필터(data_quality='OK', LONG, MISSING 제외)를 쓴다.
+- **적용 순서**: `20260925_04` SQL(주석만) → 앱 배포 → `IC_BACKFILL?horizon=20` → 다음 WEEKLY_REVIEW 가 h=20 세트 활성(n_eff ≥ 24) → 금요일 20:10 자동 또는 `POST /api/advisor/admin/jobs/ADVISE_H20?baseDate=`.
+
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
 19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.

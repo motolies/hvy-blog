@@ -43,6 +43,11 @@ public class PromptResources {
    * 저녁 후보 안에서만 ADD. 판단 모델(judge)을 쓰고 advice-v7 과 버전을 따로 센다
    */
   public static final String MORNING_VERSION = "morning-v1";
+  /**
+   * advice-h20-v1 (2026-09-25, M7): 금요일 주간 20거래일 판단 — advice-v8 과 같은 입력 모양·출력 스키마·정책 표에서 news·scoreboard·recentOutcomes·lessons 를 뺐고
+   * thesis/risk·regime 을 20거래일 창으로 쓴다. 판단 모델(judge)을 쓰고 advice-v8 과 버전을 따로 센다
+   */
+  public static final String H20_VERSION = "advice-h20-v1";
   static final String BASE = "prompts/advisor/";
 
   private final String adviceSystem;
@@ -55,6 +60,8 @@ public class PromptResources {
   private final String noteSha256;
   private final String morningSystem;
   private final String morningSha256;
+  private final String h20System;
+  private final String h20Sha256;
 
   public PromptResources() {
     this.adviceSystem = load(BASE + "advice-system-v8.md");
@@ -67,6 +74,8 @@ public class PromptResources {
     this.noteSha256 = sha256(noteSystem);
     this.morningSystem = load(BASE + "advice-morning-v1.md");
     this.morningSha256 = sha256(morningSystem);
+    this.h20System = load(BASE + "advice-h20-v1.md");
+    this.h20Sha256 = sha256(h20System);
   }
 
   public String adviceSystem() {
@@ -107,6 +116,14 @@ public class PromptResources {
 
   public String morningSha256() {
     return morningSha256;
+  }
+
+  public String h20System() {
+    return h20System;
+  }
+
+  public String h20Sha256() {
+    return h20Sha256;
   }
 
   static String load(String path) {

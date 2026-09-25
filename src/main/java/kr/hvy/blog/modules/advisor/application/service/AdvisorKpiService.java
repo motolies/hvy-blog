@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -15,6 +16,9 @@ import org.springframework.stereotype.Service;
  * KPI 집계 (결정 호라이즌만). 시그널 층은 IC, LLM 층은 픽 평균 초과수익 − 후보군 평균 초과수익 ± se 가 1차 KPI 이고 승률은 보조, Brier 는 보정 전용.
  * <p>
  * 학습·KPI 는 LONG 픽만(AVOID 는 별도 집계), data_quality=OK 인 판단만 센다. 셀 t>2 는 우연으로 ≈5% 나오므로 판정은 최소 6개월 뒤에.
+ * <p>
+ * 멀티 호라이즌(M5): 변형 요약·국면·보정·최근 픽은 (종류, 호라이즌) 을 받는 버전이 있다 — 인자 없는 버전은 DAILY·결정 호라이즌(5)으로 기존 결과와 같다.
+ * 프롬프트 실적 블록·Slack 스코어보드·교훈 입력(보정 표)·300 게이트는 계속 DAILY 만 본다.
  */
 @Service
 @RequiredArgsConstructor
@@ -40,19 +44,36 @@ public class AdvisorKpiService {
   private final NamedParameterJdbcTemplate jdbc;
   private final AdvisorProperties properties;
 
+  /**
+   * DAILY·결정 호라이즌의 변형별 요약.
+   */
   public List<VariantSummary> variantSummaries(LocalDate from, LocalDate to) {
+    return variantSummaries(from, to, AdviceKind.DAILY, properties.getHorizonDays());
+  }
+
+  /**
+   * 종류·호라이즌의 변형별 요약 (예: H20·20, DAILY·20 진단).
+   */
+  public List<VariantSummary> variantSummaries(LocalDate from, LocalDate to, AdviceKind kind, int horizonDays) {
     List<VariantSummary> result = new ArrayList<>();
     for (AdviceVariant variant : AdviceVariant.values()) {
-      result.add(variantSummary(variant, from, to));
+      result.add(variantSummary(variant, from, to, kind, horizonDays));
     }
     return result;
   }
 
   /**
-   * 변형별 픽 KPI: 승률(초과수익>0), 평균 초과수익 ± se, 비용 차감 평균, 후보군 평균, 부가가치(픽 − 후보군).
+   * DAILY·결정 호라이즌의 변형 요약.
    */
   public VariantSummary variantSummary(AdviceVariant variant, LocalDate from, LocalDate to) {
-    Map<String, Object> p = params(from, to);
+    return variantSummary(variant, from, to, AdviceKind.DAILY, properties.getHorizonDays());
+  }
+
+  /**
+   * 변형별 픽 KPI: 승률(초과수익>0), 평균 초과수익 ± se, 비용 차감 평균, 후보군 평균, 부가가치(픽 − 후보군). kind·h 의 채점 행만 센다.
+   */
+  public VariantSummary variantSummary(AdviceVariant variant, LocalDate from, LocalDate to, AdviceKind kind, int horizonDays) {
+    Map<String, Object> p = params(from, to, kind, horizonDays);
     p.put("variant", variant.getCode());
     Map<String, Object> pick = jdbc.queryForMap("""
         SELECT COUNT(DISTINCT a.advice_id) AS advices, COUNT(*) AS n,
@@ -61,7 +82,7 @@ public class AdvisorKpiService {
         FROM tb_advisor_pick pk
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
+        WHERE a.advice_kind = :kind AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         """, p);
     Map<String, Object> avoid = jdbc.queryForMap("""
@@ -69,14 +90,14 @@ public class AdvisorKpiService {
         FROM tb_advisor_pick pk
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
+        WHERE a.advice_kind = :kind AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND pk.direction = 'AVOID' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         """, p);
     Map<String, Object> pool = jdbc.queryForMap("""
         SELECT AVG(s.excess_ret) AS mean_excess
         FROM tb_advisor_candidate_score s
                  JOIN tb_advisor_advice a ON a.advice_id = s.advice_id
-        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
+        WHERE a.advice_kind = :kind AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND s.horizon_days = :h AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         """, p);
     int n = ((Number) pick.get("n")).intValue();
@@ -89,15 +110,22 @@ public class AdvisorKpiService {
   }
 
   /**
-   * 국면(지수 방향) 콜 요약: 적중률·평균 Brier·Brier skill = 1 − Brier/0.25.
+   * DAILY·결정 호라이즌의 국면 콜 요약.
    */
   public RegimeSummary regimeSummary(AdviceVariant variant, LocalDate from, LocalDate to) {
-    Map<String, Object> p = params(from, to);
+    return regimeSummary(variant, from, to, AdviceKind.DAILY, properties.getHorizonDays());
+  }
+
+  /**
+   * 국면(지수 방향) 콜 요약: 적중률·평균 Brier·Brier skill = 1 − Brier/0.25. kind·h 의 채점 행만 센다.
+   */
+  public RegimeSummary regimeSummary(AdviceVariant variant, LocalDate from, LocalDate to, AdviceKind kind, int horizonDays) {
+    Map<String, Object> p = params(from, to, kind, horizonDays);
     p.put("variant", variant.getCode());
     Map<String, Object> row = jdbc.queryForMap("""
         SELECT COUNT(*) AS n, AVG(CASE WHEN c.hit THEN 1.0 ELSE 0.0 END) AS hit_rate, AVG(c.brier) AS brier
         FROM tb_advisor_call_score c JOIN tb_advisor_advice a ON a.advice_id = c.advice_id
-        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type = 'INDEX' AND c.horizon_days = :h AND c.status = 'SCORED'
+        WHERE a.advice_kind = :kind AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type = 'INDEX' AND c.horizon_days = :h AND c.status = 'SCORED'
         """, p);
     Double brier = d(row.get("brier"));
     return new RegimeSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), brier, brier == null ? null : 1 - brier / 0.25);
@@ -218,26 +246,40 @@ public class AdvisorKpiService {
   }
 
   /**
-   * 신뢰도 버킷별 보정 표 (LIVE, LONG).
+   * DAILY·결정 호라이즌 보정 표 — 교훈(WEEKLY_REVIEW)·프롬프트 실적 블록의 입력.
    */
   public List<CalibrationRow> calibration(LocalDate from, LocalDate to) {
-    Map<String, Object> p = params(from, to);
+    return calibration(from, to, AdviceKind.DAILY, properties.getHorizonDays());
+  }
+
+  /**
+   * 신뢰도 버킷별 보정 표 (LIVE, LONG, kind·h).
+   */
+  public List<CalibrationRow> calibration(LocalDate from, LocalDate to, AdviceKind kind, int horizonDays) {
+    Map<String, Object> p = params(from, to, kind, horizonDays);
     return jdbc.query("""
         SELECT pk.conviction, COUNT(*) AS n, AVG(CASE WHEN s.excess_ret > 0 THEN 1.0 ELSE 0.0 END) AS hit_rate, AVG(s.excess_ret) AS mean_excess
         FROM tb_advisor_pick pk
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.advice_kind = 'DAILY' AND a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
+        WHERE a.advice_kind = :kind AND a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         GROUP BY pk.conviction ORDER BY pk.conviction
         """, p, (rs, i) -> new CalibrationRow(rs.getDouble("conviction"), rs.getInt("n"), d(rs.getObject("hit_rate")), d(rs.getObject("mean_excess"))));
   }
 
   /**
-   * 최근 채점된 LIVE 픽 (최신순).
+   * DAILY·결정 호라이즌의 최근 채점 LIVE 픽.
    */
   public List<RecentPick> recentPicks(LocalDate from, LocalDate to, int limit) {
-    Map<String, Object> p = params(from, to);
+    return recentPicks(from, to, limit, AdviceKind.DAILY, properties.getHorizonDays());
+  }
+
+  /**
+   * 최근 채점된 LIVE 픽 (최신순, kind·h).
+   */
+  public List<RecentPick> recentPicks(LocalDate from, LocalDate to, int limit, AdviceKind kind, int horizonDays) {
+    Map<String, Object> p = params(from, to, kind, horizonDays);
     p.put("limit", limit);
     return jdbc.query("""
         SELECT a.base_date, pk.ticker, c.stock_name, pk.conviction, s.excess_ret
@@ -245,7 +287,7 @@ public class AdvisorKpiService {
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate c ON c.advice_id = pk.advice_id AND c.ticker = pk.ticker
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.advice_kind = 'DAILY' AND a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to AND pk.direction = 'LONG' AND s.status <> 'MISSING'
+        WHERE a.advice_kind = :kind AND a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to AND pk.direction = 'LONG' AND s.status <> 'MISSING'
         ORDER BY a.base_date DESC, pk.pick_rank LIMIT :limit
         """, p, (rs, i) -> {
       Double excess = d(rs.getObject("excess_ret"));
@@ -313,11 +355,19 @@ public class AdvisorKpiService {
     return lines;
   }
 
+  /**
+   * DAILY·결정 호라이즌 파라미터 (추세·아침 점검·대응 비교처럼 DAILY 전용 집계).
+   */
   private Map<String, Object> params(LocalDate from, LocalDate to) {
+    return params(from, to, AdviceKind.DAILY, properties.getHorizonDays());
+  }
+
+  private Map<String, Object> params(LocalDate from, LocalDate to, AdviceKind kind, int horizonDays) {
     Map<String, Object> p = new LinkedHashMap<>();
     p.put("from", from);
     p.put("to", to);
-    p.put("h", properties.getHorizonDays());
+    p.put("h", horizonDays);
+    p.put("kind", kind.getCode());
     return p;
   }
 

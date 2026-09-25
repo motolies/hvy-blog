@@ -266,8 +266,13 @@ gdelt:
 # AI 시장 판단(advisor, 2026-09-13). 임계값은 AdvisorProperties 주석 참조. 피드백 기능은 표본 게이트(lesson.min-picks·ic.min-n-eff)로 잠근다
 advisor:
   enabled: ${ADVISOR_ENABLED:false}
-  horizon-days: 5                 # 결정 호라이즌(거래일) — 채점·KPI·학습은 이 값 하나만
-  diagnostic-horizons: [1, 20]    # 진단 저장만(학습·KPI 미포함)
+  horizon-days: 5                 # DAILY·MORNING 결정 호라이즌(거래일). horizons 에 같은 키가 DAILY 로 있어야 함(기동 검증)
+  diagnostic-horizons: [1, 20]    # DAILY·MORNING 진단 채점만(학습·KPI 미포함)
+  horizons:                       # M5 멀티 호라이즌: 호라이즌 → 종류·가중치 학습·IC 창(비면 ic.window-days). IC 는 전부 저장, 학습은 learn 만
+    5: { kind: DAILY, learn: true }
+    20: { kind: H20, learn: true, ic-window: 480 }   # n_eff = 480/20 = 24 (ic.min-n-eff 와 같은 게이트)
+    60: { kind: H60, learn: false }                  # 모니터링 IC 만 — 겹치는 코호트로 n_eff 가 작아 학습하지 않는다
+    180: { kind: H180, learn: false }
   candidate-limit: 30             # LLM 후보 상한 (≈2,500 토큰)
   max-per-sector: 4
   markets: [KOSPI]                # 스크리닝·rank-IC 유니버스 시장(MarketType 코드, advice-v5). 바꾸면 IC_BACKFILL 을 baseDate 없이 재실행해 IC 재기준화

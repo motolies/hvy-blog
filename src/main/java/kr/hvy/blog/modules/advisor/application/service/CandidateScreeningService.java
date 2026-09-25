@@ -6,7 +6,10 @@ import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
 import kr.hvy.blog.modules.advisor.domain.code.SignalCode;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
@@ -52,11 +55,28 @@ public class CandidateScreeningService {
   }
 
   /**
-   * 활성 가중치 세트로 지정 픽 유니버스의 후보를 뽑는다 (QUANT_TOPN_BROAD 섀도는 ALL).
+   * DAILY 활성 가중치 세트로 지정 픽 유니버스의 후보를 뽑는다 (QUANT_TOPN_BROAD 섀도는 ALL). DAILY 세트는 시드로 항상 있어야 하므로 없으면 예외.
    */
   public ScreeningResult screen(LocalDate baseDate, PickUniverse universe) {
-    WeightSet set = weightSets.active().orElseThrow(() -> new IllegalStateException("활성 가중치 세트가 없습니다 (advisor-seed.sql 적용 필요)"));
-    return screen(baseDate, set, properties.getCandidateLimit(), properties.getMaxPerSector(), universe);
+    return screen(baseDate, AdviceKind.DAILY, universe)
+        .orElseThrow(() -> new IllegalStateException("활성 가중치 세트가 없습니다 (advisor-seed.sql 적용 필요)"));
+  }
+
+  /**
+   * 판단 종류의 결정 호라이즌 활성 가중치 세트로 후보를 뽑는다(M5). 그 호라이즌의 활성 세트가 없으면 empty — 호출자(H20 발행 잡)는 발행을 SKIP 하고
+   * 사유를 run 메타에 남긴다. DAILY(h=5) 세트로 폴백하지 않는 이유: 5일 IC 로 학습한 배수를 20일 판단에 쓰면 "H20 판단" 이 사실상 DAILY 점수의 재포장이 되어
+   * H20 성과를 5일 가중치와 분리해 잴 수 없다(섀도 비교가 무의미해진다).
+   */
+  public Optional<ScreeningResult> screen(LocalDate baseDate, AdviceKind kind, PickUniverse universe) {
+    return weightSetFor(kind).map(set -> screen(baseDate, set, properties.getCandidateLimit(), properties.getMaxPerSector(), universe));
+  }
+
+  /**
+   * 판단 종류의 결정 호라이즌 활성 가중치 세트 (DAILY·MORNING·ADHOC = h 5, H20 = h 20 …). 호라이즌이 맵에 없거나 세트가 아직 없으면 empty.
+   */
+  public Optional<WeightSet> weightSetFor(AdviceKind kind) {
+    OptionalInt h = properties.horizonOf(kind);
+    return h.isPresent() ? weightSets.active(h.getAsInt()) : Optional.empty();
   }
 
   /**

@@ -79,12 +79,12 @@ class WeeklyReviewJobTest {
     when(calendar.previousTradingDays(any(), anyInt())).thenReturn(List.of(today.minusDays(14)));
     when(notes.countStaleOpen(any())).thenReturn(0);
     when(adviceWriter.findRange(any(), any(), any(), any(), anyInt())).thenReturn(List.of());
-    when(icService.computeIncremental(any())).thenReturn(Optional.empty());
+    when(icService.computeIncremental(any())).thenReturn(List.of());
     when(icService.latestScorableDate(anyInt())).thenReturn(Optional.of(today.minusDays(7)));
     WeightSet active = WeightSet.builder().weightSetId(1L).source(WeightSetSource.SEED).active(true).weights(List.of(
         SignalWeightRow.builder().signalCode("MOM_20D").baseWeight(0.12).multiplier(1).weight(0.12).enabled(true).build(),
         SignalWeightRow.builder().signalCode("TV_SURGE").baseWeight(0.10).multiplier(1).weight(0.10).enabled(true).build())).build();
-    when(weightSets.active()).thenReturn(Optional.of(active));
+    when(weightSets.active(5)).thenReturn(Optional.of(active));
     when(weightSets.insert(any(), any(Boolean.class))).thenReturn(2L);
     when(kpi.variantSummaries(any(), any())).thenReturn(List.of(
         new AdvisorKpiService.VariantSummary(AdviceVariant.LIVE, 10, 60, 0.55, 0.006, 0.004, 0.003, 0.002, 0.004, null, 0)));
@@ -108,7 +108,7 @@ class WeeklyReviewJobTest {
     WeightSet proposed = WeightSet.builder().source(WeightSetSource.WEEKLY).nEff(24).weights(List.of(
         SignalWeightRow.builder().signalCode("MOM_20D").baseWeight(0.12).multiplier(1.5).weight(0.16).enabled(true).icMean(0.045).tStat(3.2).nDays(120).build(),
         SignalWeightRow.builder().signalCode("TV_SURGE").baseWeight(0.10).multiplier(0.5).weight(0.06).enabled(true).icMean(-0.01).tStat(-1.0).nDays(120).flagged(true).build())).build();
-    when(icService.proposeWeightSet(any(), any(), any())).thenReturn(Optional.of(proposed));
+    when(icService.proposeWeightSet(org.mockito.ArgumentMatchers.eq(5), any(), any(), any())).thenReturn(Optional.of(proposed));
 
     AdvisorExecution execution = execution();
     job.execute(execution);
@@ -125,8 +125,11 @@ class WeeklyReviewJobTest {
     verify(notifier).publish(any());
     assertThat(execution.metadata("promptInputsDeleted")).isEqualTo(3);
     assertThat(execution.steps()).extracting(AdvisorExecution.StepResult::name)
-        .containsExactly("SCORE", "IC", "WEIGHTS", "LESSONS", "REPRO", "KPI", "MEMORY", "REPORT", "CLEANUP");
-    assertThat(execution.steps().get(3).status()).isEqualTo("SKIPPED");
+        .containsExactly("SCORE", "IC", "WEIGHTS", "WEIGHTS@20", "LESSONS", "REPRO", "KPI", "MEMORY", "REPORT", "CLEANUP");
+    assertThat(execution.steps().get(4).status()).isEqualTo("SKIPPED");
+    // M5: h=20 은 활성 세트가 없고 제안도 게이트 미달(empty) — DAILY 세트는 한 번만 저장되고 보고에 [h=20] 줄이 남는다
+    verify(icService).proposeWeightSet(org.mockito.ArgumentMatchers.eq(20), any(), any(), any());
+    verify(weightSets, org.mockito.Mockito.times(1)).insert(any(), any(Boolean.class));
     // note-v1: NOMEM 쌍이 없으면 "쌍 없음", 확정 지연 노트 0건
     ArgumentCaptor<kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage> message =
         ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage.class);
@@ -138,7 +141,7 @@ class WeeklyReviewJobTest {
   @Test
   @DisplayName("note-v1: 같은 기준일의 LIVE·LLM_NOMEM 쌍이 있으면 픽 Jaccard 평균·공통 티커 |Δconviction| 평균을 보고하고, 확정 지연 노트 수를 경보 줄로 낸다")
   void memoryComparisonLines() {
-    when(icService.proposeWeightSet(any(), any(), any())).thenReturn(Optional.empty());
+    when(icService.proposeWeightSet(org.mockito.ArgumentMatchers.eq(5), any(), any(), any())).thenReturn(Optional.empty());
     LocalDate d1 = today.minusDays(3);
     LocalDate d2 = today.minusDays(2);
     when(adviceWriter.findRange(any(), any(), any(), org.mockito.ArgumentMatchers.eq(AdviceVariant.LIVE), anyInt())).thenReturn(List.of(
@@ -177,7 +180,7 @@ class WeeklyReviewJobTest {
   @DisplayName("메모리가 켜지면 보조 모델로 교훈을 제안·검증하고, 가중치 단계 예외는 격리되어 PARTIAL")
   void lessonsWhenMemoryOnAndWeightFailureIsolated() {
     when(adviceWriter.countLivePicks(AdviceKind.DAILY)).thenReturn(500);
-    when(icService.proposeWeightSet(any(), any(), any())).thenThrow(new IllegalStateException("ic boom"));
+    when(icService.proposeWeightSet(org.mockito.ArgumentMatchers.eq(5), any(), any(), any())).thenThrow(new IllegalStateException("ic boom"));
     when(lessonService.review(any())).thenReturn(List.of(9L));
     when(lessonService.cells(any(), any())).thenReturn(List.of());
     when(lessonService.reviewPayload(any(), any(), org.mockito.ArgumentMatchers.anyDouble())).thenReturn(Map.of("cells", List.of()));

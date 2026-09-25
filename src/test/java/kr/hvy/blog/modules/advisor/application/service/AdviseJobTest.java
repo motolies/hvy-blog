@@ -103,7 +103,7 @@ class AdviseJobTest {
     when(adviceWriter.firstNewsAdviceDate(AdviceKind.DAILY)).thenReturn(Optional.empty());
     when(adviceWriter.firstMemoryAdviceDate(AdviceKind.DAILY)).thenReturn(Optional.empty());
     when(gate.decide(any(), any())).thenReturn(new AdvisorGateService.Decision(true, false, true, false, DataQuality.OK, "DAILY 완료"));
-    when(icService.computeIncremental(any())).thenReturn(Optional.empty());
+    when(icService.computeIncremental(any())).thenReturn(List.of());
     when(marketFeatures.features(base)).thenReturn(AdvicePromptBuilderTest.market());
     when(screening.screen(base)).thenReturn(AdvicePromptBuilderTest.screening(8));
     when(weightSets.find(1L)).thenReturn(Optional.of(WeightSet.builder().weightSetId(1L).source(WeightSetSource.SEED).active(true)
@@ -387,15 +387,20 @@ class AdviseJobTest {
   @Test
   @DisplayName("IC 증분이 상한에 잘리면 경고와 icGapFrom 메타를 남기되 run 상태는 SUCCESS 그대로")
   void icGapIsWarnedNotFailed() {
-    when(icService.computeIncremental(any())).thenReturn(Optional.of(
-        new SignalIcService.IncrementalResult(LocalDate.of(2026, 7, 28), LocalDate.of(2026, 9, 4), LocalDate.of(2020, 1, 1), 480, 2)));
+    when(icService.computeIncremental(any())).thenReturn(List.of(
+        new SignalIcService.IncrementalResult(LocalDate.of(2026, 7, 28), LocalDate.of(2026, 9, 4), LocalDate.of(2020, 1, 1), 480, 2, 5),
+        new SignalIcService.IncrementalResult(LocalDate.of(2026, 6, 20), LocalDate.of(2026, 8, 5), LocalDate.of(2020, 1, 1), 300, 2, 20)));
     AdvisorExecution execution = execution();
     job.execute(execution);
     assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SUCCESS);
     assertThat(execution.metadata("icRange")).isEqualTo("2026-07-28~2026-09-04");
     assertThat(execution.metadata("icGapFrom")).isEqualTo("2020-01-01");
     assertThat(execution.metadata("icChunks")).isEqualTo(2);
-    assertThat(execution.warnings()).anySatisfy(w -> assertThat(w).contains("IC 공백 2020-01-01~2026-07-27").contains("IC_BACKFILL?baseDate=2020-01-01"));
+    assertThat(execution.warnings()).anySatisfy(w -> assertThat(w).contains("IC 공백 2020-01-01~2026-07-27").contains("IC_BACKFILL?baseDate=2020-01-01 "));
+    // M5: DAILY 결정 호라이즌(5)은 기존 키, 그 밖(20)은 "@h" 접미 키와 horizon 파라미터가 붙은 보충 명령
+    assertThat(execution.metadata("icRange@20")).isEqualTo("2026-06-20~2026-08-05");
+    assertThat(execution.metadata("icGapFrom@20")).isEqualTo("2020-01-01");
+    assertThat(execution.warnings()).anySatisfy(w -> assertThat(w).contains("IC 공백(h=20)").contains("IC_BACKFILL?baseDate=2020-01-01&horizon=20"));
   }
 
   private AdvisorExecution execution() {

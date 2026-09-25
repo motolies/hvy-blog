@@ -14,21 +14,23 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 가중치 세트 저장·조회 (tb_advisor_weight_set + tb_advisor_signal_weight). 활성 세트는 부분 유니크로 하나만 존재한다.
+ * 가중치 세트 저장·조회 (tb_advisor_weight_set + tb_advisor_signal_weight). 활성 세트는 부분 유니크(uk_advisor_weight_set_active_horizon)로
+ * 학습 호라이즌마다 하나만 존재한다(M5) — 활성화·비활성화는 항상 같은 호라이즌 안에서만 일어난다.
  */
 @Repository
 @RequiredArgsConstructor
 public class WeightSetRepository {
 
-  private static final String SET_COLUMNS = "weight_set_id, as_of, window_days, n_eff, source, is_active, reason, run_id";
+  private static final String SET_COLUMNS = "weight_set_id, as_of, window_days, n_eff, source, is_active, reason, run_id, horizon_days";
 
   private final JdbcTemplate jdbc;
 
   /**
-   * 활성 세트 (시드가 적용됐다면 항상 존재).
+   * 호라이즌 h 의 활성 세트. h=5(DAILY)는 시드가 적용됐다면 항상 존재하고, h=20 은 첫 IC_BACKFILL·WEEKLY_REVIEW 가 게이트를 넘기 전까지 없다.
    */
-  public Optional<WeightSet> active() {
-    return jdbc.query("SELECT " + SET_COLUMNS + " FROM tb_advisor_weight_set WHERE is_active ORDER BY weight_set_id DESC LIMIT 1", SET_MAPPER)
+  public Optional<WeightSet> active(int horizonDays) {
+    return jdbc.query("SELECT " + SET_COLUMNS + " FROM tb_advisor_weight_set WHERE is_active AND horizon_days = ? ORDER BY weight_set_id DESC LIMIT 1",
+            SET_MAPPER, horizonDays)
         .stream().findFirst().map(this::withWeights);
   }
 
@@ -37,22 +39,32 @@ public class WeightSetRepository {
         .stream().findFirst().map(this::withWeights);
   }
 
-  public List<WeightSet> recent(int limit) {
-    return jdbc.query("SELECT " + SET_COLUMNS + " FROM tb_advisor_weight_set ORDER BY weight_set_id DESC LIMIT ?", SET_MAPPER, limit)
-        .stream().map(this::withWeights).toList();
+  /**
+   * 최근 세트 (최신순). horizonDays 가 null 이면 전 호라이즌.
+   */
+  public List<WeightSet> recent(Integer horizonDays, int limit) {
+    List<WeightSet> sets = horizonDays == null
+        ? jdbc.query("SELECT " + SET_COLUMNS + " FROM tb_advisor_weight_set ORDER BY weight_set_id DESC LIMIT ?", SET_MAPPER, limit)
+        : jdbc.query("SELECT " + SET_COLUMNS + " FROM tb_advisor_weight_set WHERE horizon_days = ? ORDER BY weight_set_id DESC LIMIT ?", SET_MAPPER,
+            horizonDays, limit);
+    return sets.stream().map(this::withWeights).toList();
   }
 
   /**
-   * 새 세트를 저장한다. activate=true 면 기존 활성 세트를 내리고 이 세트를 활성화한다 (한 트랜잭션).
+   * 새 세트를 저장한다. activate=true 면 같은 호라이즌의 기존 활성 세트를 내리고 이 세트를 활성화한다 (한 트랜잭션). 다른 호라이즌의 활성 세트는 건드리지 않는다.
+   * 호라이즌이 비어 있으면(0) 거부한다 — 빌더 기본값 0 이 조용히 새 호라이즌을 만드는 것을 막는다.
    */
   @Transactional
   public long insert(WeightSet set, boolean activate) {
-    if (activate) {
-      jdbc.update("UPDATE tb_advisor_weight_set SET is_active = FALSE WHERE is_active");
+    if (set.horizonDays() <= 0) {
+      throw new IllegalArgumentException("가중치 세트의 horizonDays 가 비어 있습니다: " + set.horizonDays());
     }
-    Long id = jdbc.queryForObject("INSERT INTO tb_advisor_weight_set (as_of, window_days, n_eff, source, is_active, reason, run_id) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING weight_set_id", Long.class,
-        set.asOf(), set.windowDays(), set.nEff(), set.source().getCode(), activate, set.reason(), set.runId());
+    if (activate) {
+      jdbc.update("UPDATE tb_advisor_weight_set SET is_active = FALSE WHERE is_active AND horizon_days = ?", set.horizonDays());
+    }
+    Long id = jdbc.queryForObject("INSERT INTO tb_advisor_weight_set (as_of, window_days, n_eff, source, is_active, reason, run_id, horizon_days) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING weight_set_id", Long.class,
+        set.asOf(), set.windowDays(), set.nEff(), set.source().getCode(), activate, set.reason(), set.runId(), set.horizonDays());
     jdbc.batchUpdate("INSERT INTO tb_advisor_signal_weight (weight_set_id, signal_code, base_weight, multiplier, weight, enabled, ic_mean, ic_se, "
             + "t_stat, n_days, flagged, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         set.weights(), set.weights().size(), (ps, w) -> {
@@ -73,14 +85,15 @@ public class WeightSetRepository {
   }
 
   /**
-   * 기존 세트를 활성화한다 (수동 롤백).
+   * 기존 세트를 활성화한다 (수동 롤백). 그 세트의 호라이즌 안에서만 활성 세트를 바꾼다.
    */
   @Transactional
   public void activate(long weightSetId) {
-    if (jdbc.queryForObject("SELECT COUNT(*) FROM tb_advisor_weight_set WHERE weight_set_id = ?", Integer.class, weightSetId) == 0) {
+    List<Integer> horizon = jdbc.queryForList("SELECT horizon_days FROM tb_advisor_weight_set WHERE weight_set_id = ?", Integer.class, weightSetId);
+    if (horizon.isEmpty()) {
       throw new NoSuchElementException("가중치 세트를 찾을 수 없습니다: " + weightSetId);
     }
-    jdbc.update("UPDATE tb_advisor_weight_set SET is_active = FALSE WHERE is_active");
+    jdbc.update("UPDATE tb_advisor_weight_set SET is_active = FALSE WHERE is_active AND horizon_days = ?", horizon.getFirst());
     jdbc.update("UPDATE tb_advisor_weight_set SET is_active = TRUE WHERE weight_set_id = ?", weightSetId);
   }
 
@@ -100,6 +113,7 @@ public class WeightSetRepository {
       .reason(rs.getString("reason"))
       .runId(AdvisorJdbc.nullableLong(rs, "run_id"))
       .weights(List.of())
+      .horizonDays(rs.getInt("horizon_days"))
       .build();
 
   static final RowMapper<SignalWeightRow> WEIGHT_MAPPER = (rs, i) -> SignalWeightRow.builder()

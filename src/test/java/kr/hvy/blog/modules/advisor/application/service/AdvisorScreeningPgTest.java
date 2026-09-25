@@ -1,6 +1,7 @@
 package kr.hvy.blog.modules.advisor.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -254,9 +255,15 @@ class AdvisorScreeningPgTest {
     assertThat(icService.latestScorableDate(5)).contains(to);
 
     assertThat(icService.computeAndStore(DATES.getFirst(), to)).isEqualTo(rows.size());
-    assertThat(icService.computeIncremental(runAll())).as("이미 최신까지 계산됨").isEmpty();
+    assertThat(icService.computeIncremental(5, runAll())).as("이미 최신까지 계산됨").isEmpty();
 
     WeightSet proposed = icService.proposeWeightSet(to, WeightSetSource.BACKFILL, null).orElseThrow();
+    // h=5 회귀 고정(M5): 창 120, 세트 호라이즌 5. n_eff 는 학습 시그널 중 최소(20일 창이 차야 값이 생기는 시그널은 IC 5일 → 5/5 = 1.0)
+    assertThat(proposed.horizonDays()).isEqualTo(5);
+    assertThat(proposed.windowDays()).isEqualTo(120);
+    assertThat(proposed.nEff()).isEqualTo(1.0);
+    assertThat(byCodeNDays(proposed, "MOM_20D")).as("MOM_20D 는 IC 25일").isEqualTo(25);
+    assertThat(proposed.reason()).isEqualTo("BACKFILL IC 창 120일, n_eff 1.0");
     Map<String, SignalWeightRow> byCode = proposed.byCode();
     assertThat(byCode.get("MOM_20D").multiplier()).as("IC 1.0 → raw 33 → 상한").isEqualTo(2.0);
     assertThat(byCode.get("MOM_20D").icMean()).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-6));
@@ -274,7 +281,7 @@ class AdvisorScreeningPgTest {
     properties.getIc().setIncrementalMaxDays(10);
     LocalDate to = DATES.get(24); // 계산 가능한 마지막 기준일 (d+5 = DATES[29])
     List<String> chunkNames = new ArrayList<>();
-    SignalIcService.IncrementalResult result = icService.computeIncremental((name, body) -> {
+    SignalIcService.IncrementalResult result = icService.computeIncremental(5, (name, body) -> {
       chunkNames.add(name);
       body.run();
       return true;
@@ -290,7 +297,69 @@ class AdvisorScreeningPgTest {
     assertThat(minStored).as("상한 밖(공백)은 저장되지 않는다").isAfterOrEqualTo(to.minusDays(10));
     assertThat(result.rows()).isPositive();
 
-    assertThat(icService.computeIncremental(runAll())).as("두 번째 호출은 최신까지 계산된 상태라 empty").isEmpty();
+    assertThat(icService.computeIncremental(5, runAll())).as("두 번째 호출은 최신까지 계산된 상태라 empty").isEmpty();
+  }
+
+  @Test
+  @DisplayName("M5 룩어헤드: 호라이즌 h 의 IC 는 d+h 영업일이 캘린더에 있는 d 만 계산한다 — 30영업일이면 h=20 은 앞 10일, h=60 은 0일")
+  void horizonIcRequiresExitClose() {
+    List<SignalIcRow> h20 = icService.compute(DATES.getFirst(), BASE, 20);
+    assertThat(h20).isNotEmpty().allMatch(r -> r.horizonDays() == 20);
+    assertThat(h20.stream().map(SignalIcRow::tradeDate).max(LocalDate::compareTo)).as("d+20 = DATES[29] 가 마지막").contains(DATES.get(9));
+    assertThat(h20.stream().filter(r -> r.signalCode().equals("MOM_20D"))).hasSize(10).allMatch(r -> r.rankIc() > 0.999 && r.n() == 40);
+    assertThat(icService.latestScorableDate(20)).contains(DATES.get(9));
+    assertThat(icService.compute(DATES.getFirst(), BASE, 60)).as("d+60 이 없으면 IC 행이 없다").isEmpty();
+    assertThat(icService.latestScorableDate(60)).isEmpty();
+  }
+
+  @Test
+  @DisplayName("M5: h=20 IC 는 별도 행으로 저장되어 h=5 행을 덮어쓰지 않고, 증분은 호라이즌마다 따로 돌며 계산할 날이 없는 60·180 은 빠진다")
+  void horizonIcStoredSeparately() {
+    int h5 = icService.computeAndStore(DATES.getFirst(), BASE, 5);
+    List<Map<String, Object>> before = jdbc.queryForList(
+        "SELECT signal_code, trade_date, rank_ic, n FROM tb_advisor_signal_ic_daily WHERE horizon_days = 5 ORDER BY 1, 2");
+    int h20 = icService.computeAndStore(DATES.getFirst(), BASE, 20);
+    assertThat(h20).isPositive().isLessThan(h5);
+    assertThat(jdbc.queryForList("SELECT signal_code, trade_date, rank_ic, n FROM tb_advisor_signal_ic_daily WHERE horizon_days = 5 ORDER BY 1, 2"))
+        .as("h=5 행 불변").isEqualTo(before);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_advisor_signal_ic_daily WHERE horizon_days = 20", Integer.class)).isEqualTo(h20);
+
+    jdbc.update("TRUNCATE tb_advisor_signal_ic_daily");
+    List<SignalIcService.IncrementalResult> results = icService.computeIncremental(runAll());
+    assertThat(results).extracting(SignalIcService.IncrementalResult::horizonDays).as("IC 대상 5·20·60·180 중 계산할 날이 있는 것만").containsExactly(5, 20);
+    assertThat(results).extracting(SignalIcService.IncrementalResult::to).containsExactly(DATES.get(24), DATES.get(9));
+    assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT trade_date) FROM tb_advisor_signal_ic_daily WHERE horizon_days = 20", Integer.class)).isEqualTo(10);
+    assertThat(icService.computeIncremental(runAll())).as("모두 최신").isEmpty();
+  }
+
+  @Test
+  @DisplayName("M5: h=20 가중치는 그 호라이즌 창(480)·n_eff = IC 일수/20 으로 산출하고, 첫 학습은 DAILY 세트의 사전 가중치에서 출발한다. 모니터링 호라이즌은 거부")
+  void horizonWeightSetUsesItsOwnWindow() {
+    icService.computeAndStore(DATES.getFirst(), BASE, 5);
+    icService.computeAndStore(DATES.getFirst(), BASE, 20);
+    properties.getIc().setMinNEff(1);
+    assertThat(icService.proposeWeightSet(20, DATES.get(9), WeightSetSource.BACKFILL, null)).as("IC 10일 / 20 = 0.5 < 게이트 1").isEmpty();
+
+    properties.getIc().setMinNEff(0);
+    WeightSet h20 = icService.proposeWeightSet(20, DATES.get(9), WeightSetSource.BACKFILL, null).orElseThrow();
+    assertThat(h20.horizonDays()).isEqualTo(20);
+    assertThat(h20.windowDays()).isEqualTo(480);
+    assertThat(h20.nEff()).isEqualTo(0.5);
+    assertThat(h20.reason()).isEqualTo("BACKFILL h=20 IC 창 480일, n_eff 0.5");
+    SignalWeightRow mom = h20.byCode().get("MOM_20D");
+    assertThat(mom.nDays()).as("h=5 IC 행이 섞이지 않는다").isEqualTo(10);
+    assertThat(mom.icMean()).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-6));
+    assertThat(mom.baseWeight()).as("DAILY 시드의 사전 가중치").isEqualTo(0.12);
+    // 축소: m̂ = 1 + 0.5/(0.5+24)·(1/0.03 − 1) ≈ 1.66 — h=5(n_eff 5)의 상한 2.0 보다 작다
+    assertThat(mom.multiplier()).isCloseTo(1 + 0.5 / 24.5 * (1 / 0.03 - 1), org.assertj.core.data.Offset.offset(1e-5));
+
+    assertThatThrownBy(() -> icService.proposeWeightSet(60, DATES.get(9), WeightSetSource.BACKFILL, null))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  /** 세트 안 시그널의 IC 일수 */
+  private static Integer byCodeNDays(WeightSet set, String code) {
+    return set.byCode().get(code).nDays();
   }
 
   /** 청크를 그냥 실행하는 runner (단계 기록 없음) */

@@ -16,6 +16,7 @@ import kr.hvy.blog.modules.advisor.application.service.AdvisorKpiService;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorOrchestrator;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorRequestException;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorRunService;
+import kr.hvy.blog.modules.advisor.application.service.IcBackfillJob;
 import kr.hvy.blog.modules.advisor.application.service.SignalWeightMath;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
@@ -95,12 +96,24 @@ public class AdvisorAdminController {
   /**
    * 잡 실행. 장시간 잡(ADVISE·SCORE·WEEKLY_REVIEW·IC_BACKFILL)은 advisorExecutor 제출 후 202, INTRADAY 는 완료 후 200.
    * baseDate 를 주면 그 날짜 기준(과거 보충). 이미 LIVE 판단이 있는 날은 SKIPPED 로 닫히므로 재판단은 DELETE /advices/{id} 뒤에.
+   * horizon 은 IC_BACKFILL 전용(M5): 그 호라이즌 하나만 백필한다(생략하면 학습 호라이즌 전부). IC 대상 호라이즌(advisor.horizons)이 아니거나 다른 잡에 주면 400.
    */
   @PostMapping("/jobs/{jobType}")
   public ResponseEntity<AdvisorRunResponse> trigger(@PathVariable AdvisorJobType jobType,
-      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate baseDate) {
-    AdvisorOrchestrator.TriggerResult result = orchestrator.trigger(jobType, baseDate, AdvisorTriggerType.API);
-    log.info("advisor 잡 트리거: job={}, runId={}, base={}, async={}", jobType, result.run().getRunId(), baseDate, result.async());
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate baseDate,
+      @RequestParam(required = false) Integer horizon) {
+    Map<String, Object> extra = new LinkedHashMap<>();
+    if (horizon != null) {
+      if (jobType != AdvisorJobType.IC_BACKFILL) {
+        throw new AdvisorRequestException("horizon 은 IC_BACKFILL 에만 줄 수 있습니다: " + jobType);
+      }
+      if (!properties.icHorizons().contains(horizon)) {
+        throw new AdvisorRequestException("IC 대상 호라이즌이 아닙니다: " + horizon + " (허용 " + properties.icHorizons() + ")");
+      }
+      extra.put(IcBackfillJob.HORIZON_METADATA, horizon);
+    }
+    AdvisorOrchestrator.TriggerResult result = orchestrator.trigger(jobType, baseDate, AdvisorTriggerType.API, extra);
+    log.info("advisor 잡 트리거: job={}, runId={}, base={}, horizon={}, async={}", jobType, result.run().getRunId(), baseDate, horizon, result.async());
     return ResponseEntity.status(result.async() ? HttpStatus.ACCEPTED : HttpStatus.OK).body(AdvisorRunResponse.from(result.run()));
   }
 
@@ -191,14 +204,21 @@ public class AdvisorAdminController {
 
   // ========== KPI ==========
 
+  /**
+   * KPI 요약. kind(기본 DAILY)·horizon(기본 그 종류의 결정 호라이즌) 의 채점 행만 센다 — 기본값이면 M5 이전과 같은 결과다.
+   * horizon 을 따로 주면 진단 호라이즌(예: DAILY·20)도 볼 수 있다. 종류의 호라이즌이 설정에 없으면 400.
+   */
   @GetMapping("/scores/summary")
   public ScoreSummaryResponse summary(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(defaultValue = "DAILY") AdviceKind kind, @RequestParam(required = false) Integer horizon) {
     LocalDate end = to == null ? MarketClock.today() : to;
     LocalDate start = from == null ? end.minusDays(90) : from;
-    return new ScoreSummaryResponse(start, end, properties.getHorizonDays(), kpi.variantSummaries(start, end),
-        kpi.regimeSummary(AdviceVariant.LIVE, start, end), kpi.calibration(start, end), kpi.recentPicks(start, end, 20),
-        "판정은 최소 6개월 뒤(승률 55% 검정 ≈620 독립 관측, 초과수익 0.5% 검출 ≈400). 부가가치 = 픽 − 후보군 평균이 LLM 층의 1차 KPI");
+    int h = horizon != null ? horizon : properties.horizonOf(kind)
+        .orElseThrow(() -> new AdvisorRequestException("advisor.horizons 에 " + kind + " 호라이즌이 없습니다"));
+    return new ScoreSummaryResponse(start, end, h, kpi.variantSummaries(start, end, kind, h),
+        kpi.regimeSummary(AdviceVariant.LIVE, start, end, kind, h), kpi.calibration(start, end, kind, h), kpi.recentPicks(start, end, 20, kind, h),
+        "판정은 최소 6개월 뒤(승률 55% 검정 ≈620 독립 관측, 초과수익 0.5% 검출 ≈400). 부가가치 = 픽 − 후보군 평균이 LLM 층의 1차 KPI", kind);
   }
 
   @GetMapping("/scores/calibration")
@@ -219,27 +239,38 @@ public class AdvisorAdminController {
   }
 
   /**
-   * 시그널 IC 창 통계 (asOf 이하 window 영업일).
+   * 시그널 IC 창 통계 (asOf 이하 window 영업일, 호라이즌 horizon — 기본 DAILY 결정 호라이즌). window 기본값은 그 호라이즌의 ic-window.
+   * n_eff 는 호라이즌 기준(IC 일수 / h)이라 60·180 모니터링 IC 는 t 가 작게 나온다.
    */
   @GetMapping("/scores/ic")
   public Map<String, SignalWeightMath.IcStat> ic(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf,
-      @RequestParam(required = false) Integer window) {
+      @RequestParam(required = false) Integer window, @RequestParam(required = false) Integer horizon) {
     LocalDate end = asOf == null ? MarketClock.today() : asOf;
-    int days = window == null ? properties.getIc().getWindowDays() : Math.max(5, window);
-    List<SignalIcRow> rows = icWriter.window(end, days);
-    return SignalWeightMath.aggregate(rows, properties.getHorizonDays());
+    int h = requireIcHorizon(horizon);
+    int days = window == null ? properties.icWindowDays(h) : Math.max(5, window);
+    List<SignalIcRow> rows = icWriter.window(h, end, days);
+    return SignalWeightMath.aggregate(rows, h);
   }
 
   // ========== 가중치 ==========
 
+  /**
+   * 호라이즌의 활성 가중치 세트 (기본 DAILY 결정 호라이즌). h=20 은 첫 학습 전이면 404.
+   */
   @GetMapping("/weights")
-  public WeightSet activeWeights() {
-    return weightSets.active().orElseThrow(() -> new NoSuchElementException("활성 가중치 세트가 없습니다 (advisor-seed.sql 적용 필요)"));
+  public WeightSet activeWeights(@RequestParam(required = false) Integer horizon) {
+    int h = horizon == null ? properties.getHorizonDays() : horizon;
+    return weightSets.active(h).orElseThrow(() -> new NoSuchElementException(h == properties.getHorizonDays()
+        ? "활성 가중치 세트가 없습니다 (advisor-seed.sql 적용 필요)"
+        : "h=" + h + " 활성 가중치 세트가 없습니다 (IC_BACKFILL 또는 WEEKLY_REVIEW 가 n_eff 게이트를 넘긴 뒤 생긴다)"));
   }
 
+  /**
+   * 최근 가중치 세트 (horizon 을 주면 그 호라이즌만).
+   */
   @GetMapping("/weights/sets")
-  public List<WeightSet> weightSets(@RequestParam(defaultValue = "20") int limit) {
-    return weightSets.recent(clamp(limit));
+  public List<WeightSet> weightSets(@RequestParam(defaultValue = "20") int limit, @RequestParam(required = false) Integer horizon) {
+    return weightSets.recent(horizon, clamp(limit));
   }
 
   /**
@@ -324,6 +355,19 @@ public class AdvisorAdminController {
     String message = String.format("파라미터 형식 오류: %s=%s", ex.getName(), ex.getValue());
     log.info("advisor 요청 거부: {}", message);
     return ResponseEntity.badRequest().body(ApiResponse.<Void>builder().status(ApiResponseStatus.FAIL).message(message).build());
+  }
+
+  /**
+   * IC 조회 호라이즌: 비면 DAILY 결정 호라이즌, IC 대상 호라이즌(advisor.horizons)이 아니면 400.
+   */
+  private int requireIcHorizon(Integer horizon) {
+    if (horizon == null) {
+      return properties.getHorizonDays();
+    }
+    if (!properties.icHorizons().contains(horizon)) {
+      throw new AdvisorRequestException("IC 대상 호라이즌이 아닙니다: " + horizon + " (허용 " + properties.icHorizons() + ")");
+    }
+    return horizon;
   }
 
   private int clamp(int limit) {

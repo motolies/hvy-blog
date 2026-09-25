@@ -88,7 +88,17 @@ public class MarketFeatureService {
   private final TradingCalendar tradingCalendar;
   private final GlobalLinkService globalLinks;
 
+  /**
+   * DAILY 결정 호라이즌 창으로 {@link #features(LocalDate, int)}.
+   */
   public MarketFeatures features(LocalDate asOf) {
+    return features(asOf, properties.getHorizonDays());
+  }
+
+  /**
+   * 기준일 시장 특징. horizonDays 는 적용 구간(진입 = 다음 영업일, 청산 = h번째 영업일)에만 쓰인다 — 특징 값 자체는 호라이즌과 무관하다(M5: H20 판단은 20).
+   */
+  public MarketFeatures features(LocalDate asOf, int horizonDays) {
     Map<String, Object> p = Map.of("d", asOf);
     List<IndexFeature> indices = jdbc.query("SELECT i.index_code, im.index_name, i.close_value, i.ret_1d, i.ret_5d, i.ret_20d, i.ret_60d, "
             + "i.close_value / NULLIF(i.ma_20, 0) - 1 AS dist_ma20, i.close_value / NULLIF(i.ma_60, 0) - 1 AS dist_ma60 "
@@ -149,7 +159,7 @@ public class MarketFeatureService {
     rest.sort(BOTTOM_ORDER);
     List<SectorFeature> bottom = new ArrayList<>(rest.subList(0, Math.min(BOTTOM_SECTORS, rest.size())));
 
-    TradingCalendar.Window window = tradingCalendar.window(asOf, properties.getHorizonDays());
+    TradingCalendar.Window window = tradingCalendar.window(asOf, horizonDays);
     return new MarketFeatures(asOf, indices, flows, global, top, bottom, sigma, globalAsOf, globalAge, flowAsOf, sectorAsOf,
         window.entry(), window.exit(), trendService.trends(asOf), globalLinks.links(asOf), sectorIndexAsOf);
   }

@@ -3,12 +3,20 @@ package kr.hvy.blog.modules.advisor.application;
 import jakarta.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
+import java.util.Set;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
 import kr.hvy.blog.modules.stock.domain.code.MarketType;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -36,11 +44,24 @@ public class AdvisorProperties {
   /** 전체 on/off. false 면 ChatClient 빈·잡이 등록되지 않는다 */
   private boolean enabled = false;
 
-  /** 결정 호라이즌(거래일). 채점·KPI·학습은 이 값 하나만 쓴다 (T+1·T+20 은 진단 저장만) */
+  /**
+   * DAILY(·MORNING·ADHOC) 결정 호라이즌(거래일). {@link #horizons} 에 이 키가 DAILY 로 있어야 한다(기동 검증). 다른 종류의 호라이즌은
+   * {@link #decisionHorizon(AdviceKind)} 로 얻는다 — 이 값을 직접 읽는 곳은 전부 "DAILY 결정 호라이즌" 의 뜻이다(M5 전수 점검, 2026-09-25).
+   */
   private int horizonDays = 5;
 
-  /** 진단용 보조 호라이즌 — 학습·KPI 에 넣지 않는다 */
+  /** DAILY·MORNING 판단에만 붙는 진단용 보조 호라이즌 — 학습·KPI 에 넣지 않는다. H20·H60·H180 은 자기 결정 호라이즌 하나로만 채점한다 */
   private List<Integer> diagnosticHorizons = List.of(1, 20);
+
+  /**
+   * 호라이즌(거래일) → 판단 종류·가중치 학습 여부·IC 창(M5 멀티 호라이즌, 2026-09-25). 설정 파일의 키는 이 기본 맵에 병합된다(Spring MapBinder).
+   * <ul>
+   *   <li>IC 는 맵의 모든 호라이즌에 저장한다 — learn=false(60·180)는 모니터링 전용이라 가중치 학습에는 쓰지 않는다(겹치는 코호트로 n_eff 가 60일 ≈23·180일 ≈7)</li>
+   *   <li>learn=true 호라이즌마다 활성 가중치 세트가 하나씩 있다(uk_advisor_weight_set_active_horizon). n_eff = icWindow / h 로 같은 게이트(ic.min-n-eff)를 적용한다</li>
+   *   <li>icWindow 가 비면 ic.window-days — 5일은 기존 창(120)을 그대로 따라가 하위 호환이고, 20일은 480(n_eff 24)</li>
+   * </ul>
+   */
+  private Map<Integer, Horizon> horizons = defaultHorizons();
 
   /** LLM 에 넘기는 후보 종목 수 상한 (30 × 14필드 ≈ 2,500 토큰) */
   private int candidateLimit = 30;
@@ -106,6 +127,7 @@ public class AdvisorProperties {
   @PostConstruct
   void logStatus() {
     validateMarkets();
+    validateHorizons();
     if (!enabled) {
       log.info("advisor 비활성(advisor.enabled=false) — AI 판단 잡·ChatClient 미등록");
       return;
@@ -115,8 +137,8 @@ public class AdvisorProperties {
           trend.getScoreHorizonDays(), diagnosticHorizons);
     }
     if (isConfigured()) {
-      log.info("advisor 설정 확인: judge={}, assist={}, horizon={}일, markets={}, pickUniverse={}, candidates={}, picks={}~{}, trend=[{}..{}] confirm {}일",
-          model.getJudge(), model.getAssist(), horizonDays, markets, pickUniverse, candidateLimit, pickMin, pickMax, trend.getBearThreshold(),
+      log.info("advisor 설정 확인: judge={}, assist={}, horizon={}일(IC {}·학습 {}), markets={}, pickUniverse={}, candidates={}, picks={}~{}, trend=[{}..{}] confirm {}일",
+          model.getJudge(), model.getAssist(), horizonDays, icHorizons(), learnHorizons(), markets, pickUniverse, candidateLimit, pickMin, pickMax, trend.getBearThreshold(),
           trend.getBullThreshold(), trend.getConfirmDays());
     } else {
       log.warn("advisor 가 켜져 있으나 OpenAI 키(OPENAI_API_KEY) 또는 모델 ID(ADVISOR_JUDGE_MODEL/ADVISOR_ASSIST_MODEL)가 비어 있어 잡 실행 시 거부됩니다");
@@ -138,6 +160,131 @@ public class AdvisorProperties {
       }
     }
     markets = normalized;
+  }
+
+  /**
+   * 기본 호라이즌 맵: 5 DAILY 학습(창 = ic.window-days), 20 H20 학습(창 480), 60 H60·180 H180 모니터링.
+   */
+  static Map<Integer, Horizon> defaultHorizons() {
+    Map<Integer, Horizon> map = new LinkedHashMap<>();
+    map.put(5, new Horizon(AdviceKind.DAILY, true, null));
+    map.put(20, new Horizon(AdviceKind.H20, true, 480));
+    map.put(60, new Horizon(AdviceKind.H60, false, null));
+    map.put(180, new Horizon(AdviceKind.H180, false, null));
+    return map;
+  }
+
+  /**
+   * advisor.horizons 검증. horizon-days 키가 DAILY 로 있어야 하고, 종류는 호라이즌마다 달라야 하며(MORNING·ADHOC 는 DAILY 창을 공유하므로 맵에 두지 않는다),
+   * icWindow 는 호라이즌 이상이어야 한다(n_eff ≥ 1). 잘못된 맵은 채점·IC 가 조용히 어긋나므로 기동 시점에 거부한다.
+   */
+  void validateHorizons() {
+    if (horizons == null || horizons.isEmpty()) {
+      throw new IllegalStateException("advisor.horizons 가 비어 있습니다 — 최소 " + horizonDays + ": {kind: DAILY} 가 필요합니다");
+    }
+    Horizon daily = horizons.get(horizonDays);
+    if (daily == null || daily.getKind() != AdviceKind.DAILY) {
+      throw new IllegalStateException("advisor.horizons 에 결정 호라이즌 " + horizonDays + " 이 DAILY 로 있어야 합니다 (advisor.horizon-days 와 같은 키)");
+    }
+    Set<AdviceKind> seen = EnumSet.noneOf(AdviceKind.class);
+    for (Map.Entry<Integer, Horizon> e : horizons.entrySet()) {
+      Integer h = e.getKey();
+      Horizon spec = e.getValue();
+      if (h == null || h <= 0) {
+        throw new IllegalStateException("advisor.horizons 의 키는 양의 거래일이어야 합니다: " + h);
+      }
+      if (spec == null || spec.getKind() == null) {
+        throw new IllegalStateException("advisor.horizons." + h + ".kind 가 비어 있습니다");
+      }
+      if (spec.getKind() == AdviceKind.MORNING || spec.getKind() == AdviceKind.ADHOC) {
+        throw new IllegalStateException("advisor.horizons." + h + ".kind=" + spec.getKind() + " 는 허용되지 않습니다 — MORNING·ADHOC 는 DAILY 호라이즌을 공유합니다");
+      }
+      if (!seen.add(spec.getKind())) {
+        throw new IllegalStateException("advisor.horizons 에 종류 " + spec.getKind() + " 가 두 번 이상 있습니다");
+      }
+      if (spec.getIcWindow() != null && spec.getIcWindow() < h) {
+        throw new IllegalStateException("advisor.horizons." + h + ".ic-window=" + spec.getIcWindow() + " 가 호라이즌보다 작습니다 (n_eff < 1)");
+      }
+    }
+  }
+
+  /**
+   * 판단 종류의 결정 호라이즌. MORNING(저녁과 같은 창)·ADHOC(일일 판단과 같은 창)은 DAILY 와 같다. 맵에 없는 종류는 empty.
+   */
+  public OptionalInt horizonOf(AdviceKind kind) {
+    if (kind == AdviceKind.DAILY || kind == AdviceKind.MORNING || kind == AdviceKind.ADHOC) {
+      return OptionalInt.of(horizonDays);
+    }
+    return horizons.entrySet().stream()
+        .filter(e -> e.getValue() != null && e.getValue().getKind() == kind)
+        .mapToInt(Map.Entry::getKey)
+        .findFirst();
+  }
+
+  /**
+   * {@link #horizonOf} 의 필수 버전 — 맵에 없는 종류면 IllegalStateException.
+   */
+  public int decisionHorizon(AdviceKind kind) {
+    return horizonOf(kind).orElseThrow(() -> new IllegalStateException("advisor.horizons 에 " + kind + " 호라이즌이 없습니다"));
+  }
+
+  /** 가중치를 학습하는 호라이즌 (오름차순, 결정 호라이즌 5 포함) */
+  public List<Integer> learnHorizons() {
+    return horizons.entrySet().stream().filter(e -> e.getValue().isLearn()).map(Map.Entry::getKey).sorted().toList();
+  }
+
+  /** IC 를 저장하는 호라이즌 = 맵 전체 (오름차순). learn=false 는 모니터링 전용 */
+  public List<Integer> icHorizons() {
+    return horizons.keySet().stream().sorted().toList();
+  }
+
+  /** 가중치 학습 대상 호라이즌인지 */
+  public boolean isLearnHorizon(int h) {
+    Horizon spec = horizons.get(h);
+    return spec != null && spec.isLearn();
+  }
+
+  /**
+   * 호라이즌 h 의 IC 집계 창(영업일). 맵의 icWindow 가 비면 ic.window-days.
+   */
+  public int icWindowDays(int h) {
+    Horizon spec = horizons.get(h);
+    return spec != null && spec.getIcWindow() != null ? spec.getIcWindow() : ic.getWindowDays();
+  }
+
+  /**
+   * 판단 종류가 채점되는 호라이즌 목록. DAILY·MORNING 은 결정 + 진단(1·20), H20·H60·H180 은 자기 결정 호라이즌 하나(맵에 없으면 없음),
+   * ADHOC 는 평가 루프 밖이라 없다. ScoreJob 이 종류마다 자기 호라이즌 행만 만들게 하는 단일 규칙이다.
+   */
+  public List<Integer> scoreHorizons(AdviceKind kind) {
+    if (kind == AdviceKind.ADHOC) {
+      return List.of();
+    }
+    if (kind == AdviceKind.DAILY || kind == AdviceKind.MORNING) {
+      List<Integer> result = new ArrayList<>();
+      result.add(horizonDays);
+      diagnosticHorizons.stream().filter(h -> !result.contains(h)).forEach(result::add);
+      return result;
+    }
+    OptionalInt h = horizonOf(kind);
+    return h.isPresent() ? List.of(h.getAsInt()) : List.of();
+  }
+
+  /**
+   * 호라이즌 1개의 설정. kind 는 그 호라이즌으로 발행하는 판단 종류, learn 은 가중치 학습 여부, icWindow 는 IC 집계 창(비면 ic.window-days).
+   */
+  @Data
+  @NoArgsConstructor
+  @AllArgsConstructor
+  public static class Horizon {
+
+    private AdviceKind kind;
+
+    /** true 면 WEEKLY_REVIEW·IC_BACKFILL 이 이 호라이즌의 가중치 세트를 갱신한다 */
+    private boolean learn;
+
+    /** IC 집계 창(영업일). n_eff = icWindow / h */
+    private Integer icWindow;
   }
 
   @Data

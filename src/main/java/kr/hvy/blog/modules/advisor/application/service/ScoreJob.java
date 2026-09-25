@@ -35,7 +35,8 @@ import org.springframework.stereotype.Component;
 /**
  * 채점 잡 (SCORE, 관리자 보충 실행) 겸 ADVISE 앞단 훅.
  * <ol>
- *   <li>잠정 채점: 결정 호라이즌·진단 호라이즌마다 청산일이 확보됐는데 아직 채점 행이 없는 판단. 결정 호라이즌 잠정 채점이 저장되면 같은 판단의 12:00 픽 노트를
+ *   <li>잠정 채점: 판단 종류마다 자기 호라이즌({@link AdvisorProperties#scoreHorizons} — DAILY·MORNING 은 결정 5 + 진단 1·20, H20·H60·H180 은 자기 결정
+ *       호라이즌 하나)으로 청산일이 확보됐는데 아직 채점 행이 없는 판단. DAILY 결정 호라이즌 잠정 채점이 저장되면 같은 판단의 12:00 픽 노트를
  *       T+5 초과 부호로 확정한다(note-v1, 격리 — 실패해도 채점은 유지)</li>
  *   <li>확정 재채점: 잠정 상태이고 청산일이 마지막 WEEKLY 성공 시작일보다 앞선 판단(유상증자 계수 반영됨). 노트는 다시 건드리지 않는다(append-only)</li>
  *   <li>IC 증분 계산</li>
@@ -69,24 +70,23 @@ public class ScoreJob implements AdvisorJob, AdviseJob.ScoreHook {
   public void execute(AdvisorExecution execution) {
     AdvisorSteps steps = new AdvisorSteps(execution);
     steps.run("SCORE", () -> scoreDue(execution));
-    steps.run("IC", () -> icService.computeIncremental(steps::run).ifPresent(r -> r.record(execution)));
+    steps.run("IC", () -> icService.computeIncremental(steps::run).forEach(r -> r.record(execution)));
   }
 
   @Override
   public AdviseJob.Scoreboard scoreDue(AdvisorExecution execution) {
     LocalDate today = execution.baseDate();
-    List<Integer> horizons = new ArrayList<>();
-    horizons.add(properties.getHorizonDays());
-    horizons.addAll(properties.getDiagnosticHorizons());
+    Map<Integer, List<AdviceKind>> plan = scoringPlan();
     Map<String, Object> summary = new LinkedHashMap<>();
     int provisional = 0;
     int confirmed = 0;
     int notesFinalized = 0;
     Set<Long> noteHandled = new java.util.HashSet<>();
 
-    // ① 잠정: 호라이즌마다 청산일이 확보된 미채점 판단. 결정 호라이즌이 저장되면 그 판단의 12:00 노트를 확정한다(격리)
-    for (int h : horizons) {
-      for (AdviceHeader advice : unscored(h)) {
+    // ① 잠정: 호라이즌마다 그 호라이즌으로 채점하는 종류의 미채점 판단. DAILY 결정 호라이즌이 저장되면 그 판단의 12:00 노트를 확정한다(격리)
+    for (Map.Entry<Integer, List<AdviceKind>> entry : plan.entrySet()) {
+      int h = entry.getKey();
+      for (AdviceHeader advice : unscored(h, entry.getValue())) {
         Optional<AdviceScoringService.Outcome> outcome = scoring.score(advice, h, ScoreStage.PROVISIONAL);
         if (outcome.isPresent()) {
           provisional++;
@@ -107,7 +107,7 @@ public class ScoreJob implements AdvisorJob, AdviseJob.ScoreHook {
         if (advice.isEmpty()) {
           continue;
         }
-        for (int h : horizons) {
+        for (int h : properties.scoreHorizons(advice.get().adviceKind())) {
           if (scoring.score(advice.get(), h, ScoreStage.CONFIRMED).isPresent()) {
             confirmed++;
           }
@@ -180,26 +180,53 @@ public class ScoreJob implements AdvisorJob, AdviseJob.ScoreHook {
   }
 
   /**
-   * 호라이즌 h 로 아직 채점되지 않았고 청산일이 캘린더에 있는 DAILY·MORNING 판단(모든 변형).
-   * <p>
-   * MORNING(아침 재판정, M4)은 저녁과 같은 base_date·horizon_days 라 결정·진단 호라이즌(5·1·20)을 그대로 적용해도 같은 창이 된다 — 그래서 같은 기준일
-   * MORNING − DAILY 가 대응 비교다. H20·H60·H180 은 아직 뺀다: scoreDue 가 호라이즌을 모든 판단에 일괄 적용하므로 들어오면 의미 없는 h=5 채점 행이 쌓이고,
-   * NOT EXISTS 기준이라 한 번 쌓이면 다시 채점되지 않는다. 호라이즌 인지 채점(M5)이 이 조건을 다시 넓히는 지점이다. ADHOC 는 평가 루프 밖이라 계속 뺀다.
+   * 호라이즌 → 그 호라이즌으로 채점하는 판단 종류 (DAILY 의 5·1·20 순서가 먼저, 그다음 60·180). {@link AdvisorProperties#scoreHorizons} 를 뒤집은 것 — 예: 5 → [DAILY, MORNING],
+   * 20 → [DAILY, MORNING(진단), H20(결정)], 60 → [H60], 180 → [H180]. ADHOC 는 어디에도 없다(평가 루프 밖).
+   */
+  Map<Integer, List<AdviceKind>> scoringPlan() {
+    Map<Integer, List<AdviceKind>> plan = new LinkedHashMap<>();
+    for (AdviceKind kind : AdviceKind.values()) {
+      for (int h : properties.scoreHorizons(kind)) {
+        plan.computeIfAbsent(h, k -> new ArrayList<>()).add(kind);
+      }
+    }
+    return plan;
+  }
+
+  /**
+   * 호라이즌 h 로 채점하는 모든 종류({@link #scoringPlan})의 미채점 판단.
    */
   List<AdviceHeader> unscored(int h) {
-    List<Long> ids = jdbc.queryForList("""
+    return unscored(h, scoringPlan().getOrDefault(h, List.of()));
+  }
+
+  /**
+   * 호라이즌 h 로 아직 채점되지 않았고 청산일이 캘린더에 있는 판단(모든 변형) 중 종류가 kinds 인 것.
+   * <p>
+   * 종류마다 자기 호라이즌 행만 만든다(M5): DAILY·MORNING 은 결정·진단 호라이즌(5·1·20), H20·H60·H180 은 자기 결정 호라이즌 하나. MORNING(아침 재판정, M4)은
+   * 저녁과 같은 base_date·창이라 같은 호라이즌을 적용해도 같은 창이 된다 — 그래서 같은 기준일 MORNING − DAILY 가 대응 비교다. 종류를 거르지 않으면 H20 판단에
+   * 의미 없는 h=5 행이 쌓이고, NOT EXISTS 기준이라 한 번 쌓이면 다시 채점되지 않는다. kinds 가 비면 빈 목록.
+   */
+  List<AdviceHeader> unscored(int h, List<AdviceKind> kinds) {
+    if (kinds.isEmpty()) {
+      return List.of();
+    }
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("h", h);
+    params.put("kinds", kinds.stream().map(AdviceKind::getCode).toList());
+    List<Long> ids = new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc).queryForList("""
         WITH cal AS (SELECT trade_date, ROW_NUMBER() OVER (ORDER BY trade_date) AS rn FROM vw_stock_market_calendar),
         last AS (SELECT MAX(rn) AS max_rn FROM cal)
         SELECT a.advice_id
         FROM tb_advisor_advice a
                  JOIN cal c ON c.trade_date = a.base_date
                  CROSS JOIN last
-        WHERE a.advice_kind IN ('DAILY', 'MORNING')
-          AND c.rn + ? <= last.max_rn
-          AND NOT EXISTS (SELECT 1 FROM tb_advisor_candidate_score s WHERE s.advice_id = a.advice_id AND s.horizon_days = ?)
+        WHERE a.advice_kind IN (:kinds)
+          AND c.rn + :h <= last.max_rn
+          AND NOT EXISTS (SELECT 1 FROM tb_advisor_candidate_score s WHERE s.advice_id = a.advice_id AND s.horizon_days = :h)
           AND EXISTS (SELECT 1 FROM tb_advisor_candidate cd WHERE cd.advice_id = a.advice_id)
         ORDER BY a.base_date, a.advice_id
-        """, Long.class, h, h);
+        """, params, Long.class);
     List<AdviceHeader> result = new ArrayList<>();
     for (Long id : ids) {
       adviceWriter.findById(id).ifPresent(result::add);

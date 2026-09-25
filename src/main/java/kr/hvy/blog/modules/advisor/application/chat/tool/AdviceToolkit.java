@@ -372,7 +372,8 @@ public class AdviceToolkit {
       ToolJson.put(m, "intraday", intraday.isEmpty() ? null : intraday);
       List<Map<String, Object>> scores = new ArrayList<>();
       for (CandidateScoreRow s : scoreWriter.candidateScores(h.adviceId())) {
-        if (s.horizonDays() != advisor.getHorizonDays()) {
+        // 판단 종류의 결정 호라이즌 행만 (DAILY·MORNING 5, H20 20 …) — 진단 호라이즌 행은 싣지 않는다
+        if (s.horizonDays() != advisor.horizonOf(h.adviceKind()).orElse(advisor.getHorizonDays())) {
           continue;
         }
         Map<String, Object> x = ToolJson.obj();
@@ -419,7 +420,7 @@ public class AdviceToolkit {
       if (date.isEmpty()) {
         return ToolJson.noData(null);
       }
-      Optional<WeightSet> set = weightSets.active();
+      Optional<WeightSet> set = weightSets.active(advisor.getHorizonDays());
       if (set.isEmpty()) {
         return ToolJson.error(ToolJson.ERROR_INTERNAL, "활성 가중치 세트가 없다(advisor-seed.sql 미적용)", date.get());
       }

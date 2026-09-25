@@ -111,42 +111,16 @@ public class WeeklyReviewJob implements AdvisorJob {
 
     // ① 채점·IC
     steps.run("SCORE", () -> scoreJob.scoreDue(execution));
-    steps.run("IC", () -> icService.computeIncremental(steps::run).ifPresent(r -> r.record(execution)));
+    steps.run("IC", () -> icService.computeIncremental(steps::run).forEach(r -> r.record(execution)));
 
-    // ② 가중치
+    // ② 가중치: 학습 호라이즌마다 격리된 단계(WEIGHTS = DAILY 결정 호라이즌, WEIGHTS@20 …). 보고의 ĪC 줄은 DAILY 호라이즌만 싣는다
     List<String> weightLines = new ArrayList<>();
     List<String> icLines = new ArrayList<>();
-    steps.run("WEIGHTS", () -> {
-      WeightSet before = weightSets.active().orElseThrow();
-      LocalDate asOf = icService.latestScorableDate(properties.getHorizonDays()).orElse(today);
-      Optional<WeightSet> proposed = icService.proposeWeightSet(asOf, WeightSetSource.WEEKLY, execution.runId());
-      if (proposed.isEmpty()) {
-        weightLines.add(String.format("갱신 없음 — IC 표본 부족 (n_eff < %d). 활성 세트 #%d 유지", properties.getIc().getMinNEff(), before.weightSetId()));
-        return;
-      }
-      long id = weightSets.insert(proposed.get(), true);
-      execution.putMetadata("weightSetId", id);
-      Map<String, SignalWeightRow> old = before.byCode();
-      for (SignalWeightRow w : proposed.get().weights()) {
-        SignalWeightRow o = old.get(w.signalCode());
-        if (o != null && Math.abs(o.weight() - w.weight()) >= 0.005) {
-          weightLines.add(String.format("%s %.3f → %.3f (m=%.2f%s)", w.signalCode(), o.weight(), w.weight(), w.multiplier(), w.flagged() ? " ⚑" : ""));
-        }
-        if (w.icMean() != null) {
-          icLines.add(String.format("%s ĪC %+.3f t=%+.1f n=%d%s", w.signalCode(), w.icMean(), w.tStat() == null ? 0 : w.tStat(),
-              w.nDays() == null ? 0 : w.nDays(), w.flagged() ? " ⚑" : ""));
-        }
-      }
-      if (weightLines.isEmpty()) {
-        weightLines.add("세트 #" + id + " 활성화 (변경 폭 0.005 미만)");
-      } else {
-        weightLines.add(0, "세트 #" + id + " 활성화 (n_eff " + String.format("%.1f", proposed.get().nEff()) + ")");
-      }
-      long flagged = proposed.get().weights().stream().filter(SignalWeightRow::flagged).count();
-      if (flagged > 0) {
-        warnings.add("IC 음수 시그널 " + flagged + "개 — GET /api/advisor/admin/weights 검토");
-      }
-    });
+    for (int h : properties.learnHorizons()) {
+      boolean decision = h == properties.getHorizonDays();
+      steps.run(decision ? "WEIGHTS" : "WEIGHTS@" + h,
+          () -> updateWeights(execution, h, today, weightLines, decision ? icLines : new ArrayList<>(), warnings));
+    }
     icLines.sort((a, b) -> b.compareTo(a));
 
     // ③ 교훈 (게이트: 누적 LIVE 픽)
@@ -238,6 +212,50 @@ public class WeeklyReviewJob implements AdvisorJob {
     // ⑥ 보존 정리
     steps.run("CLEANUP", () -> execution.putMetadata("promptInputsDeleted", promptInputs.deleteOlderThan(properties.getRetentionDays())));
     warnings.forEach(execution::warn);
+  }
+
+  /**
+   * 호라이즌 h 의 가중치 갱신 1회: 그 호라이즌 창(ic-window)·n_eff = 창/h 게이트로 WEEKLY 세트를 제안하고, 통과하면 같은 호라이즌 안에서 활성화한다.
+   * 비교 기준은 그 호라이즌의 활성 세트이고, 없으면(h=20 첫 학습) DAILY 세트 대비 변화를 적는다. DAILY 결정 호라이즌은 기존 메타 키(weightSetId) 그대로,
+   * 다른 호라이즌은 weightSetId@h 로 남기고 보고 줄에 [h=20] 접두를 붙인다.
+   */
+  void updateWeights(AdvisorExecution execution, int h, LocalDate today, List<String> weightLines, List<String> icLines, List<String> warnings) {
+    boolean decision = h == properties.getHorizonDays();
+    String prefix = decision ? "" : "[h=" + h + "] ";
+    Optional<WeightSet> activeH = weightSets.active(h);
+    WeightSet before = activeH.or(() -> weightSets.active(properties.getHorizonDays())).orElseThrow();
+    LocalDate asOf = icService.latestScorableDate(h).orElse(today);
+    Optional<WeightSet> proposed = icService.proposeWeightSet(h, asOf, WeightSetSource.WEEKLY, execution.runId());
+    if (proposed.isEmpty()) {
+      weightLines.add(prefix + (activeH.isPresent()
+          ? String.format("갱신 없음 — IC 표본 부족 (n_eff < %d). 활성 세트 #%d 유지", properties.getIc().getMinNEff(), before.weightSetId())
+          : String.format("갱신 없음 — IC 표본 부족 (n_eff < %d). 활성 세트 없음(발행 SKIP)", properties.getIc().getMinNEff())));
+      return;
+    }
+    long id = weightSets.insert(proposed.get(), true);
+    execution.putMetadata(decision ? "weightSetId" : "weightSetId@" + h, id);
+    List<String> changes = new ArrayList<>();
+    Map<String, SignalWeightRow> old = before.byCode();
+    for (SignalWeightRow w : proposed.get().weights()) {
+      SignalWeightRow o = old.get(w.signalCode());
+      if (o != null && Math.abs(o.weight() - w.weight()) >= 0.005) {
+        changes.add(prefix + String.format("%s %.3f → %.3f (m=%.2f%s)", w.signalCode(), o.weight(), w.weight(), w.multiplier(), w.flagged() ? " ⚑" : ""));
+      }
+      if (w.icMean() != null) {
+        icLines.add(String.format("%s ĪC %+.3f t=%+.1f n=%d%s", w.signalCode(), w.icMean(), w.tStat() == null ? 0 : w.tStat(),
+            w.nDays() == null ? 0 : w.nDays(), w.flagged() ? " ⚑" : ""));
+      }
+    }
+    if (changes.isEmpty()) {
+      weightLines.add(prefix + "세트 #" + id + " 활성화 (변경 폭 0.005 미만)");
+    } else {
+      weightLines.add(prefix + "세트 #" + id + " 활성화 (n_eff " + String.format("%.1f", proposed.get().nEff()) + ")");
+      weightLines.addAll(changes);
+    }
+    long flagged = proposed.get().weights().stream().filter(SignalWeightRow::flagged).count();
+    if (flagged > 0) {
+      warnings.add(prefix + "IC 음수 시그널 " + flagged + "개 — GET /api/advisor/admin/weights" + (decision ? "" : "?horizon=" + h) + " 검토");
+    }
   }
 
   /**

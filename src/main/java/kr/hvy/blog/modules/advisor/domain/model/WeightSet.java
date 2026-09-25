@@ -9,7 +9,7 @@ import kr.hvy.blog.modules.advisor.domain.code.WeightSetSource;
 import lombok.Builder;
 
 /**
- * 가중치 세트 (tb_advisor_weight_set + tb_advisor_signal_weight).
+ * 가중치 세트 (tb_advisor_weight_set + tb_advisor_signal_weight). horizonDays 는 학습 호라이즌(5 DAILY·20 H20) — 활성 세트는 호라이즌마다 1개다(M5).
  */
 @Builder(toBuilder = true)
 public record WeightSet(
@@ -21,7 +21,8 @@ public record WeightSet(
     boolean active,
     String reason,
     Long runId,
-    List<SignalWeightRow> weights) {
+    List<SignalWeightRow> weights,
+    int horizonDays) {
 
   /** 활성(enabled) 시그널의 code → weight */
   public Map<String, Double> enabledWeights() {

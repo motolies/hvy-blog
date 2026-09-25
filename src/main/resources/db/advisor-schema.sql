@@ -71,7 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_advisor_run_job_base ON tb_advisor_run (job_type,
 
 
 -- =============================================
--- 2. 시그널 가중치 세트 (이력 = 세트 행, 현재값 = is_active 인 세트 1개)
+-- 2. 시그널 가중치 세트 (이력 = 세트 행, 현재값 = 호라이즌마다 is_active 인 세트 1개)
 -- =============================================
 CREATE TABLE IF NOT EXISTS tb_advisor_weight_set
 (
@@ -83,21 +83,23 @@ CREATE TABLE IF NOT EXISTS tb_advisor_weight_set
     is_active     BOOLEAN        NOT NULL DEFAULT FALSE,
     reason        VARCHAR(500)            DEFAULT NULL,
     run_id        BIGINT                  DEFAULT NULL,
-    created_at    TIMESTAMPTZ(6) NOT NULL DEFAULT NOW()
+    created_at    TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
+    horizon_days  SMALLINT       NOT NULL DEFAULT 5
 );
 
 COMMENT ON TABLE  tb_advisor_weight_set               IS '정량 시그널 가중치 세트. 픽은 그날 쓴 세트 id 를 참조해 재현 가능';
 COMMENT ON COLUMN tb_advisor_weight_set.weight_set_id IS '세트 식별자';
 COMMENT ON COLUMN tb_advisor_weight_set.as_of         IS '산출 기준일 (IC 창의 마지막 영업일)';
 COMMENT ON COLUMN tb_advisor_weight_set.window_days   IS 'IC 집계 창(영업일). 시드는 0';
-COMMENT ON COLUMN tb_advisor_weight_set.n_eff         IS '5일 겹침 보정 유효 표본 수 = 창/호라이즌';
+COMMENT ON COLUMN tb_advisor_weight_set.n_eff         IS '겹침 보정 유효 표본 수 = 창/호라이즌';
 COMMENT ON COLUMN tb_advisor_weight_set.source        IS '출처: SEED 초기값 | BACKFILL 사전 추정 | WEEKLY 주간 갱신 | MANUAL 수동 활성';
-COMMENT ON COLUMN tb_advisor_weight_set.is_active     IS '스크리닝이 현재 쓰는 세트 (하나만 TRUE)';
+COMMENT ON COLUMN tb_advisor_weight_set.is_active     IS '스크리닝이 현재 쓰는 세트 (호라이즌마다 하나만 TRUE)';
 COMMENT ON COLUMN tb_advisor_weight_set.reason        IS '갱신 사유 요약';
 COMMENT ON COLUMN tb_advisor_weight_set.run_id        IS '산출한 run';
 COMMENT ON COLUMN tb_advisor_weight_set.created_at    IS '생성일시';
+COMMENT ON COLUMN tb_advisor_weight_set.horizon_days  IS '학습 호라이즌(거래일): 5 DAILY | 20 H20 (advisor.horizons learn=true, M5 2026-09-25). 기존 행은 전부 5';
 
-CREATE UNIQUE INDEX IF NOT EXISTS uk_advisor_weight_set_active ON tb_advisor_weight_set (is_active) WHERE is_active;
+-- 활성 유니크(호라이즌마다 1개, uk_advisor_weight_set_active_horizon)는 파일 끝 M5 블록에서 만든다 — 기존 DB 는 horizon_days 컬럼이 ALTER 로 붙은 뒤여야 한다
 
 CREATE TABLE IF NOT EXISTS tb_advisor_signal_weight
 (
@@ -379,13 +381,13 @@ CREATE TABLE IF NOT EXISTS tb_advisor_signal_ic_daily
     rank_ic      DOUBLE PRECISION NOT NULL,
     n            INTEGER          NOT NULL,
     computed_at  TIMESTAMPTZ(6)   NOT NULL DEFAULT NOW(),
-    CONSTRAINT pk_advisor_signal_ic_daily PRIMARY KEY (signal_code, trade_date)
+    CONSTRAINT pk_advisor_signal_ic_daily PRIMARY KEY (signal_code, trade_date, horizon_days)
 );
 
-COMMENT ON TABLE  tb_advisor_signal_ic_daily              IS '시그널별 일별 rank-IC = corr(rank(시그널 d), rank(초과수익 d→d+h)), 유니버스 전체';
+COMMENT ON TABLE  tb_advisor_signal_ic_daily              IS '시그널별 일별 rank-IC = corr(rank(시그널 d), rank(초과수익 d→d+h)), 유니버스 전체. 호라이즌마다 별도 행(PK 에 horizon_days, M5)';
 COMMENT ON COLUMN tb_advisor_signal_ic_daily.signal_code  IS '시그널 코드';
 COMMENT ON COLUMN tb_advisor_signal_ic_daily.trade_date   IS '시그널 기준일 d (d+h 가 확보된 뒤 계산)';
-COMMENT ON COLUMN tb_advisor_signal_ic_daily.horizon_days IS '호라이즌';
+COMMENT ON COLUMN tb_advisor_signal_ic_daily.horizon_days IS '호라이즌 h (advisor.horizons 키: 5·20 학습, 60·180 모니터링). d+h 영업일 종가가 확보된 d 만 계산';
 COMMENT ON COLUMN tb_advisor_signal_ic_daily.rank_ic      IS 'Spearman 상관 (순위 Pearson)';
 COMMENT ON COLUMN tb_advisor_signal_ic_daily.n            IS '표본 종목 수';
 COMMENT ON COLUMN tb_advisor_signal_ic_daily.computed_at  IS '계산 시각';
@@ -681,3 +683,11 @@ ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS parent_advice_id BIGINT  
 ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS diff_json        JSONB        DEFAULT NULL;
 ALTER TABLE tb_advisor_pick   ADD COLUMN IF NOT EXISTS action           VARCHAR(10)  DEFAULT NULL;
 ALTER TABLE tb_advisor_pick   ADD COLUMN IF NOT EXISTS action_reason    VARCHAR(300) DEFAULT NULL;
+-- M5 멀티 호라이즌(2026-09-25): IC 는 호라이즌마다 별도 행, 활성 가중치 세트는 호라이즌마다 1개. 기존 행은 전부 h=5 라 안전하다.
+-- 기존 DB 는 db/migrate/20260925_02_advisor_multi_horizon.sql 이 주석까지 갱신한다. PK 교체는 재실행 때마다 PK 인덱스를 다시 만든다(수만 행, 1초 미만)
+ALTER TABLE tb_advisor_weight_set ADD COLUMN IF NOT EXISTS horizon_days SMALLINT NOT NULL DEFAULT 5;
+DROP INDEX IF EXISTS uk_advisor_weight_set_active;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_advisor_weight_set_active_horizon ON tb_advisor_weight_set (horizon_days) WHERE is_active;
+ALTER TABLE tb_advisor_signal_ic_daily ADD COLUMN IF NOT EXISTS horizon_days SMALLINT NOT NULL DEFAULT 5;
+ALTER TABLE tb_advisor_signal_ic_daily DROP CONSTRAINT IF EXISTS pk_advisor_signal_ic_daily;
+ALTER TABLE tb_advisor_signal_ic_daily ADD CONSTRAINT pk_advisor_signal_ic_daily PRIMARY KEY (signal_code, trade_date, horizon_days);

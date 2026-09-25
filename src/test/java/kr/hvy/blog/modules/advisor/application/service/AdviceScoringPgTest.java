@@ -396,6 +396,52 @@ class AdviceScoringPgTest {
   }
 
   @Test
+  @DisplayName("M5: H20 판단은 자기 결정 호라이즌(20) 하나로만 채점되고, 청산일 없는 H60 은 채점되지 않으며, DAILY KPI 는 불변·H20 KPI 는 kind=H20 으로 따로 집계된다")
+  void longHorizonAdviceScoredWithOwnWindow() {
+    long daily = insertAdvice(AdviceKind.DAILY, D.get(5), AdviceVariant.LIVE, List.of(1, 5, 10, 30), Map.of(5, PickDirection.LONG), null);
+    scoreJob.scoreDue(execution(D.getLast()));
+    AdvisorKpiService.VariantSummary dailyBefore = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+    int dailyRegimeBefore = kpi.regimeSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast()).calls();
+
+    long h20 = insertAdvice(AdviceKind.H20, D.get(5), AdviceVariant.LIVE, List.of(1, 5, 10, 30),
+        Map.of(1, PickDirection.LONG, 30, PickDirection.LONG), null);
+    long h60 = insertAdvice(AdviceKind.H60, D.get(5), AdviceVariant.LIVE, List.of(1, 5), Map.of(1, PickDirection.LONG), null);
+    jdbc.update("UPDATE tb_advisor_advice SET horizon_days = 20 WHERE advice_id = ?", h20);
+    jdbc.update("UPDATE tb_advisor_advice SET horizon_days = 60 WHERE advice_id = ?", h60);
+
+    assertThat(scoreJob.scoringPlan()).containsEntry(5, List.of(AdviceKind.DAILY, AdviceKind.MORNING))
+        .containsEntry(20, List.of(AdviceKind.DAILY, AdviceKind.MORNING, AdviceKind.H20)).containsEntry(60, List.of(AdviceKind.H60))
+        .containsEntry(180, List.of(AdviceKind.H180)).doesNotContainKey(null);
+    assertThat(scoreJob.unscored(5)).extracting(AdviceHeader::adviceId).as("H20 에 h=5 행을 만들지 않는다").doesNotContain(h20, h60);
+    assertThat(scoreJob.unscored(20)).extracting(AdviceHeader::adviceId).contains(h20).doesNotContain(h60);
+    assertThat(scoreJob.unscored(60)).as("D5+60 청산일이 캘린더에 없다").isEmpty();
+    scoreJob.scoreDue(execution(D.getLast()));
+
+    List<CandidateScoreRow> h20Scores = scoreWriter.candidateScores(h20);
+    assertThat(h20Scores).isNotEmpty().allMatch(r -> r.horizonDays() == 20);
+    assertThat(h20Scores).allMatch(r -> r.entryDate().equals(D.get(6)) && r.exitDate().equals(D.get(25)));
+    assertThat(scoreWriter.callScores(h20)).isNotEmpty().allMatch(c -> c.horizonDays() == 20);
+    assertThat(scoreWriter.candidateScores(daily)).extracting(CandidateScoreRow::horizonDays).containsOnly(5, 1, 20);
+    assertThat(scoreWriter.candidateScores(h60)).isEmpty();
+    assertThat(scoreJob.unscored(20)).extracting(AdviceHeader::adviceId).doesNotContain(h20);
+
+    // DAILY KPI 불변(기본 인자 = DAILY·5), H20 은 kind·h 로 따로
+    AdvisorKpiService.VariantSummary dailyAfter = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+    assertThat(dailyAfter).isEqualTo(dailyBefore);
+    assertThat(kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast(), AdviceKind.DAILY, 5)).isEqualTo(dailyBefore);
+    assertThat(kpi.regimeSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast()).calls()).isEqualTo(dailyRegimeBefore);
+    AdvisorKpiService.VariantSummary h20Kpi = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast(), AdviceKind.H20, 20);
+    double t01 = h20Scores.stream().filter(r -> r.ticker().equals(AdvisorSyntheticData.ticker(1))).findFirst().orElseThrow().excessRet();
+    double t30 = h20Scores.stream().filter(r -> r.ticker().equals(AdvisorSyntheticData.ticker(30))).findFirst().orElseThrow().excessRet();
+    assertThat(h20Kpi.advices()).isEqualTo(1);
+    assertThat(h20Kpi.picks()).isEqualTo(2);
+    assertThat(h20Kpi.meanExcess()).isCloseTo((t01 + t30) / 2, within(1e-12));
+    assertThat(kpi.regimeSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast(), AdviceKind.H20, 20).calls()).isEqualTo(2);
+    assertThat(kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast(), AdviceKind.DAILY, 20).picks()).as("DAILY 진단 h=20").isEqualTo(1);
+    assertThat(adviceWriter.countLivePicks(AdviceKind.DAILY)).as("300 게이트는 DAILY 만").isEqualTo(1);
+  }
+
+  @Test
   @DisplayName("대응 차이 통계: 평균·se(표본 sd/√n)·t, n<2 면 se·t 없음, 빈 목록은 전부 null")
   void pairedDiffMath() {
     AdvisorKpiService.PairedDiff p = AdvisorKpiService.paired(List.of(0.01, 0.03, 0.02));

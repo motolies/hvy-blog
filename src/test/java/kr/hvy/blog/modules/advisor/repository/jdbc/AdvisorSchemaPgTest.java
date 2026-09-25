@@ -121,8 +121,9 @@ class AdvisorSchemaPgTest {
   @Test
   @DisplayName("시드는 SEED 세트를 활성으로 만들고 시그널 12개를 담는다. 활성 세트는 하나뿐이다")
   void seedActivatesWeightSet() {
-    WeightSet active = weightSets.active().orElseThrow();
+    WeightSet active = weightSets.active(5).orElseThrow();
     assertThat(active.source()).isEqualTo(WeightSetSource.SEED);
+    assertThat(active.horizonDays()).as("시드는 DAILY 결정 호라이즌").isEqualTo(5);
     // advice-v6: SECTOR_MOM_20D/60D 시드 2행 추가 → 14행·활성 13·사전 합 1.10 (점수는 Σw 정규화라 합 1.0 을 지킬 필요 없음)
     assertThat(active.weights()).hasSize(14);
     assertThat(active.enabledWeights()).hasSize(13).doesNotContainKey("GLOBAL_LINK").containsKeys("SECTOR_MOM_20D", "SECTOR_MOM_60D");
@@ -130,11 +131,41 @@ class AdvisorSchemaPgTest {
     assertThat(sum).isCloseTo(1.10, org.assertj.core.data.Offset.offset(1e-9));
 
     long id = weightSets.insert(active.toBuilder().source(WeightSetSource.WEEKLY).asOf(LocalDate.of(2026, 9, 12)).reason("test").build(), true);
-    assertThat(weightSets.active().orElseThrow().weightSetId()).isEqualTo(id);
+    assertThat(weightSets.active(5).orElseThrow().weightSetId()).isEqualTo(id);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_advisor_weight_set WHERE is_active", Integer.class)).isEqualTo(1);
 
     weightSets.activate(active.weightSetId());
-    assertThat(weightSets.active().orElseThrow().weightSetId()).isEqualTo(active.weightSetId());
+    assertThat(weightSets.active(5).orElseThrow().weightSetId()).isEqualTo(active.weightSetId());
+  }
+
+  @Test
+  @DisplayName("M5: 활성 가중치 세트는 호라이즌마다 1개씩 공존하고, 활성화·롤백은 같은 호라이즌 안에서만 일어난다")
+  void activeWeightSetPerHorizon() {
+    WeightSet seed = weightSets.active(5).orElseThrow();
+    assertThat(weightSets.active(20)).as("h=20 은 첫 학습 전이라 없다").isEmpty();
+
+    long h20 = weightSets.insert(seed.toBuilder().source(WeightSetSource.BACKFILL).horizonDays(20).windowDays(480).reason("h20").build(), true);
+    assertThat(weightSets.active(20).orElseThrow().weightSetId()).isEqualTo(h20);
+    assertThat(weightSets.active(20).orElseThrow().horizonDays()).isEqualTo(20);
+    assertThat(weightSets.active(5).orElseThrow().weightSetId()).as("h=20 활성화가 DAILY 세트를 내리지 않는다").isEqualTo(seed.weightSetId());
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_advisor_weight_set WHERE is_active", Integer.class)).isEqualTo(2);
+
+    long h5 = weightSets.insert(seed.toBuilder().source(WeightSetSource.WEEKLY).reason("h5").build(), true);
+    assertThat(weightSets.active(5).orElseThrow().weightSetId()).isEqualTo(h5);
+    assertThat(weightSets.active(20).orElseThrow().weightSetId()).as("DAILY 갱신이 H20 세트를 내리지 않는다").isEqualTo(h20);
+
+    weightSets.activate(seed.weightSetId());
+    assertThat(weightSets.active(5).orElseThrow().weightSetId()).as("롤백은 그 세트의 호라이즌 안에서만").isEqualTo(seed.weightSetId());
+    assertThat(weightSets.active(20).orElseThrow().weightSetId()).isEqualTo(h20);
+    assertThat(weightSets.recent(20, 10)).extracting(WeightSet::weightSetId).containsExactly(h20);
+
+    assertThatThrownBy(() -> jdbc.update("UPDATE tb_advisor_weight_set SET is_active = TRUE WHERE weight_set_id = ?", h5))
+        .as("같은 호라이즌 두 번째 활성은 부분 유니크가 막는다").isInstanceOf(DataIntegrityViolationException.class);
+    assertThatThrownBy(() -> weightSets.insert(seed.toBuilder().horizonDays(0).build(), false))
+        .as("호라이즌 없는 세트(빌더 기본값 0)는 거부").isInstanceOf(IllegalArgumentException.class);
+
+    // 다른 테스트가 시드 1개 활성 상태를 가정하므로 원복
+    jdbc.update("DELETE FROM tb_advisor_weight_set WHERE weight_set_id IN (?, ?)", h20, h5);
   }
 
   @Test
@@ -230,11 +261,30 @@ class AdvisorSchemaPgTest {
         new SignalIcRow("TV_SURGE", LocalDate.of(2026, 9, 3), 5, 0.02, 1190));
     assertThat(icWriter.upsert(rows)).isEqualTo(4);
     assertThat(icWriter.upsert(rows)).as("IS DISTINCT FROM 으로 UPDATE 생략").isZero();
-    assertThat(icWriter.maxTradeDate()).contains(LocalDate.of(2026, 9, 3));
-    List<SignalIcRow> window = icWriter.window(LocalDate.of(2026, 9, 3), 2);
+    assertThat(icWriter.maxTradeDate(5)).contains(LocalDate.of(2026, 9, 3));
+    List<SignalIcRow> window = icWriter.window(5, LocalDate.of(2026, 9, 3), 2);
     assertThat(window).hasSize(3);
     assertThat(window.stream().filter(r -> r.signalCode().equals("MOM_20D")).map(SignalIcRow::tradeDate))
         .containsExactly(LocalDate.of(2026, 9, 2), LocalDate.of(2026, 9, 3));
+  }
+
+  @Test
+  @DisplayName("M5: 같은 (시그널, 기준일) 의 h=20 IC 는 별도 행으로 저장되고 h=5 행을 덮어쓰지 않는다. 조회·최신일은 호라이즌별")
+  void signalIcRowsPerHorizon() {
+    icWriter.upsert(List.of(new SignalIcRow("MOM_20D", LocalDate.of(2026, 9, 1), 5, 0.03, 1200),
+        new SignalIcRow("MOM_20D", LocalDate.of(2026, 9, 2), 5, 0.04, 1200)));
+    assertThat(icWriter.upsert(List.of(new SignalIcRow("MOM_20D", LocalDate.of(2026, 9, 1), 20, 0.11, 1100)))).isEqualTo(1);
+
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_advisor_signal_ic_daily WHERE signal_code = 'MOM_20D' AND trade_date = '2026-09-01'",
+        Integer.class)).isEqualTo(2);
+    assertThat(icWriter.window(5, LocalDate.of(2026, 9, 30), 10)).extracting(SignalIcRow::rankIc).containsExactly(0.03, 0.04);
+    assertThat(icWriter.window(20, LocalDate.of(2026, 9, 30), 10)).extracting(SignalIcRow::rankIc, SignalIcRow::horizonDays)
+        .containsExactly(org.assertj.core.groups.Tuple.tuple(0.11, 20));
+    assertThat(icWriter.maxTradeDate(5)).contains(LocalDate.of(2026, 9, 2));
+    assertThat(icWriter.maxTradeDate(20)).contains(LocalDate.of(2026, 9, 1));
+    assertThat(icWriter.maxTradeDate(60)).isEmpty();
+    assertThat(jdbc.queryForObject("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'pk_advisor_signal_ic_daily'", String.class))
+        .isEqualTo("PRIMARY KEY (signal_code, trade_date, horizon_days)");
   }
 
   @Test

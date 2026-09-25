@@ -36,6 +36,11 @@ public class PromptResources {
   public static final String CHAT_VERSION = "chat-v2";
   /** note-v1 (2026-09-21): 12:00 장중 점검의 픽별 회고(오답노트) 시스템 프롬프트 — assist 모델, 티커 없는 일반화 가설 */
   public static final String NOTE_VERSION = "note-v1";
+  /**
+   * morning-v1 (2026-09-25, M4): 07:40 아침 재판정 — 저녁 입력 스냅샷·저녁 픽·밤사이(미국 r1·β 갭·환율·섹터 연동 심볼·07:30 점검) 를 보고 저녁 픽마다 KEEP/DROP,
+   * 저녁 후보 안에서만 ADD. 판단 모델(judge)을 쓰고 advice-v7 과 버전을 따로 센다
+   */
+  public static final String MORNING_VERSION = "morning-v1";
   static final String BASE = "prompts/advisor/";
 
   private final String adviceSystem;
@@ -46,6 +51,8 @@ public class PromptResources {
   private final String chatSha256;
   private final String noteSystem;
   private final String noteSha256;
+  private final String morningSystem;
+  private final String morningSha256;
 
   public PromptResources() {
     this.adviceSystem = load(BASE + "advice-system-v7.md");
@@ -56,6 +63,8 @@ public class PromptResources {
     this.chatSha256 = sha256(chatSystem);
     this.noteSystem = load(BASE + "intraday-note-system-v1.md");
     this.noteSha256 = sha256(noteSystem);
+    this.morningSystem = load(BASE + "advice-morning-v1.md");
+    this.morningSha256 = sha256(morningSystem);
   }
 
   public String adviceSystem() {
@@ -88,6 +97,14 @@ public class PromptResources {
 
   public String noteSha256() {
     return noteSha256;
+  }
+
+  public String morningSystem() {
+    return morningSystem;
+  }
+
+  public String morningSha256() {
+    return morningSha256;
   }
 
   static String load(String path) {

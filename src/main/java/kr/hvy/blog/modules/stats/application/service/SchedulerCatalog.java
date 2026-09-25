@@ -92,6 +92,9 @@ public class SchedulerCatalog {
       new Definition("scheduler.advisor-morning-check.lock-name", "AI 아침 해외 반영 점검",
           "scheduler.advisor-morning-check.cron-expression", List.of("0 30 7 * * MON-FRI"), "scheduler.advisor-morning-check.enabled", "Asia/Seoul",
           ManualTrigger.advisor("MORNING_CHECK")),
+      new Definition("scheduler.advisor-morning-advise.lock-name", "AI 아침 재판정",
+          "scheduler.advisor-morning-advise.cron-expression", List.of("0 40 7 * * MON-FRI"), "scheduler.advisor-morning-advise.enabled", "Asia/Seoul",
+          ManualTrigger.advisor("MORNING_ADVISE")),
       new Definition("scheduler.advisor-weekly-review.lock-name", "AI 주간 검토(가중치·교훈·보고)",
           "scheduler.advisor-weekly-review.cron-expression", List.of("0 0 8 * * SUN"), "scheduler.advisor-weekly-review.enabled", "Asia/Seoul",
           ManualTrigger.advisor("WEEKLY_REVIEW")));

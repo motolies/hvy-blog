@@ -167,6 +167,31 @@ class GlobalLinkPgTest {
     }
   }
 
+  @Test
+  @DisplayName("섹터 연동 심볼(아침 재판정): MARKET 묶음 제외, 현지일 < 기준 인 가장 최근 세션의 r1 과 그 세션을 뺀 직전 60세션 σ — 기준일 당일 행은 룩어헤드라 안 들어온다")
+  void sectorMovesExcludeSameDay() {
+    jdbc.update("INSERT INTO tb_stock_global_sector_map (sector_code, global_symbol) VALUES ('SEMICON', 'SOXX'), ('AI_DC', 'SOXX'), ('MARKET', 'SPX')");
+    double px = 100;
+    for (int k = 0; k < D.size(); k++) {
+      double r = k == D.size() - 2 ? -0.06 : k == D.size() - 1 ? 0.5 : (k % 2 == 0 ? 0.01 : -0.01);
+      px = px * (1 + r);
+      jdbc.update("INSERT INTO tb_stock_global_market_daily (symbol, trade_date, market_div, close_price) VALUES ('SOXX', ?, 'EQ', ?)", D.get(k), bd(px));
+    }
+    try {
+      List<GlobalLinkService.SectorMove> moves = links.sectorMoves(AS_OF);
+      assertThat(moves).extracting(GlobalLinkService.SectorMove::symbol).containsExactly("SOXX");
+      GlobalLinkService.SectorMove soxx = moves.getFirst();
+      assertThat(soxx.groups()).isEqualTo("AI_DC,SEMICON");
+      assertThat(soxx.date()).as("AS_OF 현지일(+50%) 은 빠지고 직전 세션").isEqualTo(D.get(D.size() - 2));
+      assertThat(soxx.r1()).isCloseTo(-0.06, within(1e-4));
+      assertThat(soxx.sigma()).as("급변 세션을 뺀 ±1% 교대의 σ").isCloseTo(0.01, within(5e-4));
+      assertThat(soxx.z()).isLessThan(-5.0);
+    } finally {
+      jdbc.update("DELETE FROM tb_stock_global_market_daily WHERE symbol = 'SOXX'");
+      jdbc.update("DELETE FROM tb_stock_global_sector_map");
+    }
+  }
+
   private static BigDecimal bd(double v) {
     return BigDecimal.valueOf(v);
   }

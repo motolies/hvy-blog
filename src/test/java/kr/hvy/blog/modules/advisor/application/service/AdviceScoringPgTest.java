@@ -320,9 +320,91 @@ class AdviceScoringPgTest {
     assertThat(kpi.recentPicks(D.getFirst(), D.getLast(), 10)).hasSize(recentBefore);
     assertThat(lessonService.cells(D.getFirst(), D.getLast()).stream().map(LessonService.Cell::n).sorted().toList()).isEqualTo(cellsBefore);
 
-    assertThat(scoreJob.unscored(5)).as("채점 대상 탐색은 DAILY 만 — 미채점 MORNING 도 집지 않는다").extracting(AdviceHeader::adviceId)
-        .doesNotContain(morning, laterMorning, earlyMemory);
-    assertThat(scoreJob.unscored(1)).extracting(AdviceHeader::adviceId).containsExactly(daily);
+    // M4: MORNING 은 저녁과 같은 창이라 채점 대상이다(KPI·게이트는 위처럼 여전히 DAILY 만)
+    assertThat(scoreJob.unscored(5)).as("이미 채점한 D10 두 판단은 빠지고 미채점 MORNING 은 집는다").extracting(AdviceHeader::adviceId)
+        .doesNotContain(daily, morning).contains(laterMorning, earlyMemory);
+    assertThat(scoreJob.unscored(1)).extracting(AdviceHeader::adviceId).contains(daily, morning);
+  }
+
+  @Test
+  @DisplayName("M4: ScoreJob 이 MORNING 을 저녁과 같은 창으로 채점하고 DAILY KPI 는 불변, MORNING−DAILY 대응 비교는 날짜 단위 차이·트리거 분할을 낸다")
+  void morningScoredWithSameWindowAndPairedKpi() {
+    // D10: 저녁은 T05·T30 LONG, 아침은 T05 유지 + T01 추가(T30 제외, 트리거일). D11: 저녁 T03, 아침 T03 유지(비트리거일)
+    long daily10 = insertAdvice(AdviceKind.DAILY, D.get(10), AdviceVariant.LIVE, List.of(1, 5, 10, 30),
+        Map.of(5, PickDirection.LONG, 30, PickDirection.LONG), null);
+    long daily11 = insertAdvice(AdviceKind.DAILY, D.get(11), AdviceVariant.LIVE, List.of(3, 7), Map.of(3, PickDirection.LONG), null);
+    scoreJob.scoreDue(execution(D.getLast()));
+    AdvisorKpiService.VariantSummary dailyOnly = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+
+    long morning10 = insertMorning(D.get(10), daily10, List.of(1, 5, 10, 30),
+        List.of(PickRow.builder().ticker(AdvisorSyntheticData.ticker(5)).pickRank(1).direction(PickDirection.LONG).conviction(0.7)
+                .action(kr.hvy.blog.modules.advisor.domain.code.PickAction.KEEP).actionReason("유지").build(),
+            PickRow.builder().ticker(AdvisorSyntheticData.ticker(1)).pickRank(2).direction(PickDirection.LONG).conviction(0.6)
+                .action(kr.hvy.blog.modules.advisor.domain.code.PickAction.ADD).actionReason("추가").build()), true);
+    long morning11 = insertMorning(D.get(11), daily11, List.of(3, 7),
+        List.of(PickRow.builder().ticker(AdvisorSyntheticData.ticker(3)).pickRank(1).direction(PickDirection.LONG).conviction(0.7)
+            .action(kr.hvy.blog.modules.advisor.domain.code.PickAction.KEEP).actionReason("유지").build()), false);
+
+    // 저장 왕복: parent·diff_json·픽 action
+    AdviceHeader m10 = adviceWriter.findById(morning10).orElseThrow();
+    assertThat(m10.parentAdviceId()).isEqualTo(daily10);
+    assertThat(m10.diffJson()).containsKey("triggers");
+    assertThat(adviceWriter.findById(daily10).orElseThrow().parentAdviceId()).isNull();
+    assertThat(adviceWriter.picks(morning10)).extracting(PickRow::ticker, PickRow::action).containsExactly(
+        org.assertj.core.groups.Tuple.tuple(AdvisorSyntheticData.ticker(5), kr.hvy.blog.modules.advisor.domain.code.PickAction.KEEP),
+        org.assertj.core.groups.Tuple.tuple(AdvisorSyntheticData.ticker(1), kr.hvy.blog.modules.advisor.domain.code.PickAction.ADD));
+    assertThat(adviceWriter.picks(daily10)).allMatch(p -> p.action() == null);
+
+    assertThat(scoreJob.unscored(5)).extracting(AdviceHeader::adviceId).contains(morning10, morning11);
+    scoreJob.scoreDue(execution(D.getLast()));
+    assertThat(scoreJob.unscored(5)).extracting(AdviceHeader::adviceId).doesNotContain(morning10, morning11);
+
+    // 같은 창: 두 판단에 공통인 T05 의 진입·청산·초과가 같다
+    CandidateScoreRow d5 = scoreWriter.candidateScores(daily10).stream().filter(r -> r.ticker().equals(AdvisorSyntheticData.ticker(5)) && r.horizonDays() == 5)
+        .findFirst().orElseThrow();
+    CandidateScoreRow m5 = scoreWriter.candidateScores(morning10).stream().filter(r -> r.ticker().equals(AdvisorSyntheticData.ticker(5)) && r.horizonDays() == 5)
+        .findFirst().orElseThrow();
+    assertThat(m5.entryDate()).isEqualTo(d5.entryDate());
+    assertThat(m5.exitDate()).isEqualTo(d5.exitDate());
+    assertThat(m5.excessRet()).isEqualTo(d5.excessRet());
+    assertThat(scoreWriter.callScores(morning10)).as("아침은 국면을 다시 판단하지 않아 콜 채점이 없다").isEmpty();
+
+    // DAILY KPI 불변
+    AdvisorKpiService.VariantSummary after = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+    assertThat(after.picks()).isEqualTo(dailyOnly.picks());
+    assertThat(after.meanExcess()).isEqualTo(dailyOnly.meanExcess());
+    assertThat(after.poolMeanExcess()).isEqualTo(dailyOnly.poolMeanExcess());
+    assertThat(adviceWriter.countLivePicks(AdviceKind.DAILY)).isEqualTo(3);
+
+    // 대응 비교: 날짜별 (아침 LONG 평균 − 저녁 LONG 평균)
+    Map<String, Double> excess = new java.util.HashMap<>();
+    for (long id : List.of(daily10, daily11)) {
+      scoreWriter.candidateScores(id).stream().filter(r -> r.horizonDays() == 5).forEach(r -> excess.put(r.ticker(), r.excessRet()));
+    }
+    double t01 = excess.get(AdvisorSyntheticData.ticker(1));
+    double t05 = excess.get(AdvisorSyntheticData.ticker(5));
+    double t30 = excess.get(AdvisorSyntheticData.ticker(30));
+    AdvisorKpiService.MorningVsDaily pair = kpi.morningVsDaily(D.getFirst(), D.getLast());
+    assertThat(pair.pairs()).extracting(AdvisorKpiService.MorningPair::baseDate).containsExactly(D.get(10), D.get(11));
+    assertThat(pair.pairs().getFirst().diff()).isCloseTo((t05 + t01) / 2 - (t05 + t30) / 2, within(1e-12));
+    assertThat(pair.pairs().get(1).diff()).isCloseTo(0.0, within(1e-12));
+    assertThat(pair.all().n()).isEqualTo(2);
+    assertThat(pair.triggered().n()).isEqualTo(1);
+    assertThat(pair.triggered().meanDiff()).isCloseTo(pair.pairs().getFirst().diff(), within(1e-12));
+    assertThat(pair.untriggered().n()).isEqualTo(1);
+    assertThat(pair.all().seDiff()).isNotNull();
+  }
+
+  @Test
+  @DisplayName("대응 차이 통계: 평균·se(표본 sd/√n)·t, n<2 면 se·t 없음, 빈 목록은 전부 null")
+  void pairedDiffMath() {
+    AdvisorKpiService.PairedDiff p = AdvisorKpiService.paired(List.of(0.01, 0.03, 0.02));
+    assertThat(p.n()).isEqualTo(3);
+    assertThat(p.meanDiff()).isCloseTo(0.02, within(1e-12));
+    assertThat(p.seDiff()).isCloseTo(0.01 / Math.sqrt(3), within(1e-12));
+    assertThat(p.t()).isCloseTo(0.02 / (0.01 / Math.sqrt(3)), within(1e-9));
+    assertThat(AdvisorKpiService.paired(List.of(0.05))).isEqualTo(new AdvisorKpiService.PairedDiff(1, 0.05, null, null));
+    assertThat(AdvisorKpiService.paired(List.of())).isEqualTo(new AdvisorKpiService.PairedDiff(0, null, null, null));
   }
 
   @Test
@@ -506,6 +588,26 @@ class AdviceScoringPgTest {
     }
     adviceWriter.insertPicks(id, pickRows);
     return id;
+  }
+
+  /**
+   * 아침 재판정 픽스처: 저녁과 같은 기준일·창, parent·diff_json(triggers.any)·픽 action 을 채운다. 국면 필드는 비운다(MorningAdviseJob 과 같게).
+   */
+  private long insertMorning(LocalDate baseDate, long parentId, List<Integer> candidateIdx, List<PickRow> picks, boolean triggered) {
+    AdviceHeader header = AdviceHeader.builder().runId(runId).baseDate(baseDate).adviceKind(AdviceKind.MORNING).variant(AdviceVariant.LIVE).horizonDays(5)
+        .dataQuality(DataQuality.OK).promptVersion(PromptResources.MORNING_VERSION).model("m").parentAdviceId(parentId)
+        .diffJson(Map.of("triggers", Map.of("any", triggered))).build();
+    long id = adviceWriter.insertHeader(header);
+    adviceWriter.insertCandidates(id, candidateIdx.stream().map(i -> CandidateRow.builder().ticker(AdvisorSyntheticData.ticker(i)).quantRank(1)
+        .quantScore(0.5).stockName("종목" + i).marketType(i % 2 == 0 ? "KOSPI" : "KOSDAQ").benchIndexCode(i % 2 == 0 ? "0001" : "1001")
+        .sectorCode("S" + (i % 4)).signals(Map.of()).features(Map.of()).appliedLessonIds(List.of()).build()).toList());
+    adviceWriter.insertPicks(id, picks);
+    return id;
+  }
+
+  private AdvisorExecution execution(LocalDate baseDate) {
+    AdvisorRun run = AdvisorRun.builder().runId(runId).jobType(AdvisorJobType.SCORE).triggerType(AdvisorTriggerType.API).baseDate(baseDate).build();
+    return new AdvisorExecution(run, baseDate, properties);
   }
 
   private kr.hvy.blog.modules.advisor.domain.model.PickNoteRow note(long adviceId, long checkId, String ticker, double excess,

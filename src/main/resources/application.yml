@@ -294,6 +294,8 @@ advisor:
     link-window-days: 60
     sigma-multiple: 1.0           # 판정 임계 = 배수 × σ_1d. |β × 미국 1일 수익률| 이 미만이면 HOLD
     max-us-lag-days: 4            # 미국 데이터가 기준일보다 이만큼 오래됐으면(휴장·수집 실패) SKIPPED
+    advise-deadline: "08:50"      # 07:40 아침 재판정(MORNING_ADVISE, M4) 발행 마감(KST). 이후 실행은 SKIPPED — 개장 후 발행은 D+1 시가 진입과 모순
+    sector-sigma-multiple: 2.0    # 아침 재판정 트리거 플래그: 섹터 연동 심볼 |r1| ≥ 배수 × 자기 σ. 플래그는 호출 여부가 아니라 diff_json 기록용
   trend:                          # 규칙 기반 중기 추세(강세·보합·약세). 성분 5개 합 [-5,+5]. 배포 후 10년 라벨 분포(강세≈40/보합≈35/약세≈25%)로 조정
     bull-threshold: 2
     bear-threshold: -2
@@ -429,6 +431,10 @@ scheduler:
     lock-name: ADVISOR-MORNING-CHECK-TEST
     cron-expression: "0 30 7 * * MON-FRI"
     enabled: false
+  advisor-morning-advise:         # 07:30 점검 뒤, 08:50 발행 마감 전. 전일 저녁 픽을 밤사이 정보로 KEEP/DROP/ADD (LLM 매일, 저녁과 같은 창으로 채점)
+    lock-name: ADVISOR-MORNING-ADVISE-TEST
+    cron-expression: "0 40 7 * * MON-FRI"
+    enabled: false
   advisor-weekly-review:
     lock-name: ADVISOR-WEEKLY-REVIEW-TEST
     cron-expression: "0 0 8 * * SUN"
@@ -524,6 +530,10 @@ scheduler:
   advisor-morning-check:
     lock-name: ADVISOR-MORNING-CHECK-PROD
     cron-expression: "0 30 7 * * MON-FRI"
+    enabled: true
+  advisor-morning-advise:         # M4 아침 재판정. 마이그레이션 20260925_01_advisor_morning.sql 적용 뒤 기동해야 한다(새 컬럼 INSERT)
+    lock-name: ADVISOR-MORNING-ADVISE-PROD
+    cron-expression: "0 40 7 * * MON-FRI"
     enabled: true
   advisor-weekly-review:
     lock-name: ADVISOR-WEEKLY-REVIEW-PROD

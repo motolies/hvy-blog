@@ -54,11 +54,42 @@ public class GlobalLinkService {
       WHERE symbol IN (:symbols) AND trade_date < :d AND trade_date > CAST(:d AS date) - INTERVAL '30 days'
       """;
 
+  /**
+   * 섹터 연동 심볼(tb_stock_global_sector_map, MARKET 묶음 제외)별 가장 최근 세션(현지일 < :d)의 1일 수익률과, 그 세션을 뺀 직전 :n 세션의 σ.
+   * σ 에서 최신 세션을 빼야 "오늘 움직임이 평소의 몇 σ 인가" 가 자기 자신에 희석되지 않는다. 150 캘린더일 ≈ 100 세션이라 :n=60 을 채운다.
+   */
+  private static final String SECTOR_MOVE_SQL = """
+      WITH m AS (SELECT DISTINCT sector_code, global_symbol FROM tb_stock_global_sector_map WHERE sector_code <> 'MARKET'),
+      r AS (
+          SELECT g.symbol, g.trade_date, g.close_price / NULLIF(LAG(g.close_price) OVER (PARTITION BY g.symbol ORDER BY g.trade_date), 0) - 1 AS r1
+          FROM tb_stock_global_market_daily g
+          WHERE g.symbol IN (SELECT global_symbol FROM m) AND g.trade_date < :d AND g.trade_date > CAST(:d AS date) - INTERVAL '150 days'
+      ),
+      ranked AS (SELECT symbol, trade_date, r1, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn FROM r WHERE r1 IS NOT NULL)
+      SELECT x.symbol, x.trade_date, x.r1,
+             (SELECT STDDEV_SAMP(p.r1) FROM ranked p WHERE p.symbol = x.symbol AND p.rn BETWEEN 2 AND :n + 1) AS sigma,
+             (SELECT STRING_AGG(m.sector_code, ',' ORDER BY m.sector_code) FROM m WHERE m.global_symbol = x.symbol) AS groups
+      FROM ranked x
+      WHERE x.rn = 1
+      ORDER BY x.symbol
+      """;
+
   private final NamedParameterJdbcTemplate jdbc;
   private final AdvisorProperties properties;
 
   /** 밤사이 미국 세션 1건 */
   public record Overnight(String symbol, LocalDate date, Double r1) {
+  }
+
+  /**
+   * 섹터 연동 심볼 1개의 밤사이 움직임. groups 는 매핑된 CUSTOM 섹터 묶음(SEMICON·BIO…, 쉼표 구분) — KRX 업종과의 연결은 CUSTOM 사슬 결정 전이라 묶음 이름으로만 싣는다.
+   */
+  public record SectorMove(String symbol, String groups, LocalDate date, Double r1, Double sigma) {
+
+    /** r1 / σ (둘 중 하나라도 없거나 σ ≤ 0 이면 null) */
+    public Double z() {
+      return r1 == null || sigma == null || sigma <= 0 ? null : r1 / sigma;
+    }
   }
 
   /**
@@ -104,6 +135,15 @@ public class GlobalLinkService {
       }
     });
     return map;
+  }
+
+  /**
+   * 섹터 연동 심볼 전부의 가장 최근 세션(현지일 < before) 수익률·σ — 아침 재판정의 overnight.sectorSymbols 와 섹터 트리거 플래그.
+   */
+  public List<SectorMove> sectorMoves(LocalDate before) {
+    return jdbc.query(SECTOR_MOVE_SQL, Map.of("d", before, "n", properties.getScoring().getSigmaLookbackDays()),
+        (rs, i) -> new SectorMove(rs.getString("symbol"), rs.getString("groups"), rs.getObject("trade_date", LocalDate.class), d(rs.getObject("r1")),
+            d(rs.getObject("sigma"))));
   }
 
   /**

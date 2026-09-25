@@ -54,7 +54,11 @@ public record AdviceHeader(
      * 프롬프트에 실린 메모리 요약 {recentOutcomes: 행수, lessons: [id], scoreboard: bool} (note-v1). 하나도 실리지 않았으면(300 게이트 전·확정 노트 부족·NOMEM 섀도) null —
      * LLM_NOMEM 섀도 창의 시작점(AdviceWriter.firstMemoryAdviceDate)과 사후 요인 분리에 쓴다
      */
-    Map<String, Object> memoryJson) {
+    Map<String, Object> memoryJson,
+    /** 아침 재판정(MORNING)이 다시 본 원 저녁 판단(DAILY LIVE) id. 다른 종류는 null (M4) */
+    Long parentAdviceId,
+    /** 아침 재판정의 저녁 대비 조치·트리거 메타 {keep, add, drop, triggers, …}. 다른 종류는 null (M4) */
+    Map<String, Object> diffJson) {
 
   /**
    * 지수 코드의 규칙 추세 (0001 → trendKospi, 1001 → trendKosdaq).

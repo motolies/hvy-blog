@@ -224,7 +224,8 @@ public class AdviceToolkit {
     for (CandidateRow c : adviceWriter.candidates(morning.adviceId())) {
       names.putIfAbsent(c.ticker(), c);
     }
-    List<AdviceComparison.Change> changes = AdviceComparison.compare(adviceWriter.picks(evening.adviceId()), adviceWriter.picks(morning.adviceId()));
+    List<AdviceComparison.Change> changes = AdviceComparison.compare(adviceWriter.picks(evening.adviceId()), adviceWriter.picks(morning.adviceId()),
+        declaredDrops(morning));
     Map<String, Object> m = ToolJson.obj();
     m.put("baseDate", evening.baseDate().toString());
     m.put("eveningAdviceId", evening.adviceId());
@@ -251,6 +252,23 @@ public class AdviceToolkit {
     m.put("declared", declared);
     m.put("note", declared ? "action·reason 은 아침 재판정이 기록한 원문" : "action 은 저녁·아침 픽 코드 집합 차이로 계산한 값 — DROP·KEEP 사유는 모델 원문이 아니다");
     return m;
+  }
+
+  /**
+   * 아침 판단 diff_json.drop 의 티커 → 사유 (M4). DROP 은 아침 픽에 행이 없어 여기가 모델 원문 사유의 유일한 출처다. 없거나 형식이 다르면 빈 맵.
+   */
+  static Map<String, String> declaredDrops(AdviceHeader morning) {
+    Map<String, String> drops = new HashMap<>();
+    if (morning.diffJson() == null || !(morning.diffJson().get("drop") instanceof List<?> list)) {
+      return drops;
+    }
+    for (Object item : list) {
+      if (item instanceof Map<?, ?> m && m.get("ticker") instanceof String ticker) {
+        Object reason = m.get("reason");
+        drops.put(ticker, reason == null ? null : reason.toString());
+      }
+    }
+    return drops;
   }
 
   private static Map<String, Object> pickBrief(PickRow p) {

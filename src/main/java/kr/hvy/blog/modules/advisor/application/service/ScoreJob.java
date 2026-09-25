@@ -132,10 +132,11 @@ public class ScoreJob implements AdvisorJob, AdviseJob.ScoreHook {
   /**
    * 결정 호라이즌 잠정 채점이 저장된 직후 같은 LIVE 판단의 OPEN 노트를 확정한다 — final_excess = 픽의 excess_ret(MISSING 제외), 12:00 초과와 부호가 같으면
    * CONFIRMED 아니면 REFUTED. 격리: 실패해도 채점은 유지되고 run 은 PARTIAL 로 남는다. 섀도 판단·CONFIRMED 재채점 경로에서는 부르지 않는다(노트는 append-only).
-   * 확정한 노트 수를 돌려준다.
+   * 12:00 노트는 DAILY LIVE 에만 생기므로(IntradayCheckJob) 다른 종류(M4 부터 채점되는 MORNING)는 조회 없이 0 이다 — MORNING 픽 채점으로 저녁 노트를 확정하면
+   * 노트의 "판단 픽" 과 확정값의 판단이 어긋난다. 확정한 노트 수를 돌려준다.
    */
   int finalizeNotes(AdvisorExecution execution, AdviceHeader advice) {
-    if (advice.adviceId() == null || advice.variant() != AdviceVariant.LIVE) {
+    if (advice.adviceId() == null || advice.variant() != AdviceVariant.LIVE || advice.adviceKind() != AdviceKind.DAILY) {
       return 0;
     }
     try {
@@ -179,10 +180,11 @@ public class ScoreJob implements AdvisorJob, AdviseJob.ScoreHook {
   }
 
   /**
-   * 호라이즌 h 로 아직 채점되지 않았고 청산일이 캘린더에 있는 DAILY 판단(모든 변형).
+   * 호라이즌 h 로 아직 채점되지 않았고 청산일이 캘린더에 있는 DAILY·MORNING 판단(모든 변형).
    * <p>
-   * 종류를 DAILY 로 한정하는 이유: scoreDue 는 결정·진단 호라이즌을 모든 판단에 일괄 적용하므로 H20·H60·H180 판단이 들어오면 의미 없는 h=5 채점 행이 쌓이고,
-   * NOT EXISTS 기준이라 한 번 쌓이면 다시 채점되지 않는다. MORNING(같은 창 채점, M4)·호라이즌 인지 채점(M5)이 이 조건을 의도적으로 넓히는 지점이다.
+   * MORNING(아침 재판정, M4)은 저녁과 같은 base_date·horizon_days 라 결정·진단 호라이즌(5·1·20)을 그대로 적용해도 같은 창이 된다 — 그래서 같은 기준일
+   * MORNING − DAILY 가 대응 비교다. H20·H60·H180 은 아직 뺀다: scoreDue 가 호라이즌을 모든 판단에 일괄 적용하므로 들어오면 의미 없는 h=5 채점 행이 쌓이고,
+   * NOT EXISTS 기준이라 한 번 쌓이면 다시 채점되지 않는다. 호라이즌 인지 채점(M5)이 이 조건을 다시 넓히는 지점이다. ADHOC 는 평가 루프 밖이라 계속 뺀다.
    */
   List<AdviceHeader> unscored(int h) {
     List<Long> ids = jdbc.queryForList("""
@@ -192,7 +194,7 @@ public class ScoreJob implements AdvisorJob, AdviseJob.ScoreHook {
         FROM tb_advisor_advice a
                  JOIN cal c ON c.trade_date = a.base_date
                  CROSS JOIN last
-        WHERE a.advice_kind = 'DAILY'
+        WHERE a.advice_kind IN ('DAILY', 'MORNING')
           AND c.rn + ? <= last.max_rn
           AND NOT EXISTS (SELECT 1 FROM tb_advisor_candidate_score s WHERE s.advice_id = a.advice_id AND s.horizon_days = ?)
           AND EXISTS (SELECT 1 FROM tb_advisor_candidate cd WHERE cd.advice_id = a.advice_id)

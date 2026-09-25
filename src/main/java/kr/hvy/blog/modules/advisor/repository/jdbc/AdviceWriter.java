@@ -15,6 +15,7 @@ import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
+import kr.hvy.blog.modules.advisor.domain.code.PickAction;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
@@ -55,7 +56,7 @@ public class AdviceWriter {
   private static final String HEADER_COLUMNS = "advice_id, run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, "
       + "kosdaq_dir, p_up, regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, "
       + "entry_date, exit_date, news_ids, prompt_version, model, system_fingerprint, weight_set_id, "
-      + "active_lesson_ids, data_quality, guard_json, published_at, created_at, memory_json";
+      + "active_lesson_ids, data_quality, guard_json, published_at, created_at, memory_json, parent_advice_id, diff_json";
 
   private final JdbcTemplate jdbc;
 
@@ -67,8 +68,9 @@ public class AdviceWriter {
     return jdbc.queryForObject(
         "INSERT INTO tb_advisor_advice (run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, kosdaq_dir, p_up, "
             + "regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, entry_date, exit_date, "
-            + "news_ids, prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, data_quality, guard_json, published_at, memory_json) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
+            + "news_ids, prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, data_quality, guard_json, published_at, memory_json, "
+            + "parent_advice_id, diff_json) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
         Long.class,
         h.runId(), h.baseDate(), code(h.adviceKind()), h.variant().getCode(), h.horizonDays(),
         code(h.regimeCode()), code(h.kospiDir()), code(h.kosdaqDir()), h.pUp(),
@@ -78,7 +80,7 @@ public class AdviceWriter {
         h.promptVersion(), h.model(), h.systemFingerprint(),
         h.weightSetId(), AdvisorJdbc.jsonb(h.activeLessonIds()),
         (h.dataQuality() == null ? DataQuality.OK : h.dataQuality()).getCode(), AdvisorJdbc.jsonb(h.guard()), AdvisorJdbc.ts(h.publishedAt()),
-        AdvisorJdbc.jsonb(h.memoryJson()));
+        AdvisorJdbc.jsonb(h.memoryJson()), h.parentAdviceId(), AdvisorJdbc.jsonb(h.diffJson()));
   }
 
   /**
@@ -123,7 +125,7 @@ public class AdviceWriter {
   }
 
   /**
-   * 픽을 저장한다. 후보 FK 가 후보 밖 티커를 막는다(가드 뒤 2차 방어).
+   * 픽을 저장한다. 후보 FK 가 후보 밖 티커를 막는다(가드 뒤 2차 방어). action·action_reason 은 아침 재판정(MORNING) 픽만 채우고 나머지는 null 이다.
    */
   @Transactional
   public int insertPicks(long adviceId, List<PickRow> rows) {
@@ -131,8 +133,8 @@ public class AdviceWriter {
       return 0;
     }
     int[][] counts = jdbc.batchUpdate(
-        "INSERT INTO tb_advisor_pick (advice_id, ticker, pick_rank, direction, conviction, thesis, risk_note, cited_json, cited_news) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tb_advisor_pick (advice_id, ticker, pick_rank, direction, conviction, thesis, risk_note, cited_json, cited_news, action, "
+            + "action_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rows, rows.size(), (ps, r) -> {
           ps.setLong(1, adviceId);
           ps.setString(2, r.ticker());
@@ -143,6 +145,8 @@ public class AdviceWriter {
           ps.setString(7, r.riskNote());
           ps.setObject(8, r.cited() == null ? null : AdvisorJson.write(r.cited()), java.sql.Types.OTHER);
           ps.setObject(9, r.citedNews() == null || r.citedNews().isEmpty() ? null : AdvisorJson.write(r.citedNews()), java.sql.Types.OTHER);
+          ps.setString(10, code(r.action()));
+          ps.setString(11, r.actionReason());
         });
     return sum(counts);
   }
@@ -217,7 +221,7 @@ public class AdviceWriter {
   }
 
   public List<PickRow> picks(long adviceId) {
-    return jdbc.query("SELECT ticker, pick_rank, direction, conviction, thesis, risk_note, cited_json, cited_news FROM tb_advisor_pick "
+    return jdbc.query("SELECT ticker, pick_rank, direction, conviction, thesis, risk_note, cited_json, cited_news, action, action_reason FROM tb_advisor_pick "
         + "WHERE advice_id = ? ORDER BY pick_rank", PICK_MAPPER, adviceId);
   }
 
@@ -284,6 +288,8 @@ public class AdviceWriter {
       .publishedAt(AdvisorJdbc.instant(rs, "published_at"))
       .createdAt(AdvisorJdbc.instant(rs, "created_at"))
       .memoryJson(readNullableMap(rs, "memory_json"))
+      .parentAdviceId(AdvisorJdbc.nullableLong(rs, "parent_advice_id"))
+      .diffJson(readNullableMap(rs, "diff_json"))
       .build();
 
   /**
@@ -337,6 +343,8 @@ public class AdviceWriter {
       .riskNote(rs.getString("risk_note"))
       .cited(readCited(rs))
       .citedNews(readJson(rs, "cited_news", STRINGS))
+      .action(AdvisorJdbc.enumOrNull(rs, "action", PickAction.class))
+      .actionReason(rs.getString("action_reason"))
       .build();
 
   private static List<CitedFeature> readCited(ResultSet rs) throws SQLException {

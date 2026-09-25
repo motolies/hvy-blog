@@ -1864,8 +1864,8 @@ CREATE TABLE IF NOT EXISTS tb_advisor_run
 
 COMMENT ON TABLE  tb_advisor_run                   IS 'AI 시장 판단 잡 실행 이력';
 COMMENT ON COLUMN tb_advisor_run.run_id            IS '실행 식별자';
-COMMENT ON COLUMN tb_advisor_run.job_type          IS '잡 유형: ADVISE | SCORE | INTRADAY | WEEKLY_REVIEW | IC_BACKFILL (AdvisorJobType)';
-COMMENT ON COLUMN tb_advisor_run.trigger_type      IS '트리거 출처: SCHEDULER | API';
+COMMENT ON COLUMN tb_advisor_run.job_type          IS '잡 유형: ADVISE | SCORE | INTRADAY | MORNING_CHECK | MORNING_ADVISE | WEEKLY_REVIEW | IC_BACKFILL | ADVISE_ADHOC (AdvisorJobType)';
+COMMENT ON COLUMN tb_advisor_run.trigger_type      IS '트리거 출처: SCHEDULER | API | CHAT (AdvisorTriggerType)';
 COMMENT ON COLUMN tb_advisor_run.status            IS '상태: RUNNING | SUCCESS | PARTIAL | FAILED | SKIPPED | CANCELED(관리자 취소, 2026-09-13)';
 COMMENT ON COLUMN tb_advisor_run.base_date         IS '판단 기준 거래일 (ADVISE·INTRADAY) 또는 채점 기준일';
 COMMENT ON COLUMN tb_advisor_run.model             IS '판단에 쓴 모델 ID';
@@ -1989,6 +1989,8 @@ CREATE TABLE IF NOT EXISTS tb_advisor_advice
     memory_json        JSONB                   DEFAULT NULL,
     published_at       TIMESTAMPTZ(6)          DEFAULT NULL,
     created_at         TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
+    parent_advice_id   BIGINT                  DEFAULT NULL,
+    diff_json          JSONB                   DEFAULT NULL,
     CONSTRAINT uk_advisor_advice UNIQUE (base_date, advice_kind, variant)
 );
 
@@ -1996,8 +1998,8 @@ COMMENT ON TABLE  tb_advisor_advice                    IS '일일 판단 헤더 
 COMMENT ON COLUMN tb_advisor_advice.advice_id          IS '판단 식별자';
 COMMENT ON COLUMN tb_advisor_advice.run_id             IS '생성한 run';
 COMMENT ON COLUMN tb_advisor_advice.base_date          IS '판단 기준 거래일 (특징은 이 날짜 이하만 사용)';
-COMMENT ON COLUMN tb_advisor_advice.advice_kind        IS '판단 종류: DAILY (확장 여지)';
-COMMENT ON COLUMN tb_advisor_advice.variant            IS '변형: LIVE 발행본 | QUANT_TOPN 정량 top-N 섀도(LLM 없음) | LLM_NOMEM 메모리 없는 LLM 섀도';
+COMMENT ON COLUMN tb_advisor_advice.advice_kind        IS '판단 종류: DAILY 19:30 일일 | MORNING 07:40 아침 재판정(저녁과 같은 base_date·창) | H20 | H60 | H180 | ADHOC 채팅 수시 판단 (AdviceKind)';
+COMMENT ON COLUMN tb_advisor_advice.variant            IS '변형: LIVE 발행본 | QUANT_TOPN 정량 top-N 섀도(LLM 없음) | QUANT_TOPN_BROAD 픽 유니버스 제한 없는 정량 섀도 | LLM_NOMEM 메모리 없는 LLM 섀도 | LLM_NONEWS 뉴스 없는 LLM 섀도';
 COMMENT ON COLUMN tb_advisor_advice.horizon_days       IS '결정 호라이즌(거래일)';
 COMMENT ON COLUMN tb_advisor_advice.regime_code        IS '시장 국면: RISK_ON | NEUTRAL | RISK_OFF';
 COMMENT ON COLUMN tb_advisor_advice.kospi_dir          IS 'KOSPI 5일 방향 예측: UP | NEUTRAL | DOWN';
@@ -2024,6 +2026,8 @@ COMMENT ON COLUMN tb_advisor_advice.guard_json         IS 'AdviceGuard 가 제�
 COMMENT ON COLUMN tb_advisor_advice.memory_json        IS '프롬프트에 실린 메모리 요약 {recentOutcomes 행수, lessons [id], scoreboard bool} (note-v1, 2026-09-21). 하나도 실리지 않은 판단·LLM_NOMEM 섀도는 NULL — LIVE 의 MIN(base_date) WHERE NOT NULL 이 NOMEM 섀도 창 시작점';
 COMMENT ON COLUMN tb_advisor_advice.published_at       IS 'Slack 발행 시각 (NULL = 미발행)';
 COMMENT ON COLUMN tb_advisor_advice.created_at         IS '생성일시';
+COMMENT ON COLUMN tb_advisor_advice.parent_advice_id   IS '아침 재판정(MORNING)이 다시 본 원 저녁 판단(DAILY LIVE) advice_id. 그 밖의 종류는 NULL (M4, 2026-09-25)';
+COMMENT ON COLUMN tb_advisor_advice.diff_json          IS '아침 재판정의 저녁 대비 조치 {parentAdviceId, keep:[{ticker,reason}], add:[…], drop:[{ticker,reason,direction,conviction}], triggers:{gap,sector,caution,any,…}, usDate}. 트리거는 호출 여부가 아니라 사후 분석(트리거일/비트리거일)용';
 
 CREATE INDEX IF NOT EXISTS idx_advisor_advice_run ON tb_advisor_advice (run_id);
 
@@ -2075,6 +2079,8 @@ CREATE TABLE IF NOT EXISTS tb_advisor_pick
     risk_note  VARCHAR(600)              DEFAULT NULL,
     cited_json JSONB                     DEFAULT NULL,
     cited_news JSONB                     DEFAULT NULL,
+    action        VARCHAR(10)            DEFAULT NULL,
+    action_reason VARCHAR(300)           DEFAULT NULL,
     CONSTRAINT pk_advisor_pick PRIMARY KEY (advice_id, ticker),
     CONSTRAINT fk_advisor_pick_candidate FOREIGN KEY (advice_id, ticker)
         REFERENCES tb_advisor_candidate (advice_id, ticker) ON DELETE CASCADE
@@ -2090,6 +2096,8 @@ COMMENT ON COLUMN tb_advisor_pick.thesis     IS '근거 (200자 목표)';
 COMMENT ON COLUMN tb_advisor_pick.risk_note  IS '리스크';
 COMMENT ON COLUMN tb_advisor_pick.cited_json IS '근거로 인용한 특징 [{name,value}] — 입력값과 대조해 검증';
 COMMENT ON COLUMN tb_advisor_pick.cited_news IS '근거로 인용한 헤드라인 id ["N3",…] — 프롬프트에 실린 id 만 (advice-v4)';
+COMMENT ON COLUMN tb_advisor_pick.action     IS '아침 재판정(MORNING) 조치: KEEP | ADD (PickAction). DROP 은 픽에 없고 헤더 diff_json.drop 에만. 다른 종류는 NULL';
+COMMENT ON COLUMN tb_advisor_pick.action_reason IS '조치 사유 (모델 원문, 가드가 보충한 KEEP 은 그 사유)';
 
 CREATE INDEX IF NOT EXISTS idx_advisor_pick_ticker ON tb_advisor_pick (ticker);
 
@@ -2490,6 +2498,11 @@ ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS news_ids   JSONB DEFAULT 
 ALTER TABLE tb_advisor_pick   ADD COLUMN IF NOT EXISTS cited_news JSONB DEFAULT NULL;
 -- note-v1 (12:00 오답노트, 2026-09-21): 프롬프트에 실린 메모리 요약. tb_advisor_pick_note 는 위 CREATE TABLE IF NOT EXISTS 가 새로 만든다
 ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS memory_json JSONB DEFAULT NULL;
+-- M4 아침 재판정(morning-v1, 2026-09-25): 원 저녁 판단 참조·조치 메타, 픽 조치. 기존 DB 는 db/migrate/20260925_01_advisor_morning.sql 이 주석까지 갱신한다
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS parent_advice_id BIGINT       DEFAULT NULL;
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS diff_json        JSONB        DEFAULT NULL;
+ALTER TABLE tb_advisor_pick   ADD COLUMN IF NOT EXISTS action           VARCHAR(10)  DEFAULT NULL;
+ALTER TABLE tb_advisor_pick   ADD COLUMN IF NOT EXISTS action_reason    VARCHAR(300) DEFAULT NULL;
 
 -- <<< END db/advisor-schema.sql
 

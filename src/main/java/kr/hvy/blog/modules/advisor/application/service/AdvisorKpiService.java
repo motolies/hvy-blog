@@ -147,6 +147,76 @@ public class AdvisorKpiService {
     return new MorningSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), d(row.get("caution_rate")));
   }
 
+  /** 같은 기준일 아침 재판정·저녁 판단 1쌍: LONG 픽 평균 초과수익(결정 호라이즌)과 그날이 트리거일이었는지 (diff_json.triggers.any) */
+  public record MorningPair(LocalDate baseDate, double dailyMean, double morningMean, int dailyPicks, int morningPicks, boolean triggered) {
+
+    public double diff() {
+      return morningMean - dailyMean;
+    }
+  }
+
+  /** 대응 차이(MORNING − DAILY) 요약: n = 기준일 수, t = mean / se (n < 2 면 se·t 는 null) */
+  public record PairedDiff(int n, Double meanDiff, Double seDiff, Double t) {
+  }
+
+  /**
+   * 아침 재판정 대응 비교 KPI (M4): 전체·트리거일·비트리거일. 사전 등록 판정(40거래일 뒤 트리거일 t &gt; 2 면 유지)의 근거다.
+   */
+  public record MorningVsDaily(LocalDate from, LocalDate to, int horizonDays, PairedDiff all, PairedDiff triggered, PairedDiff untriggered,
+                               List<MorningPair> pairs) {
+  }
+
+  /**
+   * MORNING − DAILY 대응 비교. 같은 기준일에서 아침 판단(parent_advice_id 로 묶인 저녁 판단)과 저녁 판단의 LONG 픽 평균 초과수익 차이를 날짜 단위로 구하고,
+   * 날짜들의 평균·se(표본 표준편차/√n)·t 를 낸다. 두 판단이 같은 창·같은 후보군이라 후보군 평균이 소거되어 차이가 곧 밤사이 정보의 가치다.
+   * <p>
+   * 짝의 단위가 픽이 아니라 날짜인 이유: 같은 날 픽들은 같은 시장 충격을 공유해 독립이 아니다 — 픽 단위 se 는 과소추정된다.
+   * 어느 한쪽에 채점된 LONG 픽이 없는 날(아침이 LONG 을 전부 뺐거나 미채점)은 짝이 성립하지 않아 빠진다. data_quality=OK 인 저녁만 센다.
+   */
+  public MorningVsDaily morningVsDaily(LocalDate from, LocalDate to) {
+    List<MorningPair> pairs = jdbc.query("""
+        WITH pick AS (
+            SELECT pk.advice_id, AVG(s.excess_ret) AS mean_excess, COUNT(*) AS n
+            FROM tb_advisor_pick pk
+                     JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
+                     JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
+            WHERE a.advice_kind IN ('DAILY', 'MORNING') AND a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to
+              AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
+            GROUP BY pk.advice_id
+        )
+        SELECT m.base_date, pd.mean_excess AS daily_mean, pm.mean_excess AS morning_mean, pd.n AS daily_n, pm.n AS morning_n,
+               COALESCE((m.diff_json -> 'triggers' ->> 'any')::boolean, FALSE) AS triggered
+        FROM tb_advisor_advice m
+                 JOIN tb_advisor_advice d ON d.advice_id = m.parent_advice_id
+                 JOIN pick pm ON pm.advice_id = m.advice_id
+                 JOIN pick pd ON pd.advice_id = d.advice_id
+        WHERE m.advice_kind = 'MORNING' AND m.variant = 'LIVE' AND d.advice_kind = 'DAILY' AND d.variant = 'LIVE'
+          AND m.base_date BETWEEN :from AND :to AND d.data_quality = 'OK'
+        ORDER BY m.base_date
+        """, params(from, to), (rs, i) -> new MorningPair(rs.getObject("base_date", LocalDate.class), rs.getDouble("daily_mean"), rs.getDouble("morning_mean"),
+        rs.getInt("daily_n"), rs.getInt("morning_n"), rs.getBoolean("triggered")));
+    return new MorningVsDaily(from, to, properties.getHorizonDays(), paired(pairs.stream().map(MorningPair::diff).toList()),
+        paired(pairs.stream().filter(MorningPair::triggered).map(MorningPair::diff).toList()),
+        paired(pairs.stream().filter(p -> !p.triggered()).map(MorningPair::diff).toList()), pairs);
+  }
+
+  /**
+   * 차이 목록의 평균·se·t. 비면 전부 null, 1개면 평균만.
+   */
+  static PairedDiff paired(List<Double> diffs) {
+    int n = diffs.size();
+    if (n == 0) {
+      return new PairedDiff(0, null, null, null);
+    }
+    double mean = diffs.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+    if (n < 2) {
+      return new PairedDiff(n, mean, null, null);
+    }
+    double ss = diffs.stream().mapToDouble(d -> (d - mean) * (d - mean)).sum();
+    double se = Math.sqrt(ss / (n - 1)) / Math.sqrt(n);
+    return new PairedDiff(n, mean, se, se > 0 ? mean / se : null);
+  }
+
   /**
    * 신뢰도 버킷별 보정 표 (LIVE, LONG).
    */

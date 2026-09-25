@@ -17,6 +17,11 @@ public enum AdvisorJobType implements EnumCode<String> {
   INTRADAY("INTRADAY", "장중 점검", false),
   /** 07:30 아침 점검: 밤사이 미국 마감을 β 로 환산한 예상 갭으로 직전 판단을 유지/강화/주의 판정 (규칙 기반, 원 판단 불변) */
   MORNING_CHECK("MORNING_CHECK", "아침 해외 반영 점검", false),
+  /**
+   * 07:40 아침 재판정(advice_kind=MORNING, M4): 전일 저녁 LIVE 판단을 밤사이 정보로 다시 보고 KEEP/DROP/ADD 한다. 저녁과 같은 base_date·진입/청산 창이라
+   * MORNING − DAILY 가 밤사이 정보의 가치를 재는 대응 비교가 된다. 07:30 MORNING_CHECK(규칙 점검)와 유형을 나눈 이유는 RUNNING 부분 유니크가 유형 단위이기 때문
+   */
+  MORNING_ADVISE("MORNING_ADVISE", "아침 재판정", true),
   WEEKLY_REVIEW("WEEKLY_REVIEW", "주간 검토 (가중치·보정·교훈·보고)", true),
   IC_BACKFILL("IC_BACKFILL", "시그널 IC 사전 추정", true),
   /**

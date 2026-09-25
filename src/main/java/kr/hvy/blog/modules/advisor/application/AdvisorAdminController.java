@@ -209,6 +209,16 @@ public class AdvisorAdminController {
   }
 
   /**
+   * 아침 재판정 대응 비교 (M4): 같은 기준일 MORNING − DAILY LONG 픽 평균 초과수익의 날짜 단위 평균·se·t — 전체·트리거일·비트리거일.
+   */
+  @GetMapping("/scores/morning-vs-daily")
+  public AdvisorKpiService.MorningVsDaily morningVsDaily(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+    LocalDate end = to == null ? MarketClock.today() : to;
+    return kpi.morningVsDaily(from == null ? end.minusDays(90) : from, end);
+  }
+
+  /**
    * 시그널 IC 창 통계 (asOf 이하 window 영업일).
    */
   @GetMapping("/scores/ic")

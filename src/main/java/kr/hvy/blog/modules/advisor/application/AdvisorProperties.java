@@ -217,6 +217,18 @@ public class AdvisorProperties {
     private int maxUsLagDays = 4;
 
     /**
+     * 아침 재판정(MORNING_ADVISE) 발행 마감(KST). 이 시각 이후에 돌면 SKIPPED — 개장(09:00) 뒤 발행은 D+1 시가 진입 규약과 모순되고,
+     * 동시호가(08:30~)에 주문을 낼 여유도 필요하다
+     */
+    private LocalTime adviseDeadline = LocalTime.of(8, 50);
+
+    /**
+     * 아침 재판정 트리거 플래그의 섹터 연동 심볼 임계(σ 배수). 심볼 자신의 직전 sigma-lookback-days 1일 수익률 σ 대비 |r1| 이 이 배수 이상이면 플래그.
+     * 플래그는 LLM 호출 여부를 가르지 않고 diff_json 에만 남는다(트리거일/비트리거일 사후 분석)
+     */
+    private double sectorSigmaMultiple = 2.0;
+
+    /**
      * 지수 코드 → 주 심볼 (linkPairs 의 첫 쌍).
      */
     public Map<String, String> primarySymbols() {

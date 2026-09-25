@@ -49,4 +49,19 @@ class AdviceComparisonTest {
     assertThat(changes.get(2).action()).isEqualTo(PickAction.DROP);
     assertThat(changes.get(2).declared()).isFalse();
   }
+
+  @Test
+  @DisplayName("M4 저장 규약: DROP 은 아침 픽에 행이 없고 diff_json.drop 의 사유가 선언값으로 들어온다 — 사유가 없는 DROP 만 계산값")
+  void declaredDropsFromDiffJson() {
+    List<PickRow> evening = List.of(pick("A", 1, PickDirection.LONG, 0.70), pick("B", 2, PickDirection.LONG, 0.60), pick("C", 3, PickDirection.LONG, 0.55));
+    List<PickRow> morning = List.of(pick("A", 1, PickDirection.LONG, 0.70).toBuilder().action(PickAction.KEEP).actionReason("지지").build());
+
+    List<AdviceComparison.Change> changes = AdviceComparison.compare(evening, morning, java.util.Map.of("B", "SOXX z=-3"));
+
+    assertThat(changes).extracting(AdviceComparison.Change::ticker).containsExactly("A", "B", "C");
+    assertThat(changes.get(1).action()).isEqualTo(PickAction.DROP);
+    assertThat(changes.get(1).reason()).isEqualTo("SOXX z=-3");
+    assertThat(changes.get(1).declared()).isTrue();
+    assertThat(changes.get(2).declared()).isFalse();
+  }
 }

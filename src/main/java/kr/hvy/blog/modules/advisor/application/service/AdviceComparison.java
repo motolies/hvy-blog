@@ -25,9 +25,17 @@ public final class AdviceComparison {
   }
 
   /**
-   * 아침 픽 순서(순위)대로 KEEP·ADD(선언된 DROP 포함)를 먼저, 아침에 없는 저녁 픽을 저녁 순위대로 DROP 으로 뒤에 둔다.
+   * 선언된 DROP 사유 없이 비교한다 (M4 이전 판단·diff_json 없는 판단).
    */
   public static List<Change> compare(List<PickRow> evening, List<PickRow> morning) {
+    return compare(evening, morning, Map.of());
+  }
+
+  /**
+   * 아침 픽 순서(순위)대로 KEEP·ADD 를 먼저, 아침에 없는 저녁 픽을 저녁 순위대로 DROP 으로 뒤에 둔다.
+   * DROP 은 아침 픽에 행이 없으므로(M4 저장 규약) 사유는 헤더 diff_json.drop 에서 온다 — declaredDrops(티커 → 사유)에 있으면 선언값, 없으면 계산값이다.
+   */
+  public static List<Change> compare(List<PickRow> evening, List<PickRow> morning, Map<String, String> declaredDrops) {
     Map<String, PickRow> eveningByTicker = byTicker(evening);
     Map<String, PickRow> morningByTicker = byTicker(morning);
     boolean declared = morningByTicker.values().stream().anyMatch(p -> p.action() != null);
@@ -42,7 +50,12 @@ public final class AdviceComparison {
       changes.add(new Change(m.ticker(), action, derivedReason(action, e, m), e, m, false));
     }
     for (PickRow e : eveningByTicker.values()) {
-      if (!morningByTicker.containsKey(e.ticker())) {
+      if (morningByTicker.containsKey(e.ticker())) {
+        continue;
+      }
+      if (declaredDrops != null && declaredDrops.containsKey(e.ticker())) {
+        changes.add(new Change(e.ticker(), PickAction.DROP, declaredDrops.get(e.ticker()), e, null, true));
+      } else {
         changes.add(new Change(e.ticker(), PickAction.DROP, derivedReason(PickAction.DROP, e, null), e, null, false));
       }
     }

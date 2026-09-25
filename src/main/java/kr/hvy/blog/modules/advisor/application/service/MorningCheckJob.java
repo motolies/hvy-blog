@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.slack.MorningCheckMessage;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
@@ -68,7 +69,7 @@ public class MorningCheckJob implements AdvisorJob {
       execution.skip("휴장일 " + today);
       return;
     }
-    Optional<AdviceHeader> latest = adviceWriter.findLatest(AdviceVariant.LIVE, today.minusDays(1));
+    Optional<AdviceHeader> latest = adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1));
     if (latest.isEmpty() || latest.get().baseDate().isBefore(calendar.lastTradingDayOnOrBefore(today.minusDays(1)))) {
       execution.skip("점검할 직전 영업일 LIVE 판단이 없습니다");
       return;

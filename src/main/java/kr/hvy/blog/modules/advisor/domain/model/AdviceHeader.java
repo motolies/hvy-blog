@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
@@ -21,7 +22,7 @@ public record AdviceHeader(
     Long adviceId,
     long runId,
     LocalDate baseDate,
-    String adviceKind,
+    AdviceKind adviceKind,
     AdviceVariant variant,
     int horizonDays,
     MarketRegimeCode regimeCode,
@@ -54,8 +55,6 @@ public record AdviceHeader(
      * LLM_NOMEM 섀도 창의 시작점(AdviceWriter.firstMemoryAdviceDate)과 사후 요인 분리에 쓴다
      */
     Map<String, Object> memoryJson) {
-
-  public static final String KIND_DAILY = "DAILY";
 
   /**
    * 지수 코드의 규칙 추세 (0001 → trendKospi, 1001 → trendKosdaq).

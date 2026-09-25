@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.ScoreStage;
@@ -123,7 +124,7 @@ public class ScoreJob implements AdvisorJob, AdviseJob.ScoreHook {
     // ③ 스코어보드
     LocalDate from = today.minusDays(SCOREBOARD_DAYS);
     List<String> lines = kpi.slackLines(from, today);
-    boolean memoryOn = adviceWriter.countLivePicks() >= properties.getLesson().getMinPicks();
+    boolean memoryOn = adviceWriter.countLivePicks(AdviceKind.DAILY) >= properties.getLesson().getMinPicks();
     Map<String, Object> block = memoryOn ? kpi.promptScoreboard(from, today) : null;
     return new AdviseJob.Scoreboard(lines, block);
   }
@@ -178,7 +179,10 @@ public class ScoreJob implements AdvisorJob, AdviseJob.ScoreHook {
   }
 
   /**
-   * 호라이즌 h 로 아직 채점되지 않았고 청산일이 캘린더에 있는 판단(모든 변형).
+   * 호라이즌 h 로 아직 채점되지 않았고 청산일이 캘린더에 있는 DAILY 판단(모든 변형).
+   * <p>
+   * 종류를 DAILY 로 한정하는 이유: scoreDue 는 결정·진단 호라이즌을 모든 판단에 일괄 적용하므로 H20·H60·H180 판단이 들어오면 의미 없는 h=5 채점 행이 쌓이고,
+   * NOT EXISTS 기준이라 한 번 쌓이면 다시 채점되지 않는다. MORNING(같은 창 채점, M4)·호라이즌 인지 채점(M5)이 이 조건을 의도적으로 넓히는 지점이다.
    */
   List<AdviceHeader> unscored(int h) {
     List<Long> ids = jdbc.queryForList("""
@@ -188,7 +192,8 @@ public class ScoreJob implements AdvisorJob, AdviseJob.ScoreHook {
         FROM tb_advisor_advice a
                  JOIN cal c ON c.trade_date = a.base_date
                  CROSS JOIN last
-        WHERE c.rn + ? <= last.max_rn
+        WHERE a.advice_kind = 'DAILY'
+          AND c.rn + ? <= last.max_rn
           AND NOT EXISTS (SELECT 1 FROM tb_advisor_candidate_score s WHERE s.advice_id = a.advice_id AND s.horizon_days = ?)
           AND EXISTS (SELECT 1 FROM tb_advisor_candidate cd WHERE cd.advice_id = a.advice_id)
         ORDER BY a.base_date, a.advice_id

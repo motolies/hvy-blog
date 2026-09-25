@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorTriggerType;
@@ -49,14 +50,14 @@ class MorningCheckJobTest {
 
   private final LocalDate base = LocalDate.of(2026, 9, 11); // 금요일 판단
   private final LocalDate today = LocalDate.of(2026, 9, 14); // 월요일 07:30
-  private final AdviceHeader advice = AdviceHeader.builder().adviceId(842L).runId(1L).baseDate(base).adviceKind("DAILY").variant(AdviceVariant.LIVE)
+  private final AdviceHeader advice = AdviceHeader.builder().adviceId(842L).runId(1L).baseDate(base).adviceKind(AdviceKind.DAILY).variant(AdviceVariant.LIVE)
       .horizonDays(5).kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.NEUTRAL).pUp(0.7).build();
 
   @BeforeEach
   void setUp() {
     when(calendar.isTradingDay(any())).thenReturn(true);
     when(calendar.lastTradingDayOnOrBefore(today.minusDays(1))).thenReturn(base);
-    when(adviceWriter.findLatest(AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(advice));
+    when(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(advice));
     when(checkWriter.findByAdvice(842L)).thenReturn(Optional.empty());
     when(checkWriter.insert(any())).thenReturn(7L);
     when(notifier.publish(any())).thenReturn(true);
@@ -107,7 +108,7 @@ class MorningCheckJobTest {
   @DisplayName("어제 ▼ 예측에 +갭이면 주의, NEUTRAL 예측에 큰 갭도 주의 — 전체 판정은 가장 심각한 것")
   void cautionWins() {
     AdviceHeader down = advice.toBuilder().kospiDir(DirectionCall.DOWN).kosdaqDir(DirectionCall.NEUTRAL).build();
-    when(adviceWriter.findLatest(AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(down));
+    when(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(down));
     when(links.link("1001", "COMP", base)).thenReturn(new GlobalLink("1001", "COMP", 1.5, 0.5, 60)); // 갭 1.5% ≥ 1%
 
     job.execute(execution());
@@ -158,7 +159,7 @@ class MorningCheckJobTest {
     job.execute(already);
     assertThat(already.isSkipped()).isTrue();
 
-    when(adviceWriter.findLatest(AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.empty());
+    when(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.empty());
     when(checkWriter.findByAdvice(anyLong())).thenReturn(Optional.empty());
     AdvisorExecution none = execution();
     job.execute(none);

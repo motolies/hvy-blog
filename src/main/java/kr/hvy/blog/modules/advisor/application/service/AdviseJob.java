@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.slack.DailyAdviceMessage;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.LessonStatus;
@@ -170,10 +171,10 @@ public class AdviseJob implements AdvisorJob {
     steps.run("SHADOW_QUANT", () -> saveQuantShadow(execution, result, decision, market[0]));
 
     // ④ 프롬프트: 실적 블록·교훈은 누적 픽 게이트를 넘긴 뒤에만
-    boolean memoryOn = adviceWriter.countLivePicks() >= properties.getLesson().getMinPicks();
+    boolean memoryOn = adviceWriter.countLivePicks(AdviceKind.DAILY) >= properties.getLesson().getMinPicks();
     final List<LessonRow> activeLessons = memoryOn ? activeLessons() : List.of();
     // 교훈의 regime 조건은 오늘 국면을 모르는 시점이라 직전 LIVE 판단의 국면으로 평가한다. trend 조건은 규칙이 기준일에 확정한 오늘 값으로 즉시 판정한다
-    MarketRegimeCode previousRegime = adviceWriter.findLatest(AdviceVariant.LIVE, baseDate.minusDays(1))
+    MarketRegimeCode previousRegime = adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, baseDate.minusDays(1))
         .map(AdviceHeader::regimeCode).orElse(null);
     Map<String, MarketTrendCode> trendCodes = market[0].trendCodes();
     List<CandidateRow> candidates = tagLessons(result.candidates(), activeLessons, previousRegime, trendCodes);
@@ -234,7 +235,7 @@ public class AdviseJob implements AdvisorJob {
 
     // ⑦ LIVE 저장 (필수)
     AdviceHeader header = AdviceHeader.builder()
-        .runId(execution.runId()).baseDate(baseDate).adviceKind(AdviceHeader.KIND_DAILY).variant(AdviceVariant.LIVE)
+        .runId(execution.runId()).baseDate(baseDate).adviceKind(AdviceKind.DAILY).variant(AdviceVariant.LIVE)
         .horizonDays(properties.getHorizonDays())
         .regimeCode(guarded.regime()).kospiDir(guarded.kospiDir()).kosdaqDir(guarded.kosdaqDir()).pUp(guarded.pUp())
         .regimeRationale(guarded.rationale()).leadingSectors(guarded.sectors()).summary(guarded.summary())
@@ -296,7 +297,7 @@ public class AdviseJob implements AdvisorJob {
    * 뉴스 없는 섀도를 돌릴 기간인지: 뉴스가 실린 첫 LIVE 판단부터 advisor.shadow.nonews-weeks 주 안. 첫 판단이 아직 없으면(오늘이 처음) 연다.
    */
   boolean nonewsShadowOpen(LocalDate baseDate) {
-    return adviceWriter.firstNewsAdviceDate().map(first -> !baseDate.isAfter(first.plusWeeks(properties.getShadow().getNonewsWeeks()))).orElse(true);
+    return adviceWriter.firstNewsAdviceDate(AdviceKind.DAILY).map(first -> !baseDate.isAfter(first.plusWeeks(properties.getShadow().getNonewsWeeks()))).orElse(true);
   }
 
   /**
@@ -304,7 +305,7 @@ public class AdviseJob implements AdvisorJob {
    * 첫 판단이 아직 없으면(오늘이 처음) 연다. 2026-09-21 까지 nomem-weeks 를 읽는 코드가 없어 NOMEM 이 영구 병행이던 결함의 수정(운영 문서 §8 사전 등록 판정).
    */
   boolean nomemShadowOpen(LocalDate baseDate) {
-    return adviceWriter.firstMemoryAdviceDate().map(first -> !baseDate.isAfter(first.plusWeeks(properties.getShadow().getNomemWeeks()))).orElse(true);
+    return adviceWriter.firstMemoryAdviceDate(AdviceKind.DAILY).map(first -> !baseDate.isAfter(first.plusWeeks(properties.getShadow().getNomemWeeks()))).orElse(true);
   }
 
   /**
@@ -342,12 +343,12 @@ public class AdviseJob implements AdvisorJob {
    * 정량 top-N 동일가중 섀도: LLM 없이 점수 상위 N 을 LONG·확신 0.55 로 저장 (LLM 부가가치의 대조군).
    */
   private void saveQuantShadow(AdvisorExecution execution, ScreeningResult result, AdvisorGateService.Decision decision, MarketFeatures market) {
-    if (adviceWriter.find(result.baseDate(), AdviceHeader.KIND_DAILY, AdviceVariant.QUANT_TOPN).isPresent()) {
+    if (adviceWriter.find(result.baseDate(), AdviceKind.DAILY, AdviceVariant.QUANT_TOPN).isPresent()) {
       return;
     }
     int n = Math.min(properties.getShadow().getQuantTopN(), result.candidates().size());
     Map<String, MarketTrendCode> trendCodes = market.trendCodes();
-    AdviceHeader header = AdviceHeader.builder().runId(execution.runId()).baseDate(result.baseDate()).adviceKind(AdviceHeader.KIND_DAILY)
+    AdviceHeader header = AdviceHeader.builder().runId(execution.runId()).baseDate(result.baseDate()).adviceKind(AdviceKind.DAILY)
         .variant(AdviceVariant.QUANT_TOPN).horizonDays(properties.getHorizonDays()).weightSetId(result.weightSetId())
         .trendKospi(trendCodes.get("0001")).trendKosdaq(trendCodes.get("1001")).entryDate(market.entryDate()).exitDate(market.exitDate())
         .dataQuality(decision.quality()).promptVersion("quant").model("quant-top-" + n).build();
@@ -369,7 +370,7 @@ public class AdviseJob implements AdvisorJob {
   private void saveLlmShadow(AdviceVariant variant, AdvisorExecution execution, MarketFeatures market, ScreeningResult screened, WeightSet weightSet,
       AdviceGuard.SectorContext sectorContext, AdvisorGateService.Decision decision, Map<String, Object> scoreboard, List<LessonRow> lessons,
       NewsBlock news, String metadataKey, Map<String, Object> recentOutcomes) {
-    if (adviceWriter.find(screened.baseDate(), AdviceHeader.KIND_DAILY, variant).isPresent()) {
+    if (adviceWriter.find(screened.baseDate(), AdviceKind.DAILY, variant).isPresent()) {
       return;
     }
     PromptPayload payload = promptBuilder.build(market, screened, scoreboard, lessons, weightSet.enabledWeights(), decision.quality(), news, recentOutcomes);
@@ -379,7 +380,7 @@ public class AdviseJob implements AdvisorJob {
     List<CandidateRow> included = screened.candidates().subList(0, payload.candidatesIncluded());
     Map<String, MarketTrendCode> trendCodes = market.trendCodes();
     AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorContext, trendCodes, news);
-    AdviceHeader header = AdviceHeader.builder().runId(execution.runId()).baseDate(screened.baseDate()).adviceKind(AdviceHeader.KIND_DAILY)
+    AdviceHeader header = AdviceHeader.builder().runId(execution.runId()).baseDate(screened.baseDate()).adviceKind(AdviceKind.DAILY)
         .variant(variant).horizonDays(properties.getHorizonDays())
         .regimeCode(guarded.regime()).kospiDir(guarded.kospiDir()).kosdaqDir(guarded.kosdaqDir()).pUp(guarded.pUp())
         .regimeRationale(guarded.rationale()).leadingSectors(guarded.sectors()).summary(guarded.summary())

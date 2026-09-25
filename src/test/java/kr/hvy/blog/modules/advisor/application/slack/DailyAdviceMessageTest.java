@@ -10,6 +10,7 @@ import com.slack.api.model.block.composition.MarkdownTextObject;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
 import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
@@ -38,7 +39,7 @@ class DailyAdviceMessageTest {
         .since(LocalDate.of(2026, 7, 28)).days(32).close(2731.44).ma20(2612.4).ma60(2540.1).build();
     MarketTrend kosdaqTrend = MarketTrend.builder().indexCode("1001").code(MarketTrendCode.SIDEWAYS).rawCode(MarketTrendCode.SIDEWAYS).score(1)
         .since(LocalDate.of(2026, 9, 2)).days(7).close(812.3).ma20(805.0).ma60(790.2).build();
-    AdviceHeader header = AdviceHeader.builder().adviceId(842L).runId(1284L).baseDate(LocalDate.of(2026, 9, 11)).adviceKind("DAILY")
+    AdviceHeader header = AdviceHeader.builder().adviceId(842L).runId(1284L).baseDate(LocalDate.of(2026, 9, 11)).adviceKind(AdviceKind.DAILY)
         .variant(AdviceVariant.LIVE).horizonDays(5).regimeCode(MarketRegimeCode.RISK_ON).kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.NEUTRAL)
         .pUp(0.7).regimeRationale("반도체 수급 개선").leadingSectors(List.of(new SectorCall("G2510", "반도체", "외인"))).summary("총평")
         .trendKospi(MarketTrendCode.BULL).trendKosdaq(MarketTrendCode.SIDEWAYS).trends(List.of(kospiTrend, kosdaqTrend))
@@ -103,7 +104,7 @@ class DailyAdviceMessageTest {
   @Test
   @DisplayName("v1 헤더(추세·전망·기준일 없음)도 그대로 렌더링된다 — 해당 줄만 생략")
   void rendersLegacyHeader() {
-    AdviceHeader header = AdviceHeader.builder().adviceId(1L).runId(1L).baseDate(LocalDate.of(2026, 9, 11)).adviceKind("DAILY")
+    AdviceHeader header = AdviceHeader.builder().adviceId(1L).runId(1L).baseDate(LocalDate.of(2026, 9, 11)).adviceKind(AdviceKind.DAILY)
         .variant(AdviceVariant.LIVE).horizonDays(5).regimeCode(MarketRegimeCode.NEUTRAL).promptVersion("advice-v1").model("m").build();
     DailyAdviceMessage message = DailyAdviceMessage.builder().header(header).picks(List.of()).candidates(Map.of()).scoreboardLines(List.of())
         .runId(1L).build();
@@ -115,7 +116,7 @@ class DailyAdviceMessageTest {
   @Test
   @DisplayName("픽 10개 × 가드 상한(thesis 400·risk 300)이어도 section 마다 3,000자·메시지 50블록 안이고, 본문 줄바꿈은 인용을 끊지 않는다")
   void fullTextNotesStayWithinBlockKitLimits() {
-    AdviceHeader header = AdviceHeader.builder().adviceId(1L).runId(1L).baseDate(LocalDate.of(2026, 9, 11)).adviceKind("DAILY")
+    AdviceHeader header = AdviceHeader.builder().adviceId(1L).runId(1L).baseDate(LocalDate.of(2026, 9, 11)).adviceKind(AdviceKind.DAILY)
         .variant(AdviceVariant.LIVE).horizonDays(5).regimeCode(MarketRegimeCode.NEUTRAL).promptVersion("advice-v5").model("m").build();
     List<PickRow> picks = new java.util.ArrayList<>();
     Map<String, CandidateRow> candidates = new java.util.HashMap<>();

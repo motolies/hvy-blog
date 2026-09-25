@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.AdvisorSyntheticData;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorTriggerType;
@@ -271,10 +272,64 @@ class AdviceScoringPgTest {
   }
 
   @Test
+  @DisplayName("같은 기준일·변형에 MORNING 판단이 있어도 findLatest·300 게이트·메모리 시작일·KPI·교훈 셀·채점 대상은 DAILY 만 본다")
+  void nonDailyKindsDoNotLeakIntoDailyQueries() {
+    properties.getLesson().setMinCellSamples(1);
+    LessonService lessonService = new LessonService(new NamedParameterJdbcTemplate(jdbc), mock(kr.hvy.blog.modules.advisor.repository.jdbc.LessonRepository.class),
+        properties);
+    long daily = insertAdvice(AdviceKind.DAILY, D.get(10), AdviceVariant.LIVE, List.of(1, 5, 10, 30),
+        Map.of(5, PickDirection.LONG, 30, PickDirection.LONG, 10, PickDirection.AVOID), Map.of("scoreboard", true));
+    scoring.score(adviceWriter.findById(daily).orElseThrow(), 5, ScoreStage.PROVISIONAL);
+
+    // 기준값: DAILY 만 있을 때
+    AdvisorKpiService.VariantSummary before = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+    int regimeBefore = kpi.regimeSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast()).calls();
+    List<AdvisorKpiService.CalibrationRow> calibrationBefore = kpi.calibration(D.getFirst(), D.getLast());
+    int recentBefore = kpi.recentPicks(D.getFirst(), D.getLast(), 10).size();
+    List<Integer> cellsBefore = lessonService.cells(D.getFirst(), D.getLast()).stream().map(LessonService.Cell::n).sorted().toList();
+    assertThat(before.picks()).isEqualTo(2);
+    assertThat(cellsBefore).as("교훈 셀 비교가 공허하지 않게 DAILY 셀이 있어야 한다").isNotEmpty();
+
+    // 같은 D10·LIVE 에 다른 픽의 MORNING 판단(더 큰 advice_id, 더 이른 메모리 주입일 흉내)과 D11 MORNING 을 넣고, 미래 M4 처럼 직접 채점까지 한다
+    long morning = insertAdvice(AdviceKind.MORNING, D.get(10), AdviceVariant.LIVE, List.of(1, 5, 10, 30),
+        Map.of(1, PickDirection.LONG, 10, PickDirection.LONG), Map.of("scoreboard", true));
+    long laterMorning = insertAdvice(AdviceKind.MORNING, D.get(11), AdviceVariant.LIVE, List.of(3, 7), Map.of(3, PickDirection.LONG), null);
+    long earlyMemory = insertAdvice(AdviceKind.MORNING, D.get(2), AdviceVariant.LIVE, List.of(3), Map.of(3, PickDirection.LONG), Map.of("scoreboard", true));
+    scoring.score(adviceWriter.findById(morning).orElseThrow(), 5, ScoreStage.PROVISIONAL);
+    assertThat(morning).isGreaterThan(daily);
+
+    assertThat(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, D.get(10))).map(AdviceHeader::adviceId).contains(daily);
+    assertThat(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, D.get(11))).as("D11 MORNING 이 더 최근이어도 DAILY 는 D10")
+        .map(AdviceHeader::adviceId).contains(daily);
+    assertThat(adviceWriter.findLatest(AdviceKind.MORNING, AdviceVariant.LIVE, D.get(11))).map(AdviceHeader::adviceId).contains(laterMorning);
+    assertThat(adviceWriter.countLivePicks(AdviceKind.DAILY)).as("300 게이트는 MORNING 픽을 이중 집계하지 않는다").isEqualTo(3);
+    assertThat(adviceWriter.firstMemoryAdviceDate(AdviceKind.DAILY)).as("D2 MORNING 의 메모리 주입은 NOMEM 창 시작점이 아니다").contains(D.get(10));
+    assertThat(adviceWriter.findRange(D.getFirst(), D.getLast(), AdviceKind.DAILY, AdviceVariant.LIVE, 50)).extracting(AdviceHeader::adviceId)
+        .containsExactly(daily);
+    assertThat(adviceWriter.findRange(D.getFirst(), D.getLast(), null, AdviceVariant.LIVE, 50)).extracting(AdviceHeader::adviceId)
+        .containsExactlyInAnyOrder(daily, morning, laterMorning, earlyMemory);
+
+    AdvisorKpiService.VariantSummary after = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+    assertThat(after.advices()).isEqualTo(before.advices());
+    assertThat(after.picks()).isEqualTo(before.picks());
+    assertThat(after.avoidPicks()).isEqualTo(before.avoidPicks());
+    assertThat(after.meanExcess()).isEqualTo(before.meanExcess());
+    assertThat(after.poolMeanExcess()).as("후보군 평균도 MORNING 후보를 섞지 않는다").isEqualTo(before.poolMeanExcess());
+    assertThat(kpi.regimeSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast()).calls()).isEqualTo(regimeBefore);
+    assertThat(kpi.calibration(D.getFirst(), D.getLast())).isEqualTo(calibrationBefore);
+    assertThat(kpi.recentPicks(D.getFirst(), D.getLast(), 10)).hasSize(recentBefore);
+    assertThat(lessonService.cells(D.getFirst(), D.getLast()).stream().map(LessonService.Cell::n).sorted().toList()).isEqualTo(cellsBefore);
+
+    assertThat(scoreJob.unscored(5)).as("채점 대상 탐색은 DAILY 만 — 미채점 MORNING 도 집지 않는다").extracting(AdviceHeader::adviceId)
+        .doesNotContain(morning, laterMorning, earlyMemory);
+    assertThat(scoreJob.unscored(1)).extracting(AdviceHeader::adviceId).containsExactly(daily);
+  }
+
+  @Test
   @DisplayName("추세 전망 채점(h=20): 라벨이 안 바뀌면 BEYOND_20D 적중, WITHIN_5D 는 빗나감, 무효화는 QUIET·전환 없음이면 적중, NONE 은 MISSING, √h 밴드")
   void trendOutlookScoring() {
     // 합성 지수는 2500 상수·MA 성분 0, 종목은 전부 MA20 위라 breadth +1 → 두 시장 모두 SIDEWAYS 로 고정
-    AdviceHeader advice = AdviceHeader.builder().adviceId(9L).runId(runId).baseDate(D.get(5)).adviceKind(AdviceHeader.KIND_DAILY).variant(AdviceVariant.LIVE)
+    AdviceHeader advice = AdviceHeader.builder().adviceId(9L).runId(runId).baseDate(D.get(5)).adviceKind(AdviceKind.DAILY).variant(AdviceVariant.LIVE)
         .horizonDays(5).kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.UP).pUp(0.7)
         .trendKospi(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.SIDEWAYS).trendKosdaq(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.SIDEWAYS)
         .outlooks(List.of(
@@ -366,7 +421,7 @@ class AdviceScoringPgTest {
   @DisplayName("advice-v2 헤더 컬럼(규칙 추세·전망·관측 기준일·적용 구간)이 JSONB 로 왕복한다")
   void headerRoundTripsTrendColumns() {
     kr.hvy.blog.modules.advisor.domain.model.MarketTrend trend = AdvicePromptBuilderTest.trend();
-    AdviceHeader header = AdviceHeader.builder().runId(runId).baseDate(D.get(3)).adviceKind(AdviceHeader.KIND_DAILY).variant(AdviceVariant.LIVE).horizonDays(5)
+    AdviceHeader header = AdviceHeader.builder().runId(runId).baseDate(D.get(3)).adviceKind(AdviceKind.DAILY).variant(AdviceVariant.LIVE).horizonDays(5)
         .regimeCode(MarketRegimeCode.NEUTRAL).kospiDir(DirectionCall.NEUTRAL).kosdaqDir(DirectionCall.NEUTRAL).pUp(0.55)
         .trendKospi(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL).trendKosdaq(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BEAR)
         .trends(List.of(trend))
@@ -375,11 +430,11 @@ class AdviceScoringPgTest {
         .dataAsOf(Map.of("domestic", D.get(3).toString(), "globalAgeTradingDays", 1, "flowProvisional", true))
         .entryDate(D.get(4)).exitDate(D.get(8)).newsIds(List.of("N1", "N2")).dataQuality(DataQuality.OK).promptVersion("advice-v2").model("m").build();
 
-    assertThat(adviceWriter.firstNewsAdviceDate()).isEmpty();
+    assertThat(adviceWriter.firstNewsAdviceDate(AdviceKind.DAILY)).isEmpty();
     long id = adviceWriter.insertHeader(header);
     AdviceHeader saved = adviceWriter.findById(id).orElseThrow();
     assertThat(saved.newsIds()).containsExactly("N1", "N2");
-    assertThat(adviceWriter.firstNewsAdviceDate()).contains(D.get(3));
+    assertThat(adviceWriter.firstNewsAdviceDate(AdviceKind.DAILY)).contains(D.get(3));
     adviceWriter.insertCandidates(id, List.of(CandidateRow.builder().ticker(AdvisorSyntheticData.ticker(1)).quantRank(1).quantScore(0.5).stockName("종목1")
         .marketType("KOSDAQ").benchIndexCode("1001").sectorCode("S1").signals(Map.of()).features(Map.of()).appliedLessonIds(List.of()).build()));
     adviceWriter.insertPicks(id, List.of(PickRow.builder().ticker(AdvisorSyntheticData.ticker(1)).pickRank(1).direction(PickDirection.LONG).conviction(0.7)
@@ -399,9 +454,18 @@ class AdviceScoringPgTest {
   }
 
   private long insertAdvice(LocalDate baseDate, AdviceVariant variant, List<Integer> candidateIdx, Map<Integer, PickDirection> picks) {
-    AdviceHeader header = AdviceHeader.builder().runId(runId).baseDate(baseDate).adviceKind(AdviceHeader.KIND_DAILY).variant(variant).horizonDays(5)
+    return insertAdvice(AdviceKind.DAILY, baseDate, variant, candidateIdx, picks, null);
+  }
+
+  /**
+   * 종류·메모리 요약을 지정해 헤더·후보·픽을 저장한다 (kind 안전화 픽스처용).
+   */
+  private long insertAdvice(AdviceKind kind, LocalDate baseDate, AdviceVariant variant, List<Integer> candidateIdx, Map<Integer, PickDirection> picks,
+      Map<String, Object> memoryJson) {
+    AdviceHeader header = AdviceHeader.builder().runId(runId).baseDate(baseDate).adviceKind(kind).variant(variant).horizonDays(5)
         .regimeCode(MarketRegimeCode.RISK_ON).kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.UP).pUp(0.7)
-        .leadingSectors(List.of(new SectorCall("S1", "섹터1", "r"))).dataQuality(DataQuality.OK).promptVersion("advice-v1").model("m").build();
+        .leadingSectors(List.of(new SectorCall("S1", "섹터1", "r"))).dataQuality(DataQuality.OK).promptVersion("advice-v1").model("m")
+        .memoryJson(memoryJson).build();
     long id = adviceWriter.insertHeader(header);
     List<CandidateRow> candidates = candidateIdx.stream().map(i -> CandidateRow.builder().ticker(AdvisorSyntheticData.ticker(i)).quantRank(1)
         .quantScore(0.5).stockName("종목" + i).marketType(i % 2 == 0 ? "KOSPI" : "KOSDAQ").benchIndexCode(i % 2 == 0 ? "0001" : "1001")

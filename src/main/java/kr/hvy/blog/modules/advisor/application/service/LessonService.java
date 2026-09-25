@@ -65,7 +65,7 @@ public class LessonService {
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate c ON c.advice_id = pk.advice_id AND c.ticker = pk.ticker
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.variant = 'LIVE' AND a.data_quality = 'OK' AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
+        WHERE a.advice_kind = 'DAILY' AND a.variant = 'LIVE' AND a.data_quality = 'OK' AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
           AND a.base_date BETWEEN :from AND :to
         """, Map.of("h", properties.getHorizonDays(), "from", from, "to", to));
     Map<String, List<double[]>> groups = new LinkedHashMap<>();
@@ -265,7 +265,7 @@ public class LessonService {
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate c ON c.advice_id = pk.advice_id AND c.ticker = pk.ticker
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.variant = 'LIVE' AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
+        WHERE a.advice_kind = 'DAILY' AND a.variant = 'LIVE' AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
           AND a.created_at >= :activatedAt
         """, Map.of("id", "[" + lesson.lessonId() + "]", "h", properties.getHorizonDays(),
         "activatedAt", lesson.activatedAt() == null ? java.time.OffsetDateTime.now() : lesson.activatedAt().atOffset(java.time.ZoneOffset.UTC)));

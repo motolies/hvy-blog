@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
@@ -47,7 +48,7 @@ class AdvisorGateServiceTest {
   void setUp() {
     gate = new AdvisorGateService(runs, calendar, adviceWriter, jdbc, properties);
     when(calendar.isTradingDay(any())).thenReturn(true);
-    when(adviceWriter.find(any(), anyString(), any())).thenReturn(Optional.empty());
+    when(adviceWriter.find(any(), any(), any())).thenReturn(Optional.empty());
     when(jdbc.queryForObject(anyString(), eq(Integer.class), any())).thenReturn(2700);
   }
 
@@ -64,7 +65,7 @@ class AdvisorGateServiceTest {
   @Test
   @DisplayName("이미 LIVE 판단이 있으면 멱등 종료")
   void alreadyDone() {
-    when(adviceWriter.find(today, AdviceHeader.KIND_DAILY, AdviceVariant.LIVE)).thenReturn(Optional.of(AdviceHeader.builder().adviceId(1L).build()));
+    when(adviceWriter.find(today, AdviceKind.DAILY, AdviceVariant.LIVE)).thenReturn(Optional.of(AdviceHeader.builder().adviceId(1L).build()));
     AdvisorGateService.Decision d = gate.decide(today, LocalTime.of(19, 30));
     assertThat(d.alreadyDone()).isTrue();
     assertThat(d.ready()).isFalse();

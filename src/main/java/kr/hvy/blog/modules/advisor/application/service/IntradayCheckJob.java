@@ -17,6 +17,7 @@ import java.util.regex.Pattern;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.slack.IntradayCheckMessage;
 import kr.hvy.blog.modules.advisor.client.llm.PickNoteResponse;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
@@ -177,7 +178,7 @@ public class IntradayCheckJob implements AdvisorJob {
       execution.skip("KIS 앱키가 없어 현재가를 조회할 수 없습니다");
       return;
     }
-    Optional<AdviceHeader> latest = adviceWriter.findLatest(AdviceVariant.LIVE, today.minusDays(1));
+    Optional<AdviceHeader> latest = adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1));
     if (latest.isEmpty() || latest.get().baseDate().isBefore(calendar.lastTradingDayOnOrBefore(today.minusDays(1)))) {
       execution.skip("점검할 직전 영업일 LIVE 판단이 없습니다");
       return;

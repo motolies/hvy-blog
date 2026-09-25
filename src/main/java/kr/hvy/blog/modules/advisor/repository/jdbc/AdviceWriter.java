@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorJson;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
@@ -69,7 +70,7 @@ public class AdviceWriter {
             + "news_ids, prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, data_quality, guard_json, published_at, memory_json) "
             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
         Long.class,
-        h.runId(), h.baseDate(), h.adviceKind(), h.variant().getCode(), h.horizonDays(),
+        h.runId(), h.baseDate(), code(h.adviceKind()), h.variant().getCode(), h.horizonDays(),
         code(h.regimeCode()), code(h.kospiDir()), code(h.kosdaqDir()), h.pUp(),
         h.regimeRationale(), AdvisorJdbc.jsonb(h.leadingSectors()), h.summary(),
         code(h.trendKospi()), code(h.trendKosdaq()), AdvisorJdbc.jsonb(h.trends()), AdvisorJdbc.jsonb(h.outlooks()), AdvisorJdbc.jsonb(h.dataAsOf()),
@@ -162,9 +163,9 @@ public class AdviceWriter {
     return jdbc.update("DELETE FROM tb_advisor_advice WHERE advice_id = ?", adviceId);
   }
 
-  public Optional<AdviceHeader> find(LocalDate baseDate, String adviceKind, AdviceVariant variant) {
+  public Optional<AdviceHeader> find(LocalDate baseDate, AdviceKind kind, AdviceVariant variant) {
     List<AdviceHeader> rows = jdbc.query("SELECT " + HEADER_COLUMNS + " FROM tb_advisor_advice WHERE base_date = ? AND advice_kind = ? AND variant = ?",
-        HEADER_MAPPER, baseDate, adviceKind, variant.getCode());
+        HEADER_MAPPER, baseDate, kind.getCode(), variant.getCode());
     return rows.stream().findFirst();
   }
 
@@ -174,20 +175,25 @@ public class AdviceWriter {
   }
 
   /**
-   * base_date 가 가장 최근인 LIVE 판단 (장중 점검·스코어보드용). 지정일 이하만.
+   * 종류·변형이 같은 판단 중 base_date 가 가장 최근인 것 (장중 점검·스코어보드용). 지정일 이하만.
+   * 종류를 거르지 않으면 같은 기준일의 MORNING·ADHOC 행과 동률이 돼 어느 쪽이 잡힐지 정해지지 않는다.
    */
-  public Optional<AdviceHeader> findLatest(AdviceVariant variant, LocalDate onOrBefore) {
-    return jdbc.query("SELECT " + HEADER_COLUMNS + " FROM tb_advisor_advice WHERE variant = ? AND base_date <= ? "
-            + "ORDER BY base_date DESC LIMIT 1", HEADER_MAPPER, variant.getCode(), onOrBefore)
+  public Optional<AdviceHeader> findLatest(AdviceKind kind, AdviceVariant variant, LocalDate onOrBefore) {
+    return jdbc.query("SELECT " + HEADER_COLUMNS + " FROM tb_advisor_advice WHERE advice_kind = ? AND variant = ? AND base_date <= ? "
+            + "ORDER BY base_date DESC LIMIT 1", HEADER_MAPPER, kind.getCode(), variant.getCode(), onOrBefore)
         .stream().findFirst();
   }
 
   /**
-   * 기간·변형별 헤더 목록 (최신순).
+   * 기간·종류·변형별 헤더 목록 (최신순). kind·variant 가 null 이면 그 조건을 걸지 않는다.
    */
-  public List<AdviceHeader> findRange(LocalDate from, LocalDate to, AdviceVariant variant, int limit) {
+  public List<AdviceHeader> findRange(LocalDate from, LocalDate to, AdviceKind kind, AdviceVariant variant, int limit) {
     StringBuilder sql = new StringBuilder("SELECT " + HEADER_COLUMNS + " FROM tb_advisor_advice WHERE base_date BETWEEN ? AND ?");
     java.util.ArrayList<Object> args = new java.util.ArrayList<>(List.of(from, to));
+    if (kind != null) {
+      sql.append(" AND advice_kind = ?");
+      args.add(kind.getCode());
+    }
     if (variant != null) {
       sql.append(" AND variant = ?");
       args.add(variant.getCode());
@@ -198,7 +204,7 @@ public class AdviceWriter {
   }
 
   /**
-   * 채점 대상 헤더: base_date 가 정확히 그 날인 모든 변형.
+   * base_date 가 정확히 그 날인 모든 종류·변형의 헤더.
    */
   public List<AdviceHeader> findByBaseDate(LocalDate baseDate) {
     return jdbc.query("SELECT " + HEADER_COLUMNS + " FROM tb_advisor_advice WHERE base_date = ? ORDER BY variant", HEADER_MAPPER, baseDate);
@@ -216,28 +222,29 @@ public class AdviceWriter {
   }
 
   /**
-   * 뉴스 블록이 실린 첫 LIVE 판단의 기준일 (LLM_NONEWS 섀도 병행 기간의 시작점). 없으면 empty.
+   * 뉴스 블록이 실린 첫 LIVE 판단(해당 종류)의 기준일 (LLM_NONEWS 섀도 병행 기간의 시작점). 없으면 empty.
    */
-  public Optional<LocalDate> firstNewsAdviceDate() {
-    return jdbc.query("SELECT MIN(base_date) AS d FROM tb_advisor_advice WHERE variant = 'LIVE' AND news_ids IS NOT NULL AND jsonb_array_length(news_ids) > 0",
-        rs -> rs.next() ? Optional.ofNullable(rs.getObject("d", LocalDate.class)) : Optional.<LocalDate>empty());
+  public Optional<LocalDate> firstNewsAdviceDate(AdviceKind kind) {
+    return jdbc.query("SELECT MIN(base_date) AS d FROM tb_advisor_advice WHERE advice_kind = ? AND variant = 'LIVE' AND news_ids IS NOT NULL "
+            + "AND jsonb_array_length(news_ids) > 0",
+        rs -> rs.next() ? Optional.ofNullable(rs.getObject("d", LocalDate.class)) : Optional.<LocalDate>empty(), kind.getCode());
   }
 
   /**
    * 메모리(recentOutcomes·lessons·scoreboard 중 하나라도)가 처음 실린 LIVE 판단의 기준일 — LLM_NOMEM 섀도 병행 기간(advisor.shadow.nomem-weeks)의 시작점. 없으면 empty.
    * memory_json 은 주입이 하나도 없으면 NULL 로 저장되므로 IS NOT NULL 이 곧 "메모리 주입" 이다.
    */
-  public Optional<LocalDate> firstMemoryAdviceDate() {
-    return jdbc.query("SELECT MIN(base_date) AS d FROM tb_advisor_advice WHERE variant = 'LIVE' AND memory_json IS NOT NULL",
-        rs -> rs.next() ? Optional.ofNullable(rs.getObject("d", LocalDate.class)) : Optional.<LocalDate>empty());
+  public Optional<LocalDate> firstMemoryAdviceDate(AdviceKind kind) {
+    return jdbc.query("SELECT MIN(base_date) AS d FROM tb_advisor_advice WHERE advice_kind = ? AND variant = 'LIVE' AND memory_json IS NOT NULL",
+        rs -> rs.next() ? Optional.ofNullable(rs.getObject("d", LocalDate.class)) : Optional.<LocalDate>empty(), kind.getCode());
   }
 
   /**
-   * 누적 LIVE 픽 수 (피드백 게이트 판정용).
+   * 해당 종류의 누적 LIVE 픽 수 (피드백 게이트 판정용). 같은 기준일에 여러 종류가 픽을 내므로 종류를 거르지 않으면 이중 집계된다.
    */
-  public int countLivePicks() {
+  public int countLivePicks(AdviceKind kind) {
     Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM tb_advisor_pick p JOIN tb_advisor_advice a ON a.advice_id = p.advice_id "
-        + "WHERE a.variant = 'LIVE'", Integer.class);
+        + "WHERE a.advice_kind = ? AND a.variant = 'LIVE'", Integer.class, kind.getCode());
     return n == null ? 0 : n;
   }
 
@@ -249,7 +256,7 @@ public class AdviceWriter {
       .adviceId(rs.getLong("advice_id"))
       .runId(rs.getLong("run_id"))
       .baseDate(rs.getObject("base_date", LocalDate.class))
-      .adviceKind(rs.getString("advice_kind"))
+      .adviceKind(AdvisorJdbc.enumOrNull(rs, "advice_kind", AdviceKind.class))
       .variant(AdvisorJdbc.enumOrNull(rs, "variant", AdviceVariant.class))
       .horizonDays(rs.getInt("horizon_days"))
       .regimeCode(AdvisorJdbc.enumOrNull(rs, "regime_code", MarketRegimeCode.class))

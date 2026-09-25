@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.CallSubject;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
@@ -146,7 +147,7 @@ class AdvisorSchemaPgTest {
     assertThat(adviceWriter.insertCandidates(adviceId, candidates)).isEqualTo(2);
     assertThat(adviceWriter.insertPicks(adviceId, List.of(pick("005930", 1)))).isEqualTo(1);
 
-    AdviceHeader read = adviceWriter.find(LocalDate.of(2026, 9, 11), AdviceHeader.KIND_DAILY, AdviceVariant.LIVE).orElseThrow();
+    AdviceHeader read = adviceWriter.find(LocalDate.of(2026, 9, 11), AdviceKind.DAILY, AdviceVariant.LIVE).orElseThrow();
     assertThat(read.adviceId()).isEqualTo(adviceId);
     assertThat(read.regimeCode()).isEqualTo(MarketRegimeCode.RISK_ON);
     assertThat(read.leadingSectors()).extracting(SectorCall::code).containsExactly("G2510");
@@ -163,13 +164,13 @@ class AdvisorSchemaPgTest {
     List<PickRow> picks = adviceWriter.picks(adviceId);
     assertThat(picks).hasSize(1);
     assertThat(picks.getFirst().cited()).extracting(CitedFeature::name).containsExactly("ret20");
-    assertThat(adviceWriter.countLivePicks()).isEqualTo(1);
+    assertThat(adviceWriter.countLivePicks(AdviceKind.DAILY)).isEqualTo(1);
 
     adviceWriter.markPublished(adviceId, Instant.parse("2026-09-11T10:31:00Z"));
     assertThat(adviceWriter.findById(adviceId).orElseThrow().publishedAt()).isEqualTo(Instant.parse("2026-09-11T10:31:00Z"));
     // note-v1: memory_json 왕복 — 헤더 픽스처는 메모리 요약을 싣고, 첫 메모리 판단일은 LIVE 만 본다
     assertThat(read.memoryJson()).containsEntry("recentOutcomes", 2).containsEntry("scoreboard", false).containsEntry("lessons", List.of(3, 7));
-    assertThat(adviceWriter.firstMemoryAdviceDate()).contains(LocalDate.of(2026, 9, 11));
+    assertThat(adviceWriter.firstMemoryAdviceDate(AdviceKind.DAILY)).contains(LocalDate.of(2026, 9, 11));
 
     assertThatThrownBy(() -> adviceWriter.insertPicks(adviceId, List.of(pick("999999", 2))))
         .as("후보 밖 티커는 복합 FK 가 막는다")
@@ -186,7 +187,7 @@ class AdvisorSchemaPgTest {
 
     assertThat(adviceWriter.delete(adviceId)).isEqualTo(1);
     assertThat(adviceWriter.candidates(adviceId)).as("CASCADE 로 후보·픽도 지워진다").isEmpty();
-    assertThat(adviceWriter.firstMemoryAdviceDate()).as("LIVE 가 지워지면 섀도의 NULL 만 남아 empty").isEmpty();
+    assertThat(adviceWriter.firstMemoryAdviceDate(AdviceKind.DAILY)).as("LIVE 가 지워지면 섀도의 NULL 만 남아 empty").isEmpty();
   }
 
   @Test
@@ -284,7 +285,7 @@ class AdvisorSchemaPgTest {
   }
 
   private static AdviceHeader header(long runId, LocalDate baseDate, AdviceVariant variant) {
-    return AdviceHeader.builder().runId(runId).baseDate(baseDate).adviceKind(AdviceHeader.KIND_DAILY).variant(variant).horizonDays(5)
+    return AdviceHeader.builder().runId(runId).baseDate(baseDate).adviceKind(AdviceKind.DAILY).variant(variant).horizonDays(5)
         .regimeCode(MarketRegimeCode.RISK_ON).kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.NEUTRAL).pUp(0.65)
         .regimeRationale("반도체 수급").leadingSectors(List.of(new SectorCall("G2510", "반도체", "외인 순매수")))
         .summary("요약").promptVersion("advice-v1").model("judge").systemFingerprint("fp_1").weightSetId(null)

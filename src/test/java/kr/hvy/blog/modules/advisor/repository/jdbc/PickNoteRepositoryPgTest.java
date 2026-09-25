@@ -11,6 +11,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.code.IntradayVerdict;
@@ -77,7 +78,7 @@ class PickNoteRepositoryPgTest {
     jdbc.update("TRUNCATE tb_advisor_run CASCADE");
     long runId = jdbc.queryForObject("INSERT INTO tb_advisor_run (job_type, trigger_type, status, created_at, updated_at) "
         + "VALUES ('ADVISE', 'API', 'SUCCESS', NOW(), NOW()) RETURNING run_id", Long.class);
-    adviceId = adviceWriter.insertHeader(AdviceHeader.builder().runId(runId).baseDate(BASE).adviceKind(AdviceHeader.KIND_DAILY).variant(AdviceVariant.LIVE)
+    adviceId = adviceWriter.insertHeader(AdviceHeader.builder().runId(runId).baseDate(BASE).adviceKind(AdviceKind.DAILY).variant(AdviceVariant.LIVE)
         .horizonDays(5).dataQuality(DataQuality.OK).promptVersion("advice-v6").model("m").build());
     adviceWriter.insertCandidates(adviceId, List.of(candidate("T01"), candidate("T02"), candidate("T03")));
     adviceWriter.insertPicks(adviceId, List.of(pick("T01", 1, PickDirection.LONG), pick("T02", 2, PickDirection.LONG), pick("T03", 3, PickDirection.AVOID)));

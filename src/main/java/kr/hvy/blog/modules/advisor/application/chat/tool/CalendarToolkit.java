@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.service.MarketFeatureService;
 import kr.hvy.blog.modules.advisor.application.service.TradingCalendar;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
@@ -53,7 +54,7 @@ public class CalendarToolkit {
       support.noteAsOf(context, last.get());
       MarketFeatures f = marketFeatures.features(last.get());
       m.put("dataAsOf", f.dataAsOf());
-      Optional<AdviceHeader> advice = adviceWriter.findLatest(AdviceVariant.LIVE, today);
+      Optional<AdviceHeader> advice = adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today);
       if (advice.isPresent()) {
         Map<String, Object> a = ToolJson.obj();
         a.put("baseDate", advice.get().baseDate().toString());

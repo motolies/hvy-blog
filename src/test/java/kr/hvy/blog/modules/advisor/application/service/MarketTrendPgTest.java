@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.AdvisorSyntheticData;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.CallSubject;
 import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
@@ -166,7 +167,7 @@ class MarketTrendPgTest {
   }
 
   private static AdviceHeader header(LocalDate baseDate, MarketTrendCode kospi, TrendHorizon persist, InvalidationType invalidation) {
-    return AdviceHeader.builder().adviceId(1L).runId(1L).baseDate(baseDate).adviceKind(AdviceHeader.KIND_DAILY).variant(AdviceVariant.LIVE).horizonDays(5)
+    return AdviceHeader.builder().adviceId(1L).runId(1L).baseDate(baseDate).adviceKind(AdviceKind.DAILY).variant(AdviceVariant.LIVE).horizonDays(5)
         .trendKospi(kospi).outlooks(List.of(new TrendOutlook("0001", persist, 0.7, invalidation))).build();
   }
 

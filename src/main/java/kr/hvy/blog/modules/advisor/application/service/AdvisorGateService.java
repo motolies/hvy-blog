@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
@@ -62,7 +63,7 @@ public class AdvisorGateService {
     if (!tradingDay) {
       return new Decision(false, false, false, false, DataQuality.OK, "휴장일 " + baseDate);
     }
-    boolean alreadyDone = adviceWriter.find(baseDate, AdviceHeader.KIND_DAILY, AdviceVariant.LIVE).isPresent();
+    boolean alreadyDone = adviceWriter.find(baseDate, AdviceKind.DAILY, AdviceVariant.LIVE).isPresent();
     if (alreadyDone) {
       return new Decision(true, true, true, false, DataQuality.OK, "이미 판단이 있습니다: " + baseDate);
     }

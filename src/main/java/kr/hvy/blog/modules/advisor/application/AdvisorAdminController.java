@@ -17,6 +17,7 @@ import kr.hvy.blog.modules.advisor.application.service.AdvisorOrchestrator;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorRequestException;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorRunService;
 import kr.hvy.blog.modules.advisor.application.service.SignalWeightMath;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
@@ -146,10 +147,11 @@ public class AdvisorAdminController {
   @GetMapping("/advices")
   public List<AdviceHeader> advices(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-      @RequestParam(required = false) AdviceVariant variant, @RequestParam(defaultValue = "50") int limit) {
+      @RequestParam(defaultValue = "DAILY") AdviceKind kind, @RequestParam(required = false) AdviceVariant variant,
+      @RequestParam(defaultValue = "50") int limit) {
     LocalDate end = to == null ? MarketClock.today() : to;
     LocalDate start = from == null ? end.minusDays(30) : from;
-    return adviceWriter.findRange(start, end, variant, clamp(limit));
+    return adviceWriter.findRange(start, end, kind, variant, clamp(limit));
   }
 
   @GetMapping("/advices/{adviceId}")

@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -16,6 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
@@ -97,17 +97,17 @@ class AdviseJobTest {
     when(hookProvider.getIfAvailable()).thenReturn(null);
     when(newsProvider.getIfAvailable()).thenReturn(newsFeatures);
     when(recentOutcomes.block(any())).thenReturn(Optional.empty());
-    when(adviceWriter.firstNewsAdviceDate()).thenReturn(Optional.empty());
-    when(adviceWriter.firstMemoryAdviceDate()).thenReturn(Optional.empty());
+    when(adviceWriter.firstNewsAdviceDate(AdviceKind.DAILY)).thenReturn(Optional.empty());
+    when(adviceWriter.firstMemoryAdviceDate(AdviceKind.DAILY)).thenReturn(Optional.empty());
     when(gate.decide(any(), any())).thenReturn(new AdvisorGateService.Decision(true, false, true, false, DataQuality.OK, "DAILY 완료"));
     when(icService.computeIncremental(any())).thenReturn(Optional.empty());
     when(marketFeatures.features(base)).thenReturn(AdvicePromptBuilderTest.market());
     when(screening.screen(base)).thenReturn(AdvicePromptBuilderTest.screening(8));
     when(weightSets.find(1L)).thenReturn(Optional.of(WeightSet.builder().weightSetId(1L).source(WeightSetSource.SEED).active(true)
         .weights(List.of(SignalWeightRow.builder().signalCode("MOM_20D").baseWeight(0.12).multiplier(1).weight(0.12).enabled(true).build())).build()));
-    when(adviceWriter.find(any(), anyString(), any())).thenReturn(Optional.empty());
-    when(adviceWriter.findLatest(any(), any())).thenReturn(Optional.empty());
-    when(adviceWriter.countLivePicks()).thenReturn(0);
+    when(adviceWriter.find(any(), any(), any())).thenReturn(Optional.empty());
+    when(adviceWriter.findLatest(any(), any(), any())).thenReturn(Optional.empty());
+    when(adviceWriter.countLivePicks(AdviceKind.DAILY)).thenReturn(0);
     when(adviceWriter.insertHeader(any())).thenReturn(842L, 843L, 844L);
     when(notifier.publish(any())).thenReturn(true);
   }
@@ -210,7 +210,7 @@ class AdviseJobTest {
   @DisplayName("note-v1: 메모리가 처음 실린 LIVE 판단이 nomem-weeks 보다 오래됐으면 NOMEM 섀도는 '섀도 기간 종료' 로 건너뛴다 (nomem-weeks 미사용 결함 수정)")
   void nomemShadowClosesAfterWeeks() {
     when(recentOutcomes.block(base)).thenReturn(Optional.of(outcomesBlock()));
-    when(adviceWriter.firstMemoryAdviceDate()).thenReturn(Optional.of(base.minusWeeks(properties.getShadow().getNomemWeeks()).minusDays(1)));
+    when(adviceWriter.firstMemoryAdviceDate(AdviceKind.DAILY)).thenReturn(Optional.of(base.minusWeeks(properties.getShadow().getNomemWeeks()).minusDays(1)));
 
     AdvisorExecution execution = execution();
     job.execute(execution);
@@ -222,9 +222,9 @@ class AdviseJobTest {
     assertThat(execution.metadata("memory")).isNotNull();
 
     // 창 경계: 첫 메모리 판단일 + nomem-weeks 당일까지는 열려 있고, 첫 판단이 없으면(오늘이 처음) 열린다
-    when(adviceWriter.firstMemoryAdviceDate()).thenReturn(Optional.of(base.minusWeeks(properties.getShadow().getNomemWeeks())));
+    when(adviceWriter.firstMemoryAdviceDate(AdviceKind.DAILY)).thenReturn(Optional.of(base.minusWeeks(properties.getShadow().getNomemWeeks())));
     assertThat(job.nomemShadowOpen(base)).isTrue();
-    when(adviceWriter.firstMemoryAdviceDate()).thenReturn(Optional.empty());
+    when(adviceWriter.firstMemoryAdviceDate(AdviceKind.DAILY)).thenReturn(Optional.empty());
     assertThat(job.nomemShadowOpen(base)).isTrue();
   }
 

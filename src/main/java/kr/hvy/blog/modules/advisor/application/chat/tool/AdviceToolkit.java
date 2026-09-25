@@ -9,6 +9,7 @@ import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorKpiService;
 import kr.hvy.blog.modules.advisor.application.service.CandidateScreeningService;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CallScoreRow;
@@ -334,6 +335,6 @@ public class AdviceToolkit {
    */
   private Optional<AdviceHeader> resolve(String baseDate) {
     LocalDate onOrBefore = ToolSupport.parseDate(baseDate).orElse(MarketClock.today());
-    return adviceWriter.findLatest(AdviceVariant.LIVE, onOrBefore);
+    return adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, onOrBefore);
   }
 }

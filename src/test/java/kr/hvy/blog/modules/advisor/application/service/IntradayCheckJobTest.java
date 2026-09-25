@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.slack.IntradayCheckMessage;
 import kr.hvy.blog.modules.advisor.client.llm.PickNoteResponse;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
@@ -93,7 +94,7 @@ class IntradayCheckJobTest {
   @Test
   @DisplayName("직전 영업일 LIVE 판단이 없으면 SKIPPED, KIS 호출 없음")
   void skipsWithoutAdvice() {
-    when(adviceWriter.findLatest(AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.empty());
+    when(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.empty());
     AdvisorExecution execution = execution();
     job.execute(execution);
     assertThat(execution.isSkipped()).isTrue();
@@ -197,7 +198,7 @@ class IntradayCheckJobTest {
   @DisplayName("일치율 30% 미만이면 OFF_TRACK. 후보 특징(vol20)이 없으면 전부 FLAT → assist 미호출·REFLECT SKIPPED, 노트는 class 만 저장")
   void offTrackAllFlat() {
     AdviceHeader advice = AdviceHeader.builder().adviceId(1L).baseDate(today.minusDays(1)).kospiDir(DirectionCall.DOWN).kosdaqDir(DirectionCall.DOWN).build();
-    when(adviceWriter.findLatest(AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(advice));
+    when(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(advice));
     when(adviceWriter.picks(1L)).thenReturn(List.of(
         PickRow.builder().ticker("A").pickRank(1).direction(PickDirection.LONG).conviction(0.7).build(),
         PickRow.builder().ticker("B").pickRank(2).direction(PickDirection.LONG).conviction(0.7).build()));
@@ -303,7 +304,7 @@ class IntradayCheckJobTest {
   void prevCloseFallbackAndMixedBasis() {
     AdviceHeader advice = AdviceHeader.builder().adviceId(7L).baseDate(today.minusDays(1)).regimeCode(MarketRegimeCode.NEUTRAL)
         .kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.UP).build();
-    when(adviceWriter.findLatest(AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(advice));
+    when(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(advice));
     when(adviceWriter.picks(7L)).thenReturn(List.of(
         PickRow.builder().ticker("111111").pickRank(1).direction(PickDirection.LONG).conviction(0.7).thesis("a").riskNote("b").build(),
         PickRow.builder().ticker("222222").pickRank(2).direction(PickDirection.LONG).conviction(0.7).thesis("c").riskNote("d").build()));
@@ -349,7 +350,7 @@ class IntradayCheckJobTest {
   private void stubAdvice842() {
     AdviceHeader advice = AdviceHeader.builder().adviceId(842L).baseDate(today.minusDays(1)).regimeCode(MarketRegimeCode.RISK_ON)
         .kospiDir(DirectionCall.UP).kosdaqDir(DirectionCall.NEUTRAL).build();
-    when(adviceWriter.findLatest(AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(advice));
+    when(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.of(advice));
     when(adviceWriter.picks(842L)).thenReturn(List.of(
         PickRow.builder().ticker("005930").pickRank(1).direction(PickDirection.LONG).conviction(0.8).thesis("모멘텀 지속").riskNote("지수 급락").build(),
         PickRow.builder().ticker("000660").pickRank(2).direction(PickDirection.LONG).conviction(0.7).thesis("외국인 순매수 지속").riskNote("수급 반전").build(),

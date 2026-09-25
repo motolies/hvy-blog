@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
@@ -77,7 +78,7 @@ class WeeklyReviewJobTest {
     when(scoreJob.scoreDue(any())).thenReturn(AdviseJob.Scoreboard.empty());
     when(calendar.previousTradingDays(any(), anyInt())).thenReturn(List.of(today.minusDays(14)));
     when(notes.countStaleOpen(any())).thenReturn(0);
-    when(adviceWriter.findRange(any(), any(), any(), anyInt())).thenReturn(List.of());
+    when(adviceWriter.findRange(any(), any(), any(), any(), anyInt())).thenReturn(List.of());
     when(icService.computeIncremental(any())).thenReturn(Optional.empty());
     when(icService.latestScorableDate(anyInt())).thenReturn(Optional.of(today.minusDays(7)));
     WeightSet active = WeightSet.builder().weightSetId(1L).source(WeightSetSource.SEED).active(true).weights(List.of(
@@ -91,8 +92,8 @@ class WeeklyReviewJobTest {
     when(kpi.trendSummary(any(), any(), any())).thenReturn(new AdvisorKpiService.TrendSummary(0, null, null, 0, null));
     when(kpi.morningSummary(any(), any(), any())).thenReturn(new AdvisorKpiService.MorningSummary(0, null, null));
     when(kpi.calibration(any(), any())).thenReturn(List.of(new AdvisorKpiService.CalibrationRow(0.7, 20, 0.55, 0.004)));
-    when(adviceWriter.countLivePicks()).thenReturn(0);
-    when(adviceWriter.findLatest(any(), any())).thenReturn(Optional.of(AdviceHeader.builder().adviceId(842L).runId(77L).baseDate(today.minusDays(2)).build()));
+    when(adviceWriter.countLivePicks(AdviceKind.DAILY)).thenReturn(0);
+    when(adviceWriter.findLatest(any(), any(), any())).thenReturn(Optional.of(AdviceHeader.builder().adviceId(842L).runId(77L).baseDate(today.minusDays(2)).build()));
     when(promptInputs.find(77L, AdviceVariant.LIVE)).thenReturn(Optional.of(new PromptInputRow(77L, AdviceVariant.LIVE, "advice-v1", "sha",
         frozenPayload(), "{}", null)));
     when(promptInputs.deleteOlderThan(anyInt())).thenReturn(3);
@@ -140,11 +141,11 @@ class WeeklyReviewJobTest {
     when(icService.proposeWeightSet(any(), any(), any())).thenReturn(Optional.empty());
     LocalDate d1 = today.minusDays(3);
     LocalDate d2 = today.minusDays(2);
-    when(adviceWriter.findRange(any(), any(), org.mockito.ArgumentMatchers.eq(AdviceVariant.LIVE), anyInt())).thenReturn(List.of(
+    when(adviceWriter.findRange(any(), any(), any(), org.mockito.ArgumentMatchers.eq(AdviceVariant.LIVE), anyInt())).thenReturn(List.of(
         AdviceHeader.builder().adviceId(10L).baseDate(d1).variant(AdviceVariant.LIVE).build(),
         AdviceHeader.builder().adviceId(11L).baseDate(d2).variant(AdviceVariant.LIVE).build(),
         AdviceHeader.builder().adviceId(12L).baseDate(today.minusDays(1)).variant(AdviceVariant.LIVE).build()));   // NOMEM 없는 날 → 제외
-    when(adviceWriter.findRange(any(), any(), org.mockito.ArgumentMatchers.eq(AdviceVariant.LLM_NOMEM), anyInt())).thenReturn(List.of(
+    when(adviceWriter.findRange(any(), any(), any(), org.mockito.ArgumentMatchers.eq(AdviceVariant.LLM_NOMEM), anyInt())).thenReturn(List.of(
         AdviceHeader.builder().adviceId(20L).baseDate(d1).variant(AdviceVariant.LLM_NOMEM).build(),
         AdviceHeader.builder().adviceId(21L).baseDate(d2).variant(AdviceVariant.LLM_NOMEM).build()));
     // d1: {A 0.8, B 0.7} vs {A 0.7, B 0.7, C 0.6} → Jaccard 2/3, |Δ| (0.1+0)/2 ; d2: {A 0.6} vs {A 0.6} → 1, 0
@@ -175,7 +176,7 @@ class WeeklyReviewJobTest {
   @Test
   @DisplayName("메모리가 켜지면 보조 모델로 교훈을 제안·검증하고, 가중치 단계 예외는 격리되어 PARTIAL")
   void lessonsWhenMemoryOnAndWeightFailureIsolated() {
-    when(adviceWriter.countLivePicks()).thenReturn(500);
+    when(adviceWriter.countLivePicks(AdviceKind.DAILY)).thenReturn(500);
     when(icService.proposeWeightSet(any(), any(), any())).thenThrow(new IllegalStateException("ic boom"));
     when(lessonService.review(any())).thenReturn(List.of(9L));
     when(lessonService.cells(any(), any())).thenReturn(List.of());

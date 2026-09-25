@@ -13,6 +13,7 @@ import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage;
 import kr.hvy.blog.modules.advisor.client.llm.AdviceResponse;
 import kr.hvy.blog.modules.advisor.client.llm.LessonProposalResponse;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.WeightSetSource;
@@ -150,7 +151,7 @@ public class WeeklyReviewJob implements AdvisorJob {
 
     // ③ 교훈 (게이트: 누적 LIVE 픽)
     List<String> lessonLines = new ArrayList<>();
-    boolean memoryOn = adviceWriter.countLivePicks() >= properties.getLesson().getMinPicks();
+    boolean memoryOn = adviceWriter.countLivePicks(AdviceKind.DAILY) >= properties.getLesson().getMinPicks();
     if (memoryOn) {
       steps.run("LESSONS", () -> {
         Instant now = Instant.now();
@@ -178,8 +179,8 @@ public class WeeklyReviewJob implements AdvisorJob {
         execution.putMetadata("lessons", meta);
       });
     } else {
-      steps.skip("LESSONS", "누적 LIVE 픽 " + adviceWriter.countLivePicks() + " < " + properties.getLesson().getMinPicks());
-      lessonLines.add("메모리 미활성 (누적 픽 " + adviceWriter.countLivePicks() + "/" + properties.getLesson().getMinPicks() + ")");
+      steps.skip("LESSONS", "누적 LIVE 픽 " + adviceWriter.countLivePicks(AdviceKind.DAILY) + " < " + properties.getLesson().getMinPicks());
+      lessonLines.add("메모리 미활성 (누적 픽 " + adviceWriter.countLivePicks(AdviceKind.DAILY) + "/" + properties.getLesson().getMinPicks() + ")");
     }
 
     // ④ 재현성
@@ -243,7 +244,7 @@ public class WeeklyReviewJob implements AdvisorJob {
    * 직전 LIVE 입력을 동결한 채 N회 재실행해 픽 집합 Jaccard·방향 일치·확신 편차를 잰다. Jaccard < 0.7 이면 경고.
    */
   private void reproducibility(AdvisorExecution execution, int runs, List<String> lines, List<String> warnings) {
-    Optional<AdviceHeader> latest = adviceWriter.findLatest(AdviceVariant.LIVE, execution.baseDate());
+    Optional<AdviceHeader> latest = adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, execution.baseDate());
     if (latest.isEmpty()) {
       lines.add("측정 대상 없음");
       return;
@@ -329,14 +330,14 @@ public class WeeklyReviewJob implements AdvisorJob {
   void memoryLines(AdvisorExecution execution, LocalDate today, List<String> lines) {
     LocalDate from = today.minusWeeks(MEMORY_COMPARE_WEEKS);
     Map<LocalDate, AdviceHeader> nomem = new LinkedHashMap<>();
-    for (AdviceHeader h : adviceWriter.findRange(from, today, AdviceVariant.LLM_NOMEM, MEMORY_COMPARE_LIMIT)) {
+    for (AdviceHeader h : adviceWriter.findRange(from, today, AdviceKind.DAILY, AdviceVariant.LLM_NOMEM, MEMORY_COMPARE_LIMIT)) {
       nomem.putIfAbsent(h.baseDate(), h);
     }
     double jaccardSum = 0;
     double convictionSum = 0;
     int convictionPairs = 0;
     int days = 0;
-    for (AdviceHeader live : adviceWriter.findRange(from, today, AdviceVariant.LIVE, MEMORY_COMPARE_LIMIT)) {
+    for (AdviceHeader live : adviceWriter.findRange(from, today, AdviceKind.DAILY, AdviceVariant.LIVE, MEMORY_COMPARE_LIMIT)) {
       AdviceHeader shadow = nomem.get(live.baseDate());
       if (shadow == null || live.adviceId() == null || shadow.adviceId() == null) {
         continue;
@@ -375,7 +376,7 @@ public class WeeklyReviewJob implements AdvisorJob {
 
   private double degradedRatio(LocalDate from, LocalDate to) {
     Double ratio = jdbc.queryForObject("SELECT COALESCE(AVG(CASE WHEN data_quality <> 'OK' THEN 1.0 ELSE 0.0 END), 0) "
-        + "FROM tb_advisor_advice WHERE variant = 'LIVE' AND base_date BETWEEN ? AND ?", Double.class, from, to);
+        + "FROM tb_advisor_advice WHERE advice_kind = 'DAILY' AND variant = 'LIVE' AND base_date BETWEEN ? AND ?", Double.class, from, to);
     return ratio == null ? 0 : ratio;
   }
 

@@ -61,7 +61,7 @@ public class AdvisorKpiService {
         FROM tb_advisor_pick pk
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
+        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         """, p);
     Map<String, Object> avoid = jdbc.queryForMap("""
@@ -69,14 +69,14 @@ public class AdvisorKpiService {
         FROM tb_advisor_pick pk
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
+        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND pk.direction = 'AVOID' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         """, p);
     Map<String, Object> pool = jdbc.queryForMap("""
         SELECT AVG(s.excess_ret) AS mean_excess
         FROM tb_advisor_candidate_score s
                  JOIN tb_advisor_advice a ON a.advice_id = s.advice_id
-        WHERE a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
+        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND s.horizon_days = :h AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         """, p);
     int n = ((Number) pick.get("n")).intValue();
@@ -97,7 +97,7 @@ public class AdvisorKpiService {
     Map<String, Object> row = jdbc.queryForMap("""
         SELECT COUNT(*) AS n, AVG(CASE WHEN c.hit THEN 1.0 ELSE 0.0 END) AS hit_rate, AVG(c.brier) AS brier
         FROM tb_advisor_call_score c JOIN tb_advisor_advice a ON a.advice_id = c.advice_id
-        WHERE a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type = 'INDEX' AND c.horizon_days = :h AND c.status = 'SCORED'
+        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type = 'INDEX' AND c.horizon_days = :h AND c.status = 'SCORED'
         """, p);
     Double brier = d(row.get("brier"));
     return new RegimeSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), brier, brier == null ? null : 1 - brier / 0.25);
@@ -121,7 +121,7 @@ public class AdvisorKpiService {
                COUNT(*) FILTER (WHERE c.subject_type = 'TREND_INV') AS inv_n,
                AVG(CASE WHEN c.hit THEN 1.0 ELSE 0.0 END) FILTER (WHERE c.subject_type = 'TREND_INV') AS inv_hit_rate
         FROM tb_advisor_call_score c JOIN tb_advisor_advice a ON a.advice_id = c.advice_id
-        WHERE a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type IN ('TREND', 'TREND_INV')
+        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type IN ('TREND', 'TREND_INV')
           AND c.horizon_days = :th AND c.status = 'SCORED'
         """, p);
     return new TrendSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), d(row.get("brier")),
@@ -142,7 +142,7 @@ public class AdvisorKpiService {
         SELECT COUNT(*) AS n, AVG(CASE WHEN c.hit THEN 1.0 ELSE 0.0 END) AS hit_rate,
                AVG(CASE WHEN c.predicted = 'CAUTION' THEN 1.0 ELSE 0.0 END) AS caution_rate
         FROM tb_advisor_call_score c JOIN tb_advisor_advice a ON a.advice_id = c.advice_id
-        WHERE a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type = 'MORNING' AND c.horizon_days = 1 AND c.status = 'SCORED'
+        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type = 'MORNING' AND c.horizon_days = 1 AND c.status = 'SCORED'
         """, p);
     return new MorningSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), d(row.get("caution_rate")));
   }
@@ -157,7 +157,7 @@ public class AdvisorKpiService {
         FROM tb_advisor_pick pk
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
+        WHERE a.advice_kind = 'DAILY' AND a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         GROUP BY pk.conviction ORDER BY pk.conviction
         """, p, (rs, i) -> new CalibrationRow(rs.getDouble("conviction"), rs.getInt("n"), d(rs.getObject("hit_rate")), d(rs.getObject("mean_excess"))));
@@ -175,7 +175,7 @@ public class AdvisorKpiService {
                  JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
                  JOIN tb_advisor_candidate c ON c.advice_id = pk.advice_id AND c.ticker = pk.ticker
                  JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
-        WHERE a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to AND pk.direction = 'LONG' AND s.status <> 'MISSING'
+        WHERE a.advice_kind = 'DAILY' AND a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to AND pk.direction = 'LONG' AND s.status <> 'MISSING'
         ORDER BY a.base_date DESC, pk.pick_rank LIMIT :limit
         """, p, (rs, i) -> {
       Double excess = d(rs.getObject("excess_ret"));

@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS tb_advisor_advice
     created_at         TIMESTAMPTZ(6) NOT NULL DEFAULT NOW(),
     parent_advice_id   BIGINT                  DEFAULT NULL,
     diff_json          JSONB                   DEFAULT NULL,
+    regime_json        JSONB                   DEFAULT NULL,
     CONSTRAINT uk_advisor_advice UNIQUE (base_date, advice_kind, variant)
 );
 
@@ -208,6 +209,7 @@ COMMENT ON COLUMN tb_advisor_advice.published_at       IS 'Slack 발행 시각 (
 COMMENT ON COLUMN tb_advisor_advice.created_at         IS '생성일시';
 COMMENT ON COLUMN tb_advisor_advice.parent_advice_id   IS '아침 재판정(MORNING)이 다시 본 원 저녁 판단(DAILY LIVE) advice_id. 그 밖의 종류는 NULL (M4, 2026-09-25)';
 COMMENT ON COLUMN tb_advisor_advice.diff_json          IS '아침 재판정의 저녁 대비 조치 {parentAdviceId, keep:[{ticker,reason}], add:[…], drop:[{ticker,reason,direction,conviction}], triggers:{gap,sector,caution,any,…}, usDate}. 트리거는 호출 여부가 아니라 사후 분석(트리거일/비트리거일)용';
+COMMENT ON COLUMN tb_advisor_advice.regime_json        IS '합성 국면 스냅샷 (M6, regime-policy-v1, 2026-09-25): {indexCode, tradeDate, trend, trendScore, vol LOW|NORMAL|HIGH|UNKNOWN, volPct(σ20 의 기준일 이전 최대 5년 분포 백분위), sigma20, volHistoryDays, policy{version,longMax,convictionCap,avoidMax}, themes[{code,members,rs5,rs20,rs60,breadth,strength,leaders}]}. DAILY·ADHOC LIVE 와 LLM 섀도에 저장, MORNING·QUANT 섀도·M6 이전 행은 NULL';
 
 CREATE INDEX IF NOT EXISTS idx_advisor_advice_run ON tb_advisor_advice (run_id);
 
@@ -691,3 +693,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_advisor_weight_set_active_horizon ON tb_adv
 ALTER TABLE tb_advisor_signal_ic_daily ADD COLUMN IF NOT EXISTS horizon_days SMALLINT NOT NULL DEFAULT 5;
 ALTER TABLE tb_advisor_signal_ic_daily DROP CONSTRAINT IF EXISTS pk_advisor_signal_ic_daily;
 ALTER TABLE tb_advisor_signal_ic_daily ADD CONSTRAINT pk_advisor_signal_ic_daily PRIMARY KEY (signal_code, trade_date, horizon_days);
+-- M6 합성 국면·정책 표(regime-policy-v1, 2026-09-25): 판단 헤더 맨 뒤에 국면 스냅샷. 기존 DB 는 db/migrate/20260925_03_advisor_regime_policy.sql 이 주석까지 갱신한다
+ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS regime_json JSONB DEFAULT NULL;

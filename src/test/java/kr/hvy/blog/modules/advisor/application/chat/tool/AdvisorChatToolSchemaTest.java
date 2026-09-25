@@ -12,6 +12,7 @@ import kr.hvy.blog.modules.advisor.application.service.AdvisorKpiService;
 import kr.hvy.blog.modules.advisor.application.service.CandidateScreeningService;
 import kr.hvy.blog.modules.advisor.application.service.GlobalLinkService;
 import kr.hvy.blog.modules.advisor.application.service.MarketFeatureService;
+import kr.hvy.blog.modules.advisor.application.service.MarketRegimeService;
 import kr.hvy.blog.modules.advisor.application.service.MarketTrendService;
 import kr.hvy.blog.modules.advisor.application.service.TradingCalendar;
 import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesChatModel;
@@ -32,24 +33,25 @@ import org.springframework.mock.env.MockEnvironment;
 import tools.jackson.databind.JsonNode;
 
 /**
- * 운영 툴킷 4종의 도구 정의가 Responses API 로 나갈 수 있는 모양인지 — 이름 17개, 스키마는 object·additionalProperties=false·ToolContext 제외·$schema 제거.
+ * 운영 툴킷 4종의 도구 정의가 Responses API 로 나갈 수 있는 모양인지 — 이름 18개, 스키마는 object·additionalProperties=false·ToolContext 제외·$schema 제거.
  * 인자 이름 바인딩은 컴파일 {@code -parameters}(Boot Gradle 플러그인이 부여)에 기대므로 이 테스트가 그 회귀 가드다.
  */
-@DisplayName("채팅 도구 17종 - Responses function 스키마 호환")
+@DisplayName("채팅 도구 18종 - Responses function 스키마 호환")
 class AdvisorChatToolSchemaTest {
 
   private static final List<String> EXPECTED = List.of(
-      "marketOverview", "marketTrend", "globalLink",
+      "marketOverview", "marketTrend", "marketRegime", "globalLink",
       "resolveStock", "stockSnapshot", "priceSeries", "metricTopN", "newsHeadlines",
       "latestAdvice", "horizonPicks", "compareAdvice", "requestAdvice", "adviceChecks", "screeningTop", "performanceSummary",
       "dataFreshness", "tradingDays");
 
   @Test
-  @DisplayName("툴킷 4종 → 도구 17개, 이름 중복 없음, 스키마는 strict 아닌 function 정의로 변환된다")
-  void 도구정의_14종() {
+  @DisplayName("툴킷 4종 → 도구 18개, 이름 중복 없음, 스키마는 strict 아닌 function 정의로 변환된다")
+  void 도구정의_18종() {
     AdvisorProperties properties = new AdvisorProperties(new MockEnvironment());
     ToolSupport support = mock(ToolSupport.class);
-    MarketToolkit market = new MarketToolkit(support, mock(MarketFeatureService.class), mock(MarketTrendService.class), mock(GlobalLinkService.class), properties);
+    MarketToolkit market = new MarketToolkit(support, mock(MarketFeatureService.class), mock(MarketTrendService.class), mock(GlobalLinkService.class), properties,
+        mock(MarketRegimeService.class));
     StockToolkit stock = new StockToolkit(support, mock(StockLookupReader.class), mock(DerivedViewRefresher.class), mock(StockNewsWriter.class));
     AdviceToolkit advice = new AdviceToolkit(support, mock(AdviceWriter.class), mock(ScoreWriter.class), mock(MorningCheckWriter.class),
         mock(IntradayCheckWriter.class), mock(CandidateScreeningService.class), mock(WeightSetRepository.class), mock(AdvisorKpiService.class), properties,
@@ -59,12 +61,12 @@ class AdvisorChatToolSchemaTest {
 
     ToolCallback[] callbacks = ToolCallbacks.from(market, stock, advice, calendar);
 
-    assertThat(callbacks).hasSize(17);
+    assertThat(callbacks).hasSize(18);
     List<String> names = Arrays.stream(callbacks).map(c -> c.getToolDefinition().name()).toList();
     assertThat(names).doesNotHaveDuplicates().containsExactlyInAnyOrderElementsOf(EXPECTED);
 
     List<FunctionTool> tools = OpenAiResponsesChatModel.functionTools(List.of(callbacks));
-    assertThat(tools).hasSize(17);
+    assertThat(tools).hasSize(18);
     for (FunctionTool tool : tools) {
       assertThat(tool.type()).isEqualTo("function");
       assertThat(tool.description()).as(tool.name() + " 설명").isNotBlank();

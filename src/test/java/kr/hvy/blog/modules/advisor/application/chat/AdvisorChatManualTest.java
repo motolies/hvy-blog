@@ -21,6 +21,8 @@ import kr.hvy.blog.modules.advisor.application.service.AdvisorKpiService;
 import kr.hvy.blog.modules.advisor.application.service.CandidateScreeningService;
 import kr.hvy.blog.modules.advisor.application.service.GlobalLinkService;
 import kr.hvy.blog.modules.advisor.application.service.MarketFeatureService;
+import kr.hvy.blog.modules.advisor.application.service.MarketRegimeService;
+import kr.hvy.blog.modules.advisor.application.service.ThemeStrengthService;
 import kr.hvy.blog.modules.advisor.application.service.MarketTrendService;
 import kr.hvy.blog.modules.advisor.application.service.PromptResources;
 import kr.hvy.blog.modules.advisor.application.service.TradingCalendar;
@@ -108,10 +110,11 @@ class AdvisorChatManualTest {
     MarketTrendService trends = new MarketTrendService(named, properties);
     GlobalLinkService links = new GlobalLinkService(named, properties);
     TradingCalendar tradingCalendar = new TradingCalendar(calendarService);
-    MarketFeatureService features = new MarketFeatureService(named, properties, trends, tradingCalendar, links);
+    MarketRegimeService regimes = new MarketRegimeService(named, properties, new ThemeStrengthService(named, properties));
+    MarketFeatureService features = new MarketFeatureService(named, properties, trends, tradingCalendar, links, regimes);
     WeightSetRepository weightSets = new WeightSetRepository(jdbc);
     AdviceWriter adviceWriter = new AdviceWriter(jdbc);
-    MarketToolkit market = new MarketToolkit(support, features, trends, links, properties);
+    MarketToolkit market = new MarketToolkit(support, features, trends, links, properties, regimes);
     StockToolkit stock = new StockToolkit(support, reader, new DerivedViewRefresher(jdbc), new StockNewsWriter(new BatchUpsertSupport(jdbc), jdbc));
     AdviceToolkit advice = new AdviceToolkit(support, adviceWriter, new ScoreWriter(new BatchUpsertSupport(jdbc), jdbc), new MorningCheckWriter(jdbc),
         new IntradayCheckWriter(jdbc), new CandidateScreeningService(named, weightSets, properties), weightSets, new AdvisorKpiService(named, properties), properties,

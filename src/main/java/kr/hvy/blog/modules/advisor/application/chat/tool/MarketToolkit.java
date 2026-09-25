@@ -8,9 +8,11 @@ import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.service.GlobalLinkService;
 import kr.hvy.blog.modules.advisor.application.service.MarketFeatureService;
+import kr.hvy.blog.modules.advisor.application.service.MarketRegimeService;
 import kr.hvy.blog.modules.advisor.application.service.MarketTrendService;
 import kr.hvy.blog.modules.advisor.domain.model.GlobalLink;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
@@ -20,7 +22,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * 시장 도구 3종 — 시장 개요·규칙 추세·미국 연동(β/상관). 전부 기존 서비스(MarketFeatureService·MarketTrendService·GlobalLinkService) 재사용.
+ * 시장 도구 4종 — 시장 개요·규칙 추세·합성 국면(M6)·미국 연동(β/상관). 전부 기존 서비스(MarketFeatureService·MarketTrendService·MarketRegimeService·
+ * GlobalLinkService) 재사용.
  */
 @Component
 @ConditionalOnProperty(name = "advisor.enabled", havingValue = "true")
@@ -34,6 +37,7 @@ public class MarketToolkit {
   private final MarketTrendService marketTrends;
   private final GlobalLinkService globalLinks;
   private final AdvisorProperties advisor;
+  private final MarketRegimeService marketRegimes;
 
   @Tool(name = "marketOverview", description = "시장 개요를 한 번에 가져온다: KOSPI(0001)·KOSDAQ(1001)·KOSPI200(2001) 종가와 1/5/20/60일 수익률·MA 이격, "
       + "시장 수급(외국인·기관·개인 1일/5일, 억원), 미국 지수(SPX·COMP·SOX·.DJI)와 원달러(FX@KRW)의 수익률, 주도/부진 섹터, 5일 변동성, 규칙 기반 추세 라벨, "
@@ -141,6 +145,71 @@ public class MarketToolkit {
       }).toList());
       return m;
     });
+  }
+
+  @Tool(name = "marketRegime", description = "규칙이 정한 합성 국면(M6): KOSPI 추세(BULL/SIDEWAYS/BEAR) × 변동성 국면(20일 변동성의 과거 5년 백분위로 LOW/NORMAL/HIGH), "
+      + "그 국면에 사전 등록된 정책 표의 오늘 한도(LONG 픽 최대 수·LONG 확신 상한·AVOID 최대 수 — 판단 가드가 강제), KOSPI200 섹터 대분류(테마)별 강약"
+      + "(구성 종목 중앙값 수익률의 KOSPI 대비 초과 rs5/20/60, 20일선 위 비율, STRONG/NEUTRAL/WEAK, 대표 종목). '지금 약세장이야?', '변동성 높아?', "
+      + "'어떤 테마가 강해?', '왜 픽이 적어?' 에 쓴다. 전부 규칙 계산이며 LLM 판단이 아니다.")
+  public Map<String, Object> marketRegime(@ToolParam(required = false, description = AS_OF_DESC) String asOf, ToolContext context) {
+    return support.run("marketRegime", context, () -> {
+      Optional<LocalDate> date = support.asOf(asOf);
+      if (date.isEmpty()) {
+        return ToolJson.noData(null);
+      }
+      List<MarketTrend> trends = marketTrends.trends(date.get());
+      MarketRegime regime = marketRegimes.regime(date.get(), trends);
+      if (regime.trend() == null && regime.sigma20() == null) {
+        return ToolJson.noData(date.get());
+      }
+      support.noteAsOf(context, date.get());
+      Map<String, Object> m = regimeJson(regime);
+      m.put("asOf", date.get().toString());
+      AdvisorProperties.Regime cfg = advisor.getRegime();
+      m.put("rule", String.format("변동성 국면 = %s %d일 σ 의 직전 최대 %d년 분포 백분위: < %.2f LOW, ≥ %.2f HIGH, 표본 < %d 이면 UNKNOWN. 정책 표 %s 는 사전 등록 — 수치 변경 시 새 버전",
+          cfg.getIndexCode(), cfg.getVolWindowDays(), cfg.getVolLookbackYears(), cfg.getVolLowPct(), cfg.getVolHighPct(), cfg.getVolMinHistoryDays(),
+          cfg.getPolicy().getVersion()));
+      m.put("note", "rs 는 소수(0.021 = 2.1%p). 테마 code 는 KOSPI200 섹터 대분류 코드이며 이름 대신 leaders(대표 종목)로 성격을 읽는다. 구성은 그날 기준(PIT)");
+      return m;
+    });
+  }
+
+  /**
+   * 합성 국면 → 도구 JSON (marketRegime·latestAdvice 공용). null 값 키는 뺀다.
+   */
+  static Map<String, Object> regimeJson(MarketRegime r) {
+    Map<String, Object> m = ToolJson.obj();
+    ToolJson.put(m, "index", r.indexCode());
+    m.put("label", r.labelText());
+    ToolJson.put(m, "trend", r.trend() == null ? null : r.trend().getCode());
+    ToolJson.put(m, "trendScore", r.trendScore());
+    ToolJson.put(m, "vol", r.vol() == null ? null : r.vol().getCode());
+    ToolJson.put(m, "volPct", ToolJson.r4(r.volPct()));
+    ToolJson.put(m, "sigma20", ToolJson.r4(r.sigma20()));
+    ToolJson.put(m, "volHistoryDays", r.volHistoryDays());
+    if (r.policy() != null) {
+      Map<String, Object> p = ToolJson.obj();
+      p.put("version", r.policy().version());
+      p.put("longMax", r.policy().longMax());
+      ToolJson.put(p, "convictionCap", r.policy().convictionCap());
+      p.put("avoidMax", r.policy().avoidMax());
+      m.put("policy", p);
+    }
+    if (r.themes() != null && !r.themes().isEmpty()) {
+      m.put("themes", r.themes().stream().map(t -> {
+        Map<String, Object> x = ToolJson.obj();
+        x.put("code", t.code());
+        x.put("members", t.members());
+        ToolJson.put(x, "rs5", ToolJson.r4(t.rs5()));
+        ToolJson.put(x, "rs20", ToolJson.r4(t.rs20()));
+        ToolJson.put(x, "rs60", ToolJson.r4(t.rs60()));
+        ToolJson.put(x, "breadth", ToolJson.r4(t.breadth()));
+        ToolJson.put(x, "strength", t.strength() == null ? null : t.strength().getCode());
+        ToolJson.put(x, "leaders", t.leaders());
+        return x;
+      }).toList());
+    }
+    return m;
   }
 
   @Tool(name = "globalLink", description = "국내 지수와 미국 지수의 연동 강도(β·상관·표본 수 n)를 돌려준다. krIndex 와 usSymbol 을 모두 주면 그 쌍, 생략하면 설정된 쌍 전부"

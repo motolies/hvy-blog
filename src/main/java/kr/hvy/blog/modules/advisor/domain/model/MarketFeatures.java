@@ -18,6 +18,7 @@ import java.util.Map;
  * @param links                국내 지수 ↔ 미국 심볼 연동 강도 (advice-v3, 없으면 빈 목록)
  * @param sectorIndexAsOf      업종 지수(mv_stock_index_metric, 섹터 코드 = 업종 코드) 마지막 날 (advice-v6). 0001 과 날짜가 다르면 섹터 rs 는 null 이 되고
  *                             이 값이 지연을 드러낸다. 업종 지수가 하나도 없으면 null
+ * @param regime               합성 국면(추세 × 변동성 → 정책 표 한도)과 테마 강약 (M6, advice-v8). 계산 전 호출·테스트는 null
  */
 public record MarketFeatures(
     LocalDate asOf,
@@ -35,7 +36,25 @@ public record MarketFeatures(
     LocalDate exitDate,
     List<MarketTrend> trends,
     List<GlobalLink> links,
-    LocalDate sectorIndexAsOf) {
+    LocalDate sectorIndexAsOf,
+    MarketRegime regime) {
+
+  /**
+   * M6 이전 모양(합성 국면 없음) — 기존 호출·테스트 호환용.
+   */
+  public MarketFeatures(LocalDate asOf, List<IndexFeature> indices, List<FlowFeature> flows, List<GlobalFeature> global, List<SectorFeature> topSectors,
+      List<SectorFeature> bottomSectors, Map<String, Double> sigma5d, LocalDate globalAsOf, Integer globalAgeTradingDays, LocalDate flowAsOf,
+      LocalDate sectorAsOf, LocalDate entryDate, LocalDate exitDate, List<MarketTrend> trends, List<GlobalLink> links, LocalDate sectorIndexAsOf) {
+    this(asOf, indices, flows, global, topSectors, bottomSectors, sigma5d, globalAsOf, globalAgeTradingDays, flowAsOf, sectorAsOf, entryDate, exitDate,
+        trends, links, sectorIndexAsOf, null);
+  }
+
+  /**
+   * 합성 국면의 정책 표 한도 (국면이 없거나 추세가 없으면 null — 가드는 기존 규칙만).
+   */
+  public MarketRegime.Policy policy() {
+    return regime == null ? null : regime.policy();
+  }
 
   public record IndexFeature(String code, String name, double close, Double r1, Double r5, Double r20, Double r60, Double distMa20, Double distMa60) {
   }
@@ -53,9 +72,18 @@ public record MarketFeatures(
    * 뒤 6개(advice-v6)는 업종 지수 기준 — rs5/rs20/rs60 = 업종 지수 1주·1개월·3개월 수익률 − KOSPI 같은 창 수익률(소수), mom = 세 rs 의 백분위 평균(0~1,
    * members 게이트를 넘은 섹터끼리·세 값이 전부 있는 섹터만), consistent = 세 구간 모두 > 0(지수 없으면 false), overheated = 업종 지수 5일 수익률 >
    * advisor.advise.overheated-sigma × σ_5d(KOSPI). 업종 지수가 없거나 창이 짧으면 rs·mom 은 null. 필드는 맨 뒤에만 추가한다(프롬프트 표 위치 의존).
+   * rs120(M6) 은 6개월 초과로, 호라이즌이 H60 이상인 특징 조회(features(asOf, h))에만 채운다 — 5일 판단에는 null 이라 DAILY 프롬프트 표에 싣지 않는다.
    */
   public record SectorFeature(String code, String name, Double cw5d, Double rising, Double nearHigh, Long frgn5, int members,
-                              Double rs5, Double rs20, Double rs60, Double mom, Boolean consistent, Boolean overheated) {
+                              Double rs5, Double rs20, Double rs60, Double mom, Boolean consistent, Boolean overheated, Double rs120) {
+
+    /**
+     * M6 이전 모양(rs120 없음) — 기존 호출·테스트 호환용.
+     */
+    public SectorFeature(String code, String name, Double cw5d, Double rising, Double nearHigh, Long frgn5, int members,
+        Double rs5, Double rs20, Double rs60, Double mom, Boolean consistent, Boolean overheated) {
+      this(code, name, cw5d, rising, nearHigh, frgn5, members, rs5, rs20, rs60, mom, consistent, overheated, null);
+    }
   }
 
   /**

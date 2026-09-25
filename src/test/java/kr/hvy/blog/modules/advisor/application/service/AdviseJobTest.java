@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
@@ -21,10 +22,14 @@ import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorTriggerType;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
+import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
+import kr.hvy.blog.modules.advisor.domain.code.VolRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.code.WeightSetSource;
 import kr.hvy.blog.modules.advisor.domain.entity.AdvisorRun;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
+import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SignalWeightRow;
 import kr.hvy.blog.modules.advisor.domain.model.WeightSet;
@@ -149,7 +154,7 @@ class AdviseJobTest {
     assertThat(live.weightSetId()).isEqualTo(1L);
     assertThat(live.leadingSectors()).hasSize(1);
     assertThat(live.leadingSectors().getFirst().consistent()).as("advice-v6: 섹터 맥락(SectorContext)의 consistent 가 주도 섹터 콜에 실린다").isTrue();
-    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION).isEqualTo("advice-v7");
+    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION).isEqualTo("advice-v8");
     assertThat(live.guard()).as("T00 은 secCons=1·비과열이라 클램프 없음").doesNotContainKeys("capNonConsistent", "capOverheated");
     assertThat(live.trendKospi()).as("규칙 추세는 시장 특징에서").isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
     assertThat(live.trendKosdaq()).as("KOSDAQ 추세 없음(픽스처)").isNull();
@@ -179,6 +184,31 @@ class AdviseJobTest {
     assertThat(execution.metadata("skip.NOTES")).isEqualTo("확정 노트 < " + properties.getNote().getMinFinalized());
     assertThat(execution.metadata("skip.SHADOW_NOMEM")).isEqualTo("메모리 미주입");
     assertThat(execution.metadata("memory")).isNull();
+  }
+
+  @Test
+  @DisplayName("M6: 시장 특징의 합성 국면은 LIVE 헤더 regime_json 으로 저장되고 가드가 그 정책 한도를 적용해 guard_json.policy 에 남긴다 — 정량 섀도는 국면·정책 없음")
+  void regimeSavedAndPolicyApplied() {
+    MarketFeatures m = AdvicePromptBuilderTest.market();
+    MarketRegime regime = new MarketRegime("0001", m.asOf(), MarketTrendCode.BEAR, -3, VolRegimeCode.HIGH, 0.9, 0.02, 1200,
+        new RegimePolicy(properties).limits(MarketTrendCode.BEAR, VolRegimeCode.HIGH), List.of());
+    when(marketFeatures.features(base)).thenReturn(new MarketFeatures(m.asOf(), m.indices(), m.flows(), m.global(), m.topSectors(),
+        m.bottomSectors(), m.sigma5d(), m.globalAsOf(), m.globalAgeTradingDays(), m.flowAsOf(), m.sectorAsOf(), m.entryDate(),
+        m.exitDate(), m.trends(), m.links(), m.sectorIndexAsOf(), regime));
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter, org.mockito.Mockito.times(2)).insertHeader(headers.capture());
+    AdviceHeader quant = headers.getAllValues().get(0);
+    AdviceHeader live = headers.getAllValues().get(1);
+    assertThat(live.regime()).isEqualTo(regime);
+    assertThat(quant.regime()).as("정량 섀도는 대조군 — 정책 미적용·국면 미저장").isNull();
+    assertThat(live.guard()).containsKey("policy");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> applied = (Map<String, Object>) live.guard().get("policy");
+    assertThat(applied).containsEntry("version", "regime-policy-v1").containsEntry("longMax", 8).containsEntry("convictionCap", 0.65);
+    assertThat(execution.metadata("regime")).isEqualTo("BEAR·HIGH");
   }
 
   @Test

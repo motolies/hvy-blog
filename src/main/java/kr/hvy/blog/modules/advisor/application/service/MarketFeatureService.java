@@ -6,7 +6,9 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures.FlowFeature;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures.GlobalFeature;
@@ -61,13 +63,14 @@ public class MarketFeatureService {
           WHERE s.rn <= 5 GROUP BY s.sector_code, n.sector_name HAVING MAX(CASE WHEN s.rn = 1 THEN s.member_count END) >= :minMembers
       ),
       idx AS (
-          SELECT index_code, trade_date, ret_5d, ret_20d, ret_60d,
+          SELECT index_code, trade_date, ret_5d, ret_20d, ret_60d, ret_120d,
                  ROW_NUMBER() OVER (PARTITION BY index_code ORDER BY trade_date DESC) AS rn
           FROM mv_stock_index_metric WHERE trade_date <= :d AND trade_date > CAST(:d AS date) - INTERVAL '10 days'
       ),
-      k AS (SELECT trade_date, ret_5d, ret_20d, ret_60d FROM idx WHERE index_code = '0001' AND rn = 1),
+      k AS (SELECT trade_date, ret_5d, ret_20d, ret_60d, ret_120d FROM idx WHERE index_code = '0001' AND rn = 1),
       rs AS (
-          SELECT mv.*, i.ret_5d AS abs5, i.ret_5d - k.ret_5d AS rs5, i.ret_20d - k.ret_20d AS rs20, i.ret_60d - k.ret_60d AS rs60
+          SELECT mv.*, i.ret_5d AS abs5, i.ret_5d - k.ret_5d AS rs5, i.ret_20d - k.ret_20d AS rs20, i.ret_60d - k.ret_60d AS rs60,
+                 i.ret_120d - k.ret_120d AS rs120
           FROM mv
                    LEFT JOIN k ON TRUE
                    LEFT JOIN idx i ON i.index_code = mv.sector_code AND i.rn = 1 AND i.trade_date = k.trade_date
@@ -87,6 +90,8 @@ public class MarketFeatureService {
   private final MarketTrendService trendService;
   private final TradingCalendar tradingCalendar;
   private final GlobalLinkService globalLinks;
+  /** 합성 국면·테마(M6) */
+  private final MarketRegimeService regimeService;
 
   /**
    * DAILY 결정 호라이즌 창으로 {@link #features(LocalDate, int)}.
@@ -96,7 +101,8 @@ public class MarketFeatureService {
   }
 
   /**
-   * 기준일 시장 특징. horizonDays 는 적용 구간(진입 = 다음 영업일, 청산 = h번째 영업일)에만 쓰인다 — 특징 값 자체는 호라이즌과 무관하다(M5: H20 판단은 20).
+   * 기준일 시장 특징. horizonDays 는 적용 구간(진입 = 다음 영업일, 청산 = h번째 영업일)과 섹터 rs120 노출(H60 호라이즌 이상, M6)에 쓰인다 — 나머지 특징 값은
+   * 호라이즌과 무관하다(M5: H20 판단은 20). 합성 국면(regime)은 같은 추세 목록으로 한 번만 계산한다.
    */
   public MarketFeatures features(LocalDate asOf, int horizonDays) {
     Map<String, Object> p = Map.of("d", asOf);
@@ -153,15 +159,25 @@ public class MarketFeatureService {
           sigma.put(rs.getString("index_code"), rs.getDouble("sigma5"));
         });
 
-    List<SectorFeature> sectors = sectors(asOf, sigma.get("0001"));
+    List<SectorFeature> sectors = sectors(asOf, sigma.get("0001"), exposesRs120(horizonDays));
     List<SectorFeature> top = new ArrayList<>(sectors.subList(0, Math.min(TOP_SECTORS, sectors.size())));
     List<SectorFeature> rest = new ArrayList<>(sectors.subList(top.size(), sectors.size()));
     rest.sort(BOTTOM_ORDER);
     List<SectorFeature> bottom = new ArrayList<>(rest.subList(0, Math.min(BOTTOM_SECTORS, rest.size())));
 
     TradingCalendar.Window window = tradingCalendar.window(asOf, horizonDays);
+    List<kr.hvy.blog.modules.advisor.domain.model.MarketTrend> trends = trendService.trends(asOf);
     return new MarketFeatures(asOf, indices, flows, global, top, bottom, sigma, globalAsOf, globalAge, flowAsOf, sectorAsOf,
-        window.entry(), window.exit(), trendService.trends(asOf), globalLinks.links(asOf), sectorIndexAsOf);
+        window.entry(), window.exit(), trends, globalLinks.links(asOf), sectorIndexAsOf, regimeService.regime(asOf, trends));
+  }
+
+  /**
+   * 섹터 rs120(6개월 초과)을 노출할 호라이즌인지: H60 결정 호라이즌 이상(advisor.horizons 에 H60 이 없으면 노출하지 않는다).
+   * 5·20일 판단에 6개월 초과를 섞으면 표만 길어지고 판단 창과 어긋난다.
+   */
+  boolean exposesRs120(int horizonDays) {
+    OptionalInt h60 = properties.horizonOf(AdviceKind.H60);
+    return h60.isPresent() && horizonDays >= h60.getAsInt();
   }
 
   /**
@@ -169,6 +185,13 @@ public class MarketFeatureService {
    * overheated 는 업종 지수 5일 수익률 > advisor.advise.overheated-sigma × σ_5d(KOSPI) — σ 가 없으면(0001 행 부족) 판정하지 않는다(false).
    */
   List<SectorFeature> sectors(LocalDate asOf, Double kospiSigma5d) {
+    return sectors(asOf, kospiSigma5d, false);
+  }
+
+  /**
+   * @param includeRs120 true 면 rs120(업종 지수 120일 수익률 − KOSPI) 을 채운다(H60·H180 판단용), false 면 null
+   */
+  List<SectorFeature> sectors(LocalDate asOf, Double kospiSigma5d, boolean includeRs120) {
     double overheatedSigma = properties.getAdvise().getOverheatedSigma();
     return jdbc.query(SECTOR_SQL, Map.of("d", asOf, "minMembers", MIN_SECTOR_MEMBERS),
         (rs, i) -> {
@@ -176,7 +199,8 @@ public class MarketFeatureService {
           boolean overheated = abs5 != null && kospiSigma5d != null && abs5 > overheatedSigma * kospiSigma5d;
           return new SectorFeature(rs.getString("sector_code"), rs.getString("sector_name"), d(rs.getObject("cw5")), d(rs.getObject("rising")),
               d(rs.getObject("near_high")), l(rs.getObject("frgn5")), rs.getInt("members"),
-              d(rs.getObject("rs5")), d(rs.getObject("rs20")), d(rs.getObject("rs60")), d(rs.getObject("mom")), rs.getBoolean("consistent"), overheated);
+              d(rs.getObject("rs5")), d(rs.getObject("rs20")), d(rs.getObject("rs60")), d(rs.getObject("mom")), rs.getBoolean("consistent"), overheated,
+              includeRs120 ? d(rs.getObject("rs120")) : null);
         });
   }
 

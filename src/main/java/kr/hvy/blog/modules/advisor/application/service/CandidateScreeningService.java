@@ -181,6 +181,8 @@ public class CandidateScreeningService {
     putFeature(features, "secRs5", rs, "sector_rs_5d");
     putFeature(features, "secRs20", rs, "sector_rs_20d");
     putFeature(features, "secRs60", rs, "sector_rs_60d");
+    // M6: 소속 테마(KOSPI200 섹터 대분류, PIT 구성일 때만). 프롬프트 theme 블록의 code 와 같은 키
+    putFeature(features, "theme", rs, "k200_sector");
     CandidateRow row = CandidateRow.builder()
         .ticker(rs.getString("ticker"))
         .quantScore(round6(rs.getDouble("score")))

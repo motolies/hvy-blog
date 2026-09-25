@@ -17,9 +17,12 @@ import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
+import kr.hvy.blog.modules.advisor.domain.code.ThemeStrength;
 import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
+import kr.hvy.blog.modules.advisor.domain.code.VolRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
@@ -167,4 +170,40 @@ class DailyAdviceMessageTest {
     assertThat(adhoc.title()).isEqualTo("📈 2026-09-24 수시 판단 (5거래일)");
     assertThat(adhoc.toBlocks().toString()).contains("성과 집계");
   }
+
+  @Test
+  @DisplayName("M6: 국면 줄 '국면(규칙)  BEAR · 변동성 HIGH(87%) · 정책: LONG≤8, 확신≤0.65, AVOID≤4' 와 테마 강·약 줄이 국면(5일) 앞에 실린다 — 국면이 없으면 두 줄 모두 없다")
+  void regimeAndThemeLines() {
+    MarketRegime regime = new MarketRegime("0001", LocalDate.of(2026, 9, 11), MarketTrendCode.BEAR, -3, VolRegimeCode.HIGH, 0.8712, 0.0183, 1180,
+        new MarketRegime.Policy("regime-policy-v1", 8, 0.65, 4),
+        List.of(new MarketRegime.Theme("5", 31, 0.01, 0.031, 0.02, 0.6, ThemeStrength.STRONG, List.of("삼성전자")),
+            new MarketRegime.Theme("2", 20, 0.0, 0.012, 0.01, 0.5, ThemeStrength.NEUTRAL, List.of("HD현대중공업")),
+            new MarketRegime.Theme("3", 15, 0.0, -0.004, 0.0, 0.5, ThemeStrength.NEUTRAL, List.of()),
+            new MarketRegime.Theme("6", 18, -0.01, -0.024, -0.03, 0.3, ThemeStrength.WEAK, List.of("KB금융", "신한지주"))));
+    AdviceHeader header = AdviceHeader.builder().adviceId(1L).runId(2L).baseDate(LocalDate.of(2026, 9, 11)).adviceKind(AdviceKind.DAILY)
+        .variant(AdviceVariant.LIVE).horizonDays(5).regimeCode(MarketRegimeCode.RISK_OFF).pUp(0.6).regime(regime).build();
+    DailyAdviceMessage message = DailyAdviceMessage.builder().header(header).picks(List.of()).candidates(Map.of()).scoreboardLines(List.of()).build();
+
+    assertThat(message.policyText()).isEqualTo("*국면(규칙)*  BEAR · 변동성 HIGH(87%) · 정책: LONG≤8, 확신≤0.65, AVOID≤4");
+    assertThat(message.themeText()).isEqualTo("*테마*  강: 5[삼성전자] +3.1%p · 2[HD현대중공업] +1.2%p / 약: 6[KB금융] -2.4%p · 3 -0.4%p");
+    List<String> texts = message.toBlocks().stream().filter(b -> b instanceof SectionBlock).map(b -> ((SectionBlock) b).getText())
+        .filter(t -> t instanceof MarkdownTextObject).map(t -> ((MarkdownTextObject) t).getText()).toList();
+    int policyAt = texts.indexOf(message.policyText());
+    assertThat(policyAt).isNotNegative();
+    assertThat(texts.get(policyAt + 1)).isEqualTo(message.themeText());
+    assertThat(texts.get(policyAt + 2)).startsWith("*국면* ");
+
+    MarketRegime bull = new MarketRegime("0001", null, MarketTrendCode.BULL, 3, VolRegimeCode.UNKNOWN, null, null, 10,
+        new MarketRegime.Policy("regime-policy-v1", 10, null, 2), List.of());
+    DailyAdviceMessage bullMessage = DailyAdviceMessage.builder().header(header.toBuilder().regime(bull).build()).picks(List.of()).candidates(Map.of())
+        .scoreboardLines(List.of()).build();
+    assertThat(bullMessage.policyText()).as("확신 상한 없음·백분위 없음").isEqualTo("*국면(규칙)*  BULL · 변동성 UNKNOWN · 정책: LONG≤10, AVOID≤2");
+    assertThat(bullMessage.themeText()).isNull();
+
+    DailyAdviceMessage legacy = DailyAdviceMessage.builder().header(header.toBuilder().regime(null).build()).picks(List.of()).candidates(Map.of())
+        .scoreboardLines(List.of()).build();
+    assertThat(legacy.policyText()).isNull();
+    assertThat(legacy.themeText()).isNull();
+  }
+
 }

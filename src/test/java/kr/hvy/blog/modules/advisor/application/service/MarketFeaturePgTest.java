@@ -88,7 +88,7 @@ class MarketFeaturePgTest {
       return day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY;
     });
     features = new MarketFeatureService(named, properties, new MarketTrendService(named, properties), new TradingCalendar(calendar),
-        new GlobalLinkService(named, properties));
+        new GlobalLinkService(named, properties), new MarketRegimeService(named, properties, new ThemeStrengthService(named, properties)));
     screening = new CandidateScreeningService(named, new WeightSetRepository(jdbc), properties);
   }
 

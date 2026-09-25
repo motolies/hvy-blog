@@ -9,8 +9,11 @@ import java.util.Map;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
 import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
+import kr.hvy.blog.modules.advisor.domain.code.ThemeStrength;
+import kr.hvy.blog.modules.advisor.domain.code.VolRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
 import kr.hvy.blog.modules.advisor.domain.model.PromptPayload;
 import kr.hvy.blog.modules.advisor.domain.model.ScreeningResult;
@@ -50,10 +53,10 @@ class AdvicePromptBuilderTest {
     assertThat(json).contains("\"sectors\":{\"columns\":[\"code\",\"name\",\"cw5\",\"rising\",\"nearHigh\",\"frgn5\",\"members\",\"rs5\",\"rs20\",\"rs60\",\"mom\",\"consistent\",\"overheated\"],"
         + "\"top\":[[\"G2510\",\"반도체\",0.0412,0.71,0.34,286000000000,58,0.0123,0.0456,0.0789,0.9167,true,false]],"
         + "\"bottom\":[[\"G3020\",\"음식료\",-0.0231,0.19,0.03,-41000000000,42,null,null,null,null,false,false]]}");
-    assertThat(json).contains("\"columns\":[\"tkr\",\"name\",\"sec\",\"score\",\"r20\",\"r60\",\"distHigh\",\"tvRatio\",\"frgnFlow\",\"instFlow\",\"rsIdx\",\"per\",\"pbr\",\"vol20\",\"secRs60\",\"secCons\"]");
-    assertThat(json).as("T00: 세 구간 모두 양수 → secCons 1").contains(",14.23,null,0.0182,0.0789,1]");
-    assertThat(json).as("T01: rs60 음수 → secCons 0").contains(",14.23,null,0.0182,-0.01,0]");
-    assertThat(json).as("T02: 업종 지수 없음 → secRs60·secCons null").contains(",14.23,null,0.0182,null,null]");
+    assertThat(json).contains("\"columns\":[\"tkr\",\"name\",\"sec\",\"score\",\"r20\",\"r60\",\"distHigh\",\"tvRatio\",\"frgnFlow\",\"instFlow\",\"rsIdx\",\"per\",\"pbr\",\"vol20\",\"secRs60\",\"secCons\",\"theme\"]");
+    assertThat(json).as("T00: 세 구간 모두 양수 → secCons 1").contains(",14.23,null,0.0182,0.0789,1,null]");
+    assertThat(json).as("T01: rs60 음수 → secCons 0").contains(",14.23,null,0.0182,-0.01,0,null]");
+    assertThat(json).as("T02: 업종 지수 없음 → secRs60·secCons null").contains(",14.23,null,0.0182,null,null,null]");
   }
 
   @Test
@@ -154,6 +157,37 @@ class AdvicePromptBuilderTest {
     assertThat(none.newsIds()).isEmpty();
     assertThat(none.json()).doesNotContain("\"news\"");
     assertThat(builder.build(market(), screening(3), null, List.of(), Map.of(), DataQuality.OK, null).newsIds()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("advice-v8: regime(합성 국면·정책 한도)은 dataQuality 뒤, theme(대분류 강약 표)은 sectors 뒤, 후보 theme 열은 맨 뒤 — 국면이 없으면 두 블록 모두 없다")
+  void regimeAndThemeBlocks() {
+    MarketFeatures base = market();
+    MarketRegime regime = new MarketRegime("0001", LocalDate.of(2026, 9, 11), MarketTrendCode.BEAR, -3, VolRegimeCode.HIGH, 0.8712, 0.01834, 1180,
+        new MarketRegime.Policy("regime-policy-v1", 8, 0.65, 4),
+        List.of(new MarketRegime.Theme("5", 31, 0.012, 0.0311, 0.02, 0.645, ThemeStrength.STRONG, List.of("삼성전자", "SK하이닉스")),
+            new MarketRegime.Theme("6", 18, -0.01, -0.024, -0.03, 0.31, ThemeStrength.WEAK, List.of("KB금융"))));
+    MarketFeatures withRegime = new MarketFeatures(base.asOf(), base.indices(), base.flows(), base.global(), base.topSectors(), base.bottomSectors(),
+        base.sigma5d(), base.globalAsOf(), base.globalAgeTradingDays(), base.flowAsOf(), base.sectorAsOf(), base.entryDate(), base.exitDate(),
+        base.trends(), base.links(), base.sectorIndexAsOf(), regime);
+    ScreeningResult screened = screening(2);
+    List<CandidateRow> rows = new ArrayList<>(screened.candidates());
+    Map<String, Object> themed = new java.util.LinkedHashMap<>(rows.getFirst().features());
+    themed.put("theme", "5");
+    rows.set(0, rows.getFirst().toBuilder().features(themed).build());
+
+    String json = builder.build(withRegime, new ScreeningResult(screened.baseDate(), 1200, 300, 1L, rows), null, List.of(), Map.of(), DataQuality.OK).json();
+
+    assertThat(json).contains("\"dataQuality\":\"OK\",\"regime\":{\"index\":\"0001\",\"label\":\"BEAR·HIGH\",\"trend\":\"BEAR\",\"trendScore\":-3,"
+        + "\"vol\":\"HIGH\",\"volPct\":0.871,\"sigma20\":0.0183,\"volHistoryDays\":1180,"
+        + "\"policy\":{\"version\":\"regime-policy-v1\",\"longMax\":8,\"convictionCap\":0.65,\"avoidMax\":4,\"enforced\":true}},\"sectors\":");
+    assertThat(json).contains("]},\"theme\":{\"columns\":[\"code\",\"members\",\"rs5\",\"rs20\",\"rs60\",\"breadth\",\"strength\",\"leaders\"],"
+        + "\"rows\":[[\"5\",31,0.012,0.0311,0.02,0.645,\"STRONG\",[\"삼성전자\",\"SK하이닉스\"]],[\"6\",18,-0.01,-0.024,-0.03,0.31,\"WEAK\",[\"KB금융\"]]]},"
+        + "\"candidates\":");
+    assertThat(json).as("T00 소속 테마 5, T01 없음(null) — 맨 뒤 열").contains(",0.0789,1,\"5\"]").contains(",-0.01,0,null]");
+
+    String plain = builder.build(base, screened, null, List.of(), Map.of(), DataQuality.OK).json();
+    assertThat(plain).doesNotContain("\"regime\"").doesNotContain("\"theme\":{");
   }
 
   /** 반도체(G2510)는 세 구간 연속 초과(consistent), 음식료(G3020)는 업종 지수 없음(rs·mom null, consistent false) */

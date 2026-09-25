@@ -58,7 +58,12 @@ public record AdviceHeader(
     /** 아침 재판정(MORNING)이 다시 본 원 저녁 판단(DAILY LIVE) id. 다른 종류는 null (M4) */
     Long parentAdviceId,
     /** 아침 재판정의 저녁 대비 조치·트리거 메타 {keep, add, drop, triggers, …}. 다른 종류는 null (M4) */
-    Map<String, Object> diffJson) {
+    Map<String, Object> diffJson,
+    /**
+     * 합성 국면(추세 × 변동성)·정책 표 한도·테마 강약 스냅샷 (M6, regime_json). DAILY·ADHOC LIVE 와 LLM 섀도에 저장하고, MORNING 은 저녁 값을 읽기만 한다(null).
+     * M6 이전 행은 null
+     */
+    MarketRegime regime) {
 
   /**
    * 지수 코드의 규칙 추세 (0001 → trendKospi, 1001 → trendKosdaq).

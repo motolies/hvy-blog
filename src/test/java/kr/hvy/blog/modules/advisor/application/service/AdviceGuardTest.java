@@ -14,7 +14,9 @@ import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
+import kr.hvy.blog.modules.advisor.domain.code.VolRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
 import kr.hvy.blog.modules.advisor.domain.model.SignalValue;
@@ -214,6 +216,85 @@ class AdviceGuardTest {
     AdviceGuard.Result noNews = guard.validate(response, candidates, sectors, trends, null);
     assertThat(noNews.picks().getFirst().citedNews()).isEmpty();
     assertThat(noNews.stats()).containsEntry("unknownNews", 5);
+  }
+
+  @Test
+  @DisplayName("M6 BEAR·HIGH 정책(LONG≤8·확신≤0.65·AVOID≤4): 초과 확신은 클램프, AVOID 는 4개까지, 초과 LONG 은 확신 낮은 순 제거 — guard_json.policy 에 남고 제거율엔 안 들어간다")
+  void bearHighPolicyClampsAndTruncates() {
+    MarketRegime.Policy policy = new RegimePolicy(properties).limits(MarketTrendCode.BEAR, VolRegimeCode.HIGH);
+    assertThat(policy).isEqualTo(new MarketRegime.Policy("regime-policy-v1", 8, 0.65, 4));
+    List<CandidateRow> candidates = new java.util.ArrayList<>();
+    List<AdviceResponse.Pick> picks = new java.util.ArrayList<>();
+    for (int i = 0; i < 14; i++) {
+      String ticker = String.format("%06d", i);
+      candidates.add(candidate(ticker, 0.01 * i));
+      // 0~4 AVOID 0.80, 5~7 LONG 0.60, 8~10 LONG 0.75, 11~13 LONG 0.90
+      String direction = i < 5 ? "AVOID" : "LONG";
+      String conviction = i < 5 ? "0.80" : i < 8 ? "0.60" : i < 11 ? "0.75" : "0.90";
+      picks.add(pick(ticker, direction, conviction, List.of()));
+    }
+    AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("RISK_OFF", "DOWN", "DOWN", "0.60", ""), outlook, List.of(), picks, "");
+
+    AdviceGuard.Result result = guard.validate(response, candidates, sectors, trends, null, policy);
+
+    List<PickRow> longs = result.picks().stream().filter(p -> p.direction() == PickDirection.LONG).toList();
+    List<PickRow> avoids = result.picks().stream().filter(p -> p.direction() == PickDirection.AVOID).toList();
+    assertThat(avoids).as("AVOID 상한 4(기존 2)").hasSize(4);
+    assertThat(longs).as("AVOID 0.80 ×4 가 앞, LONG 0.65(클램프) ×6 이 pick-max 10 을 채운다").hasSize(6).allMatch(p -> p.conviction() == 0.65);
+    assertThat(result.picks()).hasSize(10);
+    assertThat(longs.size()).isLessThanOrEqualTo(policy.longMax());
+    assertThat(result.stats()).containsEntry("truncatedAvoid", 1).containsEntry("truncated", 2);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> applied = (Map<String, Object>) result.stats().get("policy");
+    assertThat(applied).containsEntry("version", "regime-policy-v1").containsEntry("longMax", 8).containsEntry("convictionCap", 0.65)
+        .containsEntry("avoidMax", 4).containsEntry("cappedConviction", 6).containsEntry("truncatedLong", 1);
+    assertThat(result.removed()).as("정책 개입은 제거율(PARTIAL 경보)에 넣지 않는다 — AVOID 초과 1건만").isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("M6 BEAR 정책의 LONG 상한은 pick-min 을 존중한다: pick-max 4·pick-min 3 이면 LONG ≤ 3 (4−2=2 가 아니라)")
+  void bearPolicyRespectsPickMin() {
+    properties.setPickMax(4);
+    MarketRegime.Policy policy = new RegimePolicy(properties).limits(MarketTrendCode.BEAR, VolRegimeCode.NORMAL);
+    assertThat(policy.longMax()).isEqualTo(3);
+    List<CandidateRow> candidates = new java.util.ArrayList<>();
+    List<AdviceResponse.Pick> picks = new java.util.ArrayList<>();
+    for (int i = 0; i < 5; i++) {
+      String ticker = String.format("%06d", i);
+      candidates.add(candidate(ticker, 0.01 * i));
+      picks.add(pick(ticker, "LONG", "0.70", List.of()));
+    }
+    AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("NEUTRAL", "UP", "UP", "0.60", ""), outlook, List.of(), picks, "");
+
+    AdviceGuard.Result result = guard.validate(response, candidates, sectors, trends, null, policy);
+
+    assertThat(result.picks()).hasSize(3);
+    assertThat(result.tooFew(properties.getPickMin())).as("LONG 상한이 하한을 깨지 않는다").isFalse();
+  }
+
+  @Test
+  @DisplayName("M6 회귀: BULL·NORMAL 정책은 기존 가드와 픽·확신·순위가 같다(상한 pick-max, 확신 상한 없음, AVOID 2) — stats 에 policy 만 더해진다")
+  void bullPolicyEqualsLegacy() {
+    MarketRegime.Policy policy = new RegimePolicy(properties).limits(MarketTrendCode.BULL, VolRegimeCode.NORMAL);
+    assertThat(policy).isEqualTo(new MarketRegime.Policy("regime-policy-v1", properties.getPickMax(), null, 2));
+    List<CandidateRow> candidates = new java.util.ArrayList<>();
+    List<AdviceResponse.Pick> picks = new java.util.ArrayList<>();
+    for (int i = 0; i < 14; i++) {
+      String ticker = String.format("%06d", i);
+      candidates.add(candidate(ticker, 0.01 * i));
+      picks.add(pick(ticker, i < 4 ? "AVOID" : "LONG", String.format("%.2f", 0.55 + 0.025 * i), List.of()));
+    }
+    AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("RISK_ON", "UP", "UP", "0.60", ""), outlook, List.of(), picks, "");
+
+    AdviceGuard.Result legacy = guard.validate(response, candidates, sectors, trends, null);
+    AdviceGuard.Result bull = guard.validate(response, candidates, sectors, trends, null, policy);
+
+    assertThat(bull.picks()).isEqualTo(legacy.picks());
+    assertThat(bull.removed()).isEqualTo(legacy.removed());
+    Map<String, Object> withoutPolicy = new HashMap<>(bull.stats());
+    withoutPolicy.remove("policy");
+    assertThat(withoutPolicy).isEqualTo(legacy.stats());
+    assertThat(legacy.stats()).doesNotContainKey("policy");
   }
 
   private static CandidateRow candidate(String ticker, double r20) {

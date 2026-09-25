@@ -101,6 +101,8 @@ public class AdvisorProperties {
   private Model model = new Model();
   private Cost cost = new Cost();
   private Note note = new Note();
+  private Regime regime = new Regime();
+  private Theme theme = new Theme();
 
   /** 프롬프트 입력 스냅샷·원본 출력 보존 일수 */
   private int retentionDays = 180;
@@ -128,6 +130,7 @@ public class AdvisorProperties {
   void logStatus() {
     validateMarkets();
     validateHorizons();
+    validateRegime();
     if (!enabled) {
       log.info("advisor 비활성(advisor.enabled=false) — AI 판단 잡·ChatClient 미등록");
       return;
@@ -204,6 +207,42 @@ public class AdvisorProperties {
       }
       if (spec.getIcWindow() != null && spec.getIcWindow() < h) {
         throw new IllegalStateException("advisor.horizons." + h + ".ic-window=" + spec.getIcWindow() + " 가 호라이즌보다 작습니다 (n_eff < 1)");
+      }
+    }
+  }
+
+  /**
+   * advisor.regime 검증(M6). 백분위 임계는 0 ≤ low &lt; high ≤ 1, 정책 표의 확신 상한은 허용 이산값 범위 [0.55, 0.90], 감산·가산은 음수가 아니어야 한다.
+   * 정책 표는 사전 등록 대상이라 잘못된 값이 조용히 적용되느니 기동을 거부한다.
+   */
+  void validateRegime() {
+    if (regime.getVolLowPct() < 0 || regime.getVolHighPct() > 1 || regime.getVolLowPct() >= regime.getVolHighPct()) {
+      throw new IllegalStateException("advisor.regime.vol-low-pct(" + regime.getVolLowPct() + ") < vol-high-pct(" + regime.getVolHighPct()
+          + ") 이고 둘 다 [0, 1] 이어야 합니다");
+    }
+    if (regime.getVolWindowDays() < 2 || regime.getVolLookbackYears() <= 0) {
+      throw new IllegalStateException("advisor.regime.vol-window-days ≥ 2, vol-lookback-years > 0 이어야 합니다");
+    }
+    RegimePolicyTable policy = regime.getPolicy();
+    if (StringUtils.isBlank(policy.getVersion())) {
+      throw new IllegalStateException("advisor.regime.policy.version 이 비어 있습니다 — 정책 표 수치는 버전과 함께 사전 등록한다");
+    }
+    if (policy.getVolHighConvictionPenalty() < 0) {
+      throw new IllegalStateException("advisor.regime.policy.vol-high-conviction-penalty 는 음수일 수 없습니다");
+    }
+    for (Map.Entry<String, RegimeRule> e : Map.of("bull", policy.getBull(), "sideways", policy.getSideways(), "bear", policy.getBear()).entrySet()) {
+      RegimeRule rule = e.getValue();
+      if (rule == null) {
+        throw new IllegalStateException("advisor.regime.policy." + e.getKey() + " 가 비어 있습니다");
+      }
+      if (rule.getLongMaxReduction() < 0) {
+        throw new IllegalStateException("advisor.regime.policy." + e.getKey() + ".long-max-reduction 은 음수일 수 없습니다");
+      }
+      if (rule.getConvictionCap() != null && (rule.getConvictionCap() < 0.55 || rule.getConvictionCap() > 0.90)) {
+        throw new IllegalStateException("advisor.regime.policy." + e.getKey() + ".conviction-cap 은 [0.55, 0.90] 이어야 합니다: " + rule.getConvictionCap());
+      }
+      if (rule.getAvoidMax() != null && rule.getAvoidMax() < 0) {
+        throw new IllegalStateException("advisor.regime.policy." + e.getKey() + ".avoid-max 는 음수일 수 없습니다");
       }
     }
   }
@@ -569,5 +608,87 @@ public class AdvisorProperties {
      * 사후 재실행(?baseDate=)에서 미래 확정이 새어 들지 않게 하는 상한으로, advisor.news.cutoff 와 같은 뜻이다(bitemporal)
      */
     private LocalTime cutoff = LocalTime.of(20, 0);
+  }
+
+  /**
+   * 합성 국면(M6, 2026-09-25): 규칙 추세 × 변동성 국면(지수 σ20 의 과거 분포 백분위) → 사전 등록 정책 표. 결과는 tb_advisor_advice.regime_json 과
+   * 프롬프트 regime 블록에 실리고, 정책 표 한도는 AdviceGuard·MorningAdviceGuard 가 기계적으로 강제한다.
+   */
+  @Data
+  public static class Regime {
+
+    /** 국면 기준 지수 — 픽 유니버스(KOSPI)의 벤치 */
+    private String indexCode = "0001";
+
+    /** σ 창(거래일). σ20 = 직전 20거래일 ret_1d 표본 표준편차 */
+    private int volWindowDays = 20;
+
+    /** 백분위 분포의 과거 창(년). 기준일 이전 σ 값만 쓴다(룩어헤드 없음). 이력이 짧으면 가능한 범위 전부 */
+    private int volLookbackYears = 5;
+
+    /** 분포 표본이 이보다 적으면 변동성 국면 UNKNOWN (정책의 고변동 가산 없음) */
+    private int volMinHistoryDays = 250;
+
+    /** 백분위가 이 값 미만이면 LOW */
+    private double volLowPct = 0.30;
+
+    /** 백분위가 이 값 이상이면 HIGH */
+    private double volHighPct = 0.80;
+
+    private RegimePolicyTable policy = new RegimePolicyTable();
+  }
+
+  /**
+   * 사전 등록 정책 표(regime-policy-v1). **수치를 바꾸면 version 을 올린다(새 버전)** — 판단마다 regime_json.policy.version 이 남아 사후에 표 버전별로 분리한다.
+   * 근거는 M0 측정 전이라 보수 규칙만 둔다: 약세장에서 LONG 을 줄이고 확신을 낮추며 AVOID 여지를 넓힌다. 국면별 가중치(계획 M6 (b))는 M0 검정 뒤로 미룬다.
+   */
+  @Data
+  public static class RegimePolicyTable {
+
+    /** 정책 표 버전 (regime_json·guard_json 에 기록) */
+    private String version = "regime-policy-v1";
+
+    /** 강세: 기존 상한 그대로 */
+    private RegimeRule bull = new RegimeRule(0, null, null);
+
+    /** 보합: LONG 확신 0.80 상한 */
+    private RegimeRule sideways = new RegimeRule(0, 0.80, null);
+
+    /** 약세: LONG 상한 −2(pick-min 존중), 확신 0.70 상한, AVOID 최대 4 */
+    private RegimeRule bear = new RegimeRule(2, 0.70, 4);
+
+    /** 변동성 HIGH 면 확신 상한을 이만큼 더 낮춘다(상한이 없던 국면은 허용 최댓값에서 뺀다) */
+    private double volHighConvictionPenalty = 0.05;
+  }
+
+  /**
+   * 추세 라벨 1개의 정책 행. longMaxReduction 은 pick-max 에서 빼는 수(결과는 pick-min 이상), convictionCap 이 null 이면 상한 없음, avoidMax 가 null 이면 기존 AVOID 상한(2).
+   */
+  @Data
+  @NoArgsConstructor
+  @AllArgsConstructor
+  public static class RegimeRule {
+
+    private int longMaxReduction;
+
+    private Double convictionCap;
+
+    private Integer avoidMax;
+  }
+
+  /**
+   * 테마 블록(M6): 기준일에 KOSPI200 구성(PIT, tb_stock_master_history)인 종목을 kospi200_sector 대분류별로 집계한다. CUSTOM 매핑은 보류(2026-09-25 결정).
+   */
+  @Data
+  public static class Theme {
+
+    /** 강약 판정 임계: rs20(중앙값 수익률 − KOSPI) 이 +이 값 이상이고 rs60 &gt; 0 이면 STRONG, −이 값 이하이고 rs60 &lt; 0 이면 WEAK */
+    private double strongRs20 = 0.02;
+
+    /** 지표가 있는 구성 종목이 이보다 적은 대분류는 뺀다(중앙값이 한두 종목에 좌우) */
+    private int minMembers = 3;
+
+    /** 대분류마다 싣는 대표 종목명 수(60일 평균 거래대금 상위) — 코드 의미를 LLM 이 추정하는 단서 */
+    private int leaders = 3;
   }
 }

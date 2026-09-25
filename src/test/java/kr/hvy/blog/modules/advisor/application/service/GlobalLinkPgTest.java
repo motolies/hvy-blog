@@ -121,7 +121,8 @@ class GlobalLinkPgTest {
         LocalDate d = inv.getArgument(0);
         return d != null && d.getDayOfWeek() != DayOfWeek.SATURDAY && d.getDayOfWeek() != DayOfWeek.SUNDAY;
       });
-      MarketFeatureService features = new MarketFeatureService(named, properties, new MarketTrendService(named, properties), new TradingCalendar(calendar), links);
+      MarketFeatureService features = new MarketFeatureService(named, properties, new MarketTrendService(named, properties), new TradingCalendar(calendar), links,
+          new MarketRegimeService(named, properties, new ThemeStrengthService(named, properties)));
       MarketFeatures f = features.features(AS_OF);
       assertThat(f.globalAsOf()).as("미국 T-1 = 기준일 직전 영업일").isEqualTo(D.get(D.size() - 2));
       assertThat(f.globalAgeTradingDays()).isEqualTo(1);

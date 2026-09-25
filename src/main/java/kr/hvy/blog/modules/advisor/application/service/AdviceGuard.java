@@ -16,6 +16,7 @@ import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.CitedFeature;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
 import kr.hvy.blog.modules.advisor.domain.model.NewsBlock;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
@@ -33,6 +34,9 @@ import org.apache.commons.lang3.StringUtils;
  *   <li>텍스트에서 <!channel>·<!here>·제어문자 제거, 길이 절단</li>
  *   <li>advice-v6: secCons=0 후보·overheated 섹터의 LONG 픽은 확신을 advisor.advise.non-consistent-conviction-cap 으로 클램프(제거 아님, stats
  *       capNonConsistent/capOverheated). 주도 섹터 콜에는 입력 sectors 의 consistent 를 채운다</li>
+ *   <li>advice-v8(M6): 합성 국면의 사전 등록 정책 표(RegimePolicy) — LONG 확신 상한 클램프, AVOID 상한(기본 2 → 약세 4), LONG 개수 상한(확신 낮은 LONG 부터 제거).
+ *       정책이 없으면(국면 미계산·추세 없음) 기존 규칙과 같다. 정책 적용 내역은 stats.policy 에 남고 픽 제거율(removed)에는 넣지 않는다 — 정책은 모델 이탈이 아니라
+ *       사전에 정한 한도라 PARTIAL 경보를 울릴 이유가 없다</li>
  * </ul>
  * 제거율(제거 픽 / 원본 픽)이 30% 를 넘으면 모델·프롬프트가 어긋난 신호로 보고 run 을 PARTIAL 로 둔다.
  */
@@ -134,7 +138,16 @@ public final class AdviceGuard {
    */
   public Result validate(AdviceResponse response, List<CandidateRow> candidates, SectorContext sectors, Map<String, MarketTrendCode> trends,
       NewsBlock news) {
+    return validate(response, candidates, sectors, trends, news, null);
+  }
+
+  /**
+   * @param policy 합성 국면의 정책 표 한도(M6). null 이면 기존 규칙(LONG 상한 = pick-max, 확신 상한 없음, AVOID ≤ 2)
+   */
+  public Result validate(AdviceResponse response, List<CandidateRow> candidates, SectorContext sectors, Map<String, MarketTrendCode> trends,
+      NewsBlock news, MarketRegime.Policy policy) {
     Map<String, Object> stats = new LinkedHashMap<>();
+    PolicyCounter policyCounter = new PolicyCounter(policy);
     Map<String, Set<String>> newsTickers = news == null ? Map.of() : news.tickersById();
     Map<String, String> sectorNames = sectors == null ? Map.of() : sectors.names();
     Set<String> consistentSectors = sectors == null ? Set.of() : sectors.consistent();
@@ -207,6 +220,7 @@ public final class AdviceGuard {
         double conviction = conviction(p.conviction(), stats, "clampedConviction");
         if (direction == PickDirection.LONG) {
           conviction = capBySector(conviction, candidate, overheatedSectors, stats);
+          conviction = policyCounter.capConviction(conviction);
         }
         picks.add(PickRow.builder()
             .ticker(p.ticker())
@@ -219,16 +233,18 @@ public final class AdviceGuard {
             .build());
       }
     }
-    // AVOID 상한
+    // AVOID 상한 (정책 표가 있으면 그 값 — 약세장 4)
+    int avoidMax = policy == null ? MAX_AVOID : policy.avoidMax();
     List<PickRow> avoids = picks.stream().filter(p -> p.direction() == PickDirection.AVOID).toList();
-    if (avoids.size() > MAX_AVOID) {
-      List<PickRow> drop = avoids.stream().sorted((a, b) -> Double.compare(a.conviction(), b.conviction())).limit(avoids.size() - MAX_AVOID).toList();
+    if (avoids.size() > avoidMax) {
+      List<PickRow> drop = avoids.stream().sorted((a, b) -> Double.compare(a.conviction(), b.conviction())).limit(avoids.size() - avoidMax).toList();
       picks.removeAll(drop);
       removed += drop.size();
       stats.put("truncatedAvoid", drop.size());
     }
-    // 확신 내림차순, 상한
+    // 확신 내림차순, 정책 LONG 상한(확신 낮은 LONG 부터 제거), 전체 상한
     picks.sort((a, b) -> Double.compare(b.conviction(), a.conviction()));
+    picks = policyCounter.limitLongs(picks);
     if (picks.size() > properties.getPickMax()) {
       stats.put("truncated", picks.size() - properties.getPickMax());
       picks = new ArrayList<>(picks.subList(0, properties.getPickMax()));
@@ -242,8 +258,63 @@ public final class AdviceGuard {
     }
     stats.put("originalPicks", original);
     stats.put("removed", removed);
+    if (policy != null) {
+      stats.put("policy", policyCounter.summary());
+    }
     return new Result(regime, kospi, kosdaq, pUp, rationale, sectorCalls, ranked, sanitize(response.summary(), SUMMARY_LIMIT, stats), stats,
         original, removed, outlooks);
+  }
+
+  /**
+   * 정책 표 적용기(M6): 확신 클램프·LONG 개수 상한을 적용하며 실제로 건드린 수를 센다. 정책이 null 이면 아무것도 바꾸지 않는다.
+   */
+  static final class PolicyCounter {
+
+    private final MarketRegime.Policy policy;
+    private int cappedConviction;
+    private int truncatedLong;
+
+    PolicyCounter(MarketRegime.Policy policy) {
+      this.policy = policy;
+    }
+
+    /** LONG 확신을 정책 상한으로 내린다(상한은 RegimePolicy 가 이미 허용 이산값으로 맞춰 둔다) */
+    double capConviction(double conviction) {
+      if (policy == null || policy.convictionCap() == null || conviction <= policy.convictionCap() + RegimePolicy.EPS) {
+        return conviction;
+      }
+      cappedConviction++;
+      return policy.convictionCap();
+    }
+
+    /** 확신 내림차순으로 정렬된 픽에서 LONG 을 정책 상한까지만 남긴다(AVOID 는 그대로) */
+    List<PickRow> limitLongs(List<PickRow> sorted) {
+      if (policy == null) {
+        return sorted;
+      }
+      List<PickRow> kept = new ArrayList<>();
+      int longs = 0;
+      for (PickRow p : sorted) {
+        if (p.direction() == PickDirection.LONG && ++longs > policy.longMax()) {
+          truncatedLong++;
+          continue;
+        }
+        kept.add(p);
+      }
+      return kept;
+    }
+
+    /** guard_json.policy: 적용한 한도와 실제 개입 수 */
+    Map<String, Object> summary() {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("version", policy.version());
+      m.put("longMax", policy.longMax());
+      m.put("convictionCap", policy.convictionCap());
+      m.put("avoidMax", policy.avoidMax());
+      m.put("cappedConviction", cappedConviction);
+      m.put("truncatedLong", truncatedLong);
+      return m;
+    }
   }
 
   /**

@@ -98,7 +98,7 @@ class AdvisorScreeningPgTest {
       return day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY;
     });
     marketFeatures = new MarketFeatureService(named, properties, new MarketTrendService(named, properties), new TradingCalendar(calendar),
-        new GlobalLinkService(named, properties));
+        new GlobalLinkService(named, properties), new MarketRegimeService(named, properties, new ThemeStrengthService(named, properties)));
     jdbc.update("TRUNCATE tb_advisor_signal_ic_daily");
     jdbc.update("DELETE FROM tb_stock_daily_metric WHERE trade_date > ?", BASE);
     jdbc.update("DELETE FROM tb_stock_daily_price WHERE trade_date > ?", BASE);

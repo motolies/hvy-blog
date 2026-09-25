@@ -22,8 +22,10 @@ import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
 import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
 import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
+import kr.hvy.blog.modules.advisor.domain.code.VolRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
@@ -36,13 +38,13 @@ import lombok.Builder;
 /**
  * 일일 판단 Block Kit 메시지 (#hvy-advisor, 멘션 없음).
  * <pre>
- * 헤더 → 추세(규칙) → 국면(5일) → 추세 전망(LLM) → 데이터 기준·적용 구간 → 주도 섹터 → 종목 표(고정폭: 순위 코드 종목명 방향 확신 점수)
+ * 헤더 → 추세(규칙) → 합성 국면·정책(M6) → 테마 강약(M6) → 국면(5일) → 추세 전망(LLM) → 데이터 기준·적용 구간 → 주도 섹터 → 종목 표(고정폭: 순위 코드 종목명 방향 확신 점수)
  * → 픽마다 근거·리스크 인용 블록(전문) → 최근 채점 → 총평 → run 메타 → 면책
  * </pre>
  * 종목 표는 고정폭 코드 블록(Block Kit fields 는 2열 고정이라 표가 깨진다)이며 폭은 {@link SlackWidth} 로 한글 2칸을 계산한다. 모바일 코드 블록이
  * 40칸 남짓에서 접히므로 표는 39칸 안에 두고 근거·리스크는 표 밖 인용 블록으로 내렸다. 근거·리스크는 **픽마다 section 1개** 에 전문을 싣는다(advice-v5) —
  * 픽 10개를 section 1개(3,000자 상한)에 몰아넣느라 한글 29자/19자로 잘랐던 v2~v4 결함의 수정. 픽당 최대 ≈830자(가드 400+300+헤더), 블록 수는
- * 고정 14 + 픽 수(≤ pick-max 10) 로 메시지 상한 50 안이다. 하단 면책 문구는 고정이다.
+ * 고정 16 + 픽 수(≤ pick-max 10) 로 메시지 상한 50 안이다. 하단 면책 문구는 고정이다.
  */
 @Builder
 public class DailyAdviceMessage implements SlackMessage {
@@ -118,6 +120,14 @@ public class DailyAdviceMessage implements SlackMessage {
     if (trend != null) {
       blocks.add(section(s -> s.text(markdownText(trend))));
     }
+    String policy = policyText();
+    if (policy != null) {
+      blocks.add(section(s -> s.text(markdownText(policy))));
+    }
+    String themes = themeText();
+    if (themes != null) {
+      blocks.add(section(s -> s.text(markdownText(themes))));
+    }
     blocks.add(section(s -> s.text(markdownText(regimeText()))));
     String outlook = outlookText();
     if (outlook != null) {
@@ -170,6 +180,61 @@ public class DailyAdviceMessage implements SlackMessage {
       }
     }
     return parts.isEmpty() ? null : "*추세*  " + String.join(" · ", parts);
+  }
+
+  /**
+   * 합성 국면·정책 한 줄(M6): "*국면(규칙)*  BEAR · 변동성 HIGH(87%) · 정책: LONG≤8, 확신≤0.65, AVOID≤4". 국면이 없으면(M6 이전·계산 실패) null.
+   * 확신 상한이 없으면 확신 항목을 뺀다.
+   */
+  String policyText() {
+    MarketRegime r = header.regime();
+    if (r == null) {
+      return null;
+    }
+    StringBuilder sb = new StringBuilder("*국면(규칙)*  ");
+    sb.append(r.trend() == null ? "-" : r.trend().getCode());
+    sb.append(" · 변동성 ").append(r.vol() == null ? VolRegimeCode.UNKNOWN.getCode() : r.vol().getCode());
+    if (r.volPct() != null) {
+      sb.append(String.format("(%.0f%%)", r.volPct() * 100));
+    }
+    MarketRegime.Policy p = r.policy();
+    if (p != null) {
+      sb.append(" · 정책: LONG≤").append(p.longMax());
+      if (p.convictionCap() != null) {
+        sb.append(String.format(", 확신≤%.2f", p.convictionCap()));
+      }
+      sb.append(", AVOID≤").append(p.avoidMax());
+    }
+    return sb.toString();
+  }
+
+  /** 테마 요약에 싣는 상위·하위 개수 */
+  static final int THEME_BRIEF = 2;
+
+  /**
+   * 테마 강약 한 줄(M6): "*테마*  강: 5[삼성전자] +3.1%p · 2[HD현대] +2.0%p / 약: 6[KB금융] −2.4%p". rs20(시장 대비 1개월 초과) 기준 상위·하위 각 2개,
+   * 테마가 4개 미만이면 겹치지 않게 나눈다. 테마가 없으면 null.
+   */
+  String themeText() {
+    MarketRegime r = header.regime();
+    if (r == null || r.themes() == null || r.themes().isEmpty()) {
+      return null;
+    }
+    List<MarketRegime.Theme> themes = r.themes();
+    int top = Math.min(THEME_BRIEF, (themes.size() + 1) / 2);
+    int bottom = Math.min(THEME_BRIEF, themes.size() - top);
+    String strong = themes.subList(0, top).stream().map(DailyAdviceMessage::themeBrief).collect(Collectors.joining(" · "));
+    List<MarketRegime.Theme> weakest = new ArrayList<>(themes.subList(themes.size() - bottom, themes.size()));
+    Collections.reverse(weakest);
+    String weak = weakest.stream().map(DailyAdviceMessage::themeBrief).collect(Collectors.joining(" · "));
+    return "*테마*  강: " + strong + (weak.isEmpty() ? "" : " / 약: " + weak);
+  }
+
+  /** 테마 1개: 코드[대표 종목] rs20(%p) */
+  static String themeBrief(MarketRegime.Theme t) {
+    String leader = t.leaders() == null || t.leaders().isEmpty() ? "" : "[" + t.leaders().getFirst() + "]";
+    String rs20 = t.rs20() == null ? "-" : String.format("%+.1f%%p", t.rs20() * 100);
+    return t.code() + leader + " " + rs20;
   }
 
   String regimeText() {

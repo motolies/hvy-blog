@@ -29,6 +29,9 @@ public final class FeatureSql {
    * is_kospi200(advice-v7) 는 그 거래일에 유효한 마스터 SCD2 이력 행([valid_from, valid_to) 반열림, 겹치지 않아 행이 늘지 않는다)의 구성 여부다 — PIT.
    * 라이브 기준일에는 현재 행(valid_to IS NULL)이 곧 당일 스냅샷이다. 이력 시작 전 날짜는 NULL(모름)이며 tb_stock_master 의 현재 값으로 채우지 않는다
    * (과거 구간을 오늘 구성종목으로 거르는 룩어헤드). 후보 필터(advisor.pick-universe)에만 쓰고 IC·백분위는 이 컬럼을 보지 않는다.
+   * <p>
+   * k200_sector(M6) 는 그날 구성종목(PIT)일 때만 현재 마스터의 KOSPI200 섹터 대분류 코드 — 후보 features.theme(프롬프트 테마 블록과 조인하는 키)의 원천이다.
+   * 분류 코드는 이력 테이블에 없어 현재 값을 쓴다(ThemeStrengthService 와 같은 한계). 시그널·IC 는 이 컬럼을 보지 않는다.
    */
   public static String featureCtes() {
     return """
@@ -66,7 +69,8 @@ public final class FeatureSql {
                    ix.ret_20d AS index_ret_20d,
                    six.ret_5d - ix.ret_5d AS sector_rs_5d, six.ret_20d - ix.ret_20d AS sector_rs_20d, six.ret_60d - ix.ret_60d AS sector_rs_60d,
                    p.close_price AS raw_close,
-                   mh.is_kospi200
+                   mh.is_kospi200,
+                   CASE WHEN mh.is_kospi200 THEN ms.kospi200_sector END AS k200_sector
             FROM base b
                      JOIN tb_stock_daily_metric m ON m.ticker = b.ticker AND m.trade_date = b.trade_date
                      JOIN tb_stock_master ms ON ms.ticker = m.ticker

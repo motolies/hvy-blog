@@ -81,6 +81,46 @@
 
 **축 C — 2계층 메모리.** 빠른 층 = `recentOutcomes`(`RecentOutcomesService`): 기준일 앞 `note.window-trading-days`(20) 거래일의 확정 노트를 `finalized_at·noted_at ≤ 기준일 note.cutoff(20:00 KST)` 로 읽어(사후 재실행에서 미래 확정 차단) `class × secCons` 빈도표 `{windowTradingDays, finalizedAsOf, columns:[class,secCons,n,confirmRate,meanFinalExcess,se,underpowered], rows}` 로 만든다. 확정 노트 < `min-finalized`(10) 이면 블록 생략(run 메타 `skip.NOTES`), 행은 n 상위 `max-rows`(5), `underpowered = n<30`, secCons 없음은 `"-"`. 프롬프트 위치는 scoreboard 뒤·lessons 앞, 지시는 "확신을 **한 단계(0.05) 안에서만**, underpowered 는 참고만, 종목 추가·제거·순위 변경 금지". 느린 층 = scoreboard·lessons(300 게이트 그대로). 헤더 `memory_json = {recentOutcomes: 행수, lessons: [id], scoreboard: bool}` 은 **하나도 실리지 않으면 NULL**(NOMEM 섀도도 NULL) — `AdviceWriter.firstMemoryAdviceDate()`(LIVE 의 MIN(base_date) WHERE memory_json IS NOT NULL) 가 NOMEM 창의 시작점이다. `SHADOW_NOMEM` 실행 조건은 `memoryInjected && nomemShadowOpen(baseDate)`(첫 메모리 판단일 + `shadow.nomem-weeks`(8) 이내, NONEWS 와 동형) 로 바뀌어 **2026-09-21 까지 `nomem-weeks` 를 읽는 코드가 없어 NOMEM 이 영구 병행이던 결함이 수정**됐다(skip 사유 "메모리 미주입"/"섀도 기간 종료"). 300 전에는 scoreboard·lessons 가 비어 NOMEM = "노트만 뺀 것" 이라 정확히 1요인이다. 주간 보고 KPI 블록에 `LIVE vs NOMEM(최근 4주): 픽 Jaccard 평균·|Δconviction| 평균 (n=일수)` 와 `OPEN 노트 10영업일 초과: N건`(finalize 정지 경보, `PickNoteRepository.countStaleOpen`) 2줄이 붙는다(`MEMORY` 단계, 격리). 교훈 셀의 t 는 base_date 클러스터 se(`LessonService.clusterT`, D<2 → 0, `Cell.nDays`) 로 바뀌었고 `lesson-system-v2.md` 에 설명 한 줄만 보탰다(스키마 불변, 버전 유지).
 
+### 1.7 합성 국면·사전 등록 정책 표·테마 (advice-v8 · regime-policy-v1, M6, 2026-09-25)
+
+브랜치 `feat/advisor-regime-policy`. 규칙 추세(BULL/SIDEWAYS/BEAR)에 **변동성 국면**을 더해 합성 국면을 만들고, 그 국면에 **사전 등록된 정책 표**를 가드가 기계적으로 강제한다. 국면별 **가중치**(계획 M6 (b))는 운영 DB 로 M0 측정(국면별 IC 차이 t≥2)을 먼저 해야 해서 이번에는 넣지 않았다.
+
+- **변동성 국면**(`MarketRegimeService`): KOSPI(`advisor.regime.index-code`) σ20(직전 20거래일 `ret_1d` 표본 표준편차, 창이 꽉 찬 날만)을 기준일 **이전** 최대 5년 σ20 분포의 백분위로 나눈다(`below/hist`). `< 0.30` LOW, `≥ 0.80` HIGH, 그 사이는 NORMAL 이고, 분포 표본이 250 미만이면 UNKNOWN(정책 가산 없음)이다. SQL 전체가 `trade_date ≤ 기준일` 로 잘려 있어 룩어헤드가 없다(`MarketRegimePgTest` 가 미래 극단값을 넣어 검증).
+- **정책 표**(`RegimePolicy`, yml `advisor.regime.policy`). ★ **수치를 바꾸면 `version` 을 올린다(새 버전).** 판단마다 `regime_json.policy.version` 이 남는다.
+
+  | 추세 | LONG 상한 | LONG 확신 상한 | AVOID 최대 |
+  |---|---|---|---|
+  | BULL | pick-max(기존) | — | 2(기존) |
+  | SIDEWAYS | pick-max(기존) | 0.80 | 2 |
+  | BEAR | max(pick-min, pick-max − 2) | 0.70 | 4 |
+  | vol=HIGH 가산 | — | 위 상한 −0.05(상한이 없던 국면은 0.90 −0.05 = 0.85) | — |
+
+  - 확신 상한은 허용 이산값 중 상한 이하 최댓값으로 맞춘다.
+  - 기본 pick-max 10 기준으로 BEAR 의 LONG 상한은 8, BEAR·HIGH 의 확신 상한은 0.65 다.
+  - 수치 근거: M0 측정 전이라 방향만 보수적인 규칙이다. 약세장에서 LONG 을 줄이고, 과신을 막고, AVOID 여지를 넓힌다. BULL 은 기존과 완전히 같다(회귀 테스트로 확인).
+- **강제**
+  - `AdviceGuard.validate(..., policy)`: LONG 확신을 클램프하고, AVOID 상한을 정책 값으로 두며, 초과 LONG 은 확신이 낮은 것부터 제거한다.
+    - LIVE·ADHOC·LLM 섀도(NOMEM/NONEWS)에 **같은 한도**를 적용한다. 섀도가 LIVE 와 요인 하나만 달라야 하기 때문이다.
+    - QUANT_TOPN 섀도는 대조군이라 적용하지 않는다.
+    - 적용 내역은 `guard_json.policy {version,longMax,convictionCap,avoidMax,cappedConviction,truncatedLong}` 에 남는다. 픽 제거율(PARTIAL 경보)에는 넣지 않는다.
+  - `MorningAdviceGuard` 는 국면을 다시 판단하지 않고 **저녁 `regime_json.policy` 를 그대로** 적용한다: ADD LONG 확신 클램프(`policyCappedConviction`), AVOID 상한, 초과 LONG 제거(`policyTruncatedLong`, 확신 낮은 ADD 부터).
+- **테마**(`ThemeStrengthService`)
+  - 기준일(0001 최신 행 날짜)에 KOSPI200 구성(PIT, `tb_stock_master_history`)인 종목을 `kospi200_sector` 대분류별로 묶는다.
+  - 집계 항목: members, rs5/20/60(구성 종목 수익률 **중앙값** − KOSPI), breadth(20일선 위 비율), 강약 라벨, leaders(60일 거래대금 상위 종목명 3개).
+  - 강약 라벨: rs20 ≥ +0.02 이고 rs60 > 0 이면 STRONG, rs20 ≤ −0.02 이고 rs60 < 0 이면 WEAK, 그 외 NEUTRAL.
+  - 구성 종목이 3개 미만인 대분류는 뺀다.
+  - **한계**: 대분류 코드는 이력 테이블에 없어 현재 마스터 값을 쓴다. 과거 날짜를 재실행하면 오늘 분류로 묶이고, 지금 편출돼 코드가 NULL 인 과거 구성 종목은 빠진다.
+  - 코드→이름 표는 KIS 원천에 없어서 이름 대신 leaders 를 싣는다. 후보 features 에 `theme`(PIT 구성일 때만)이 붙고, 프롬프트 후보 표 맨 뒤에 `theme` 열이 생긴다.
+- **섹터 rs120**: `SectorFeature.rs120`(업종 지수 120일 − KOSPI)은 `features(asOf, h)` 에서 h ≥ H60 호라이즌일 때만 채운다. DAILY 프롬프트 표에는 싣지 않는다(M8 용).
+- **저장·노출**
+  - `tb_advisor_advice.regime_json`(맨 뒤, 마이그레이션 `20260925_03_advisor_regime_policy.sql`): `{indexCode, tradeDate, trend, trendScore, vol, volPct, sigma20, volHistoryDays, policy, themes}`. DAILY·ADHOC LIVE 와 LLM 섀도에 저장하고, MORNING·QUANT 는 NULL 이다.
+  - 프롬프트 v8: `regime` 블록(dataQuality 뒤), `theme` 블록(sectors 뒤), 규칙 13(국면별 행동 지침, 정책 한도는 시스템이 강제), 규칙 14(테마 해석).
+  - Slack 에 두 줄이 추가된다: `*국면(규칙)*  BEAR · 변동성 HIGH(87%) · 정책: LONG≤8, 확신≤0.65, AVOID≤4`, `*테마*  강: 5[삼성전자] +3.1%p · … / 약: …`.
+  - 채팅
+    - `latestAdvice` 응답에 `ruleRegime` 이 추가된다. 기존 `regime` 키는 LLM 5일 위험 선호다.
+    - 신규 도구 `marketRegime(asOf)` 는 기준일 합성 국면·정책·테마를 규칙으로 즉석 계산한다. 도구는 18종이 된다.
+- **적용 순서**: `20260925_03` SQL → 앱 배포. IC 재계산은 필요 없다(시그널·가중치 불변). 배포 뒤 첫 DAILY 에서 `regime_json` 과 `guard_json.policy` 를 확인한다.
+
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
 19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.

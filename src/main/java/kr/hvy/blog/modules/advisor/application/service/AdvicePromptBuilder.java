@@ -11,6 +11,7 @@ import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.GlobalLink;
 import kr.hvy.blog.modules.advisor.domain.model.LessonRow;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
 import kr.hvy.blog.modules.advisor.domain.model.NewsBlock;
 import kr.hvy.blog.modules.advisor.domain.model.PromptPayload;
@@ -26,15 +27,17 @@ import org.springframework.stereotype.Component;
  * <p>
  * 표 컬럼(SECTOR_COLUMNS·CANDIDATE_COLUMNS)은 위치 배열이라 재현성 측정(동결 페이로드 재실행)·테스트가 위치로 읽는다 — 새 열은 맨 뒤에만 붙인다.
  * advice-v6: sectors 에 업종 지수 rs5/rs20/rs60·mom·consistent·overheated, candidates 에 소속 섹터의 secRs60·secCons(LLM 이 두 표를 조인하지 않게).
+ * advice-v8(M6): 루트에 regime(합성 국면·정책 표 한도, dataQuality 뒤)·theme(KOSPI200 섹터 대분류 강약, sectors 뒤) 블록, candidates 맨 뒤에 theme 열.
  */
 @Component
 @RequiredArgsConstructor
 public class AdvicePromptBuilder {
 
   static final List<String> CANDIDATE_COLUMNS = List.of("tkr", "name", "sec", "score", "r20", "r60", "distHigh", "tvRatio", "frgnFlow",
-      "instFlow", "rsIdx", "per", "pbr", "vol20", "secRs60", "secCons");
+      "instFlow", "rsIdx", "per", "pbr", "vol20", "secRs60", "secCons", "theme");
   static final List<String> SECTOR_COLUMNS = List.of("code", "name", "cw5", "rising", "nearHigh", "frgn5", "members",
       "rs5", "rs20", "rs60", "mom", "consistent", "overheated");
+  static final List<String> THEME_COLUMNS = List.of("code", "members", "rs5", "rs20", "rs60", "breadth", "strength", "leaders");
 
   private final AdvisorProperties properties;
 
@@ -212,12 +215,23 @@ public class AdvicePromptBuilder {
       root.put("window", window);
     }
     root.put("dataQuality", (quality == null ? DataQuality.OK : quality).getCode());
+    // advice-v8: 합성 국면·정책 표 — 규칙이 확정한 사실이고 한도는 가드가 강제한다(프롬프트 규칙 R1~R4)
+    if (market.regime() != null) {
+      root.put("regime", regimeBlock(market.regime()));
+    }
 
     Map<String, Object> sectors = new LinkedHashMap<>();
     sectors.put("columns", SECTOR_COLUMNS);
     sectors.put("top", market.topSectors().stream().map(AdvicePromptBuilder::sectorRow).toList());
     sectors.put("bottom", market.bottomSectors().stream().map(AdvicePromptBuilder::sectorRow).toList());
     root.put("sectors", sectors);
+    // advice-v8: 테마(KOSPI200 섹터 대분류) 강약 — sectors(KRX 업종) 옆. 후보 행의 theme 열이 code 와 조인된다
+    if (market.regime() != null && market.regime().themes() != null && !market.regime().themes().isEmpty()) {
+      Map<String, Object> theme = new LinkedHashMap<>();
+      theme.put("columns", THEME_COLUMNS);
+      theme.put("rows", market.regime().themes().stream().map(AdvicePromptBuilder::themeRow).toList());
+      root.put("theme", theme);
+    }
 
     Map<String, Object> cand = new LinkedHashMap<>();
     cand.put("columns", CANDIDATE_COLUMNS);
@@ -249,6 +263,47 @@ public class AdvicePromptBuilder {
     weights.forEach((k, v) -> w.put(k, round(v)));
     root.put("weights", w);
     return root;
+  }
+
+  /**
+   * regime 블록(advice-v8): 추세·변동성 국면·백분위·σ20·합성 라벨과 정책 표 한도. 정책이 없으면(추세 없음) policy 키를 뺀다.
+   */
+  static Map<String, Object> regimeBlock(MarketRegime r) {
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("index", r.indexCode());
+    m.put("label", r.labelText());
+    m.put("trend", r.trend() == null ? null : r.trend().getCode());
+    m.put("trendScore", r.trendScore());
+    m.put("vol", r.vol() == null ? null : r.vol().getCode());
+    m.put("volPct", round(r.volPct(), 3));
+    m.put("sigma20", round(r.sigma20()));
+    m.put("volHistoryDays", r.volHistoryDays());
+    if (r.policy() != null) {
+      Map<String, Object> p = new LinkedHashMap<>();
+      p.put("version", r.policy().version());
+      p.put("longMax", r.policy().longMax());
+      p.put("convictionCap", r.policy().convictionCap());
+      p.put("avoidMax", r.policy().avoidMax());
+      p.put("enforced", true);
+      m.put("policy", p);
+    }
+    return m;
+  }
+
+  /**
+   * 테마 1행(THEME_COLUMNS 순). rs·breadth 는 소수, leaders 는 대표 종목명 목록.
+   */
+  private static List<Object> themeRow(MarketRegime.Theme t) {
+    List<Object> row = new ArrayList<>();
+    row.add(t.code());
+    row.add(t.members());
+    row.add(round(t.rs5()));
+    row.add(round(t.rs20()));
+    row.add(round(t.rs60()));
+    row.add(round(t.breadth(), 3));
+    row.add(t.strength() == null ? null : t.strength().getCode());
+    row.add(t.leaders() == null ? List.of() : t.leaders());
+    return row;
   }
 
   /**
@@ -336,6 +391,7 @@ public class AdvicePromptBuilder {
     row.add(round(num(f.get("vol20d"))));
     row.add(round(num(f.get("secRs60"))));
     row.add(secCons(f));
+    row.add(f.get("theme") instanceof String theme ? theme : null);
     return row;
   }
 

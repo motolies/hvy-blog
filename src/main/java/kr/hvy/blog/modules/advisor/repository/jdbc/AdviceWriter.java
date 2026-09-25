@@ -20,6 +20,7 @@ import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.CitedFeature;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.MarketTrend;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.SectorCall;
@@ -56,7 +57,7 @@ public class AdviceWriter {
   private static final String HEADER_COLUMNS = "advice_id, run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, "
       + "kosdaq_dir, p_up, regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, "
       + "entry_date, exit_date, news_ids, prompt_version, model, system_fingerprint, weight_set_id, "
-      + "active_lesson_ids, data_quality, guard_json, published_at, created_at, memory_json, parent_advice_id, diff_json";
+      + "active_lesson_ids, data_quality, guard_json, published_at, created_at, memory_json, parent_advice_id, diff_json, regime_json";
 
   private final JdbcTemplate jdbc;
 
@@ -69,8 +70,8 @@ public class AdviceWriter {
         "INSERT INTO tb_advisor_advice (run_id, base_date, advice_kind, variant, horizon_days, regime_code, kospi_dir, kosdaq_dir, p_up, "
             + "regime_rationale, leading_sectors, summary, trend_kospi, trend_kosdaq, trend_json, outlook_json, data_as_of_json, entry_date, exit_date, "
             + "news_ids, prompt_version, model, system_fingerprint, weight_set_id, active_lesson_ids, data_quality, guard_json, published_at, memory_json, "
-            + "parent_advice_id, diff_json) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
+            + "parent_advice_id, diff_json, regime_json) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING advice_id",
         Long.class,
         h.runId(), h.baseDate(), code(h.adviceKind()), h.variant().getCode(), h.horizonDays(),
         code(h.regimeCode()), code(h.kospiDir()), code(h.kosdaqDir()), h.pUp(),
@@ -80,7 +81,7 @@ public class AdviceWriter {
         h.promptVersion(), h.model(), h.systemFingerprint(),
         h.weightSetId(), AdvisorJdbc.jsonb(h.activeLessonIds()),
         (h.dataQuality() == null ? DataQuality.OK : h.dataQuality()).getCode(), AdvisorJdbc.jsonb(h.guard()), AdvisorJdbc.ts(h.publishedAt()),
-        AdvisorJdbc.jsonb(h.memoryJson()), h.parentAdviceId(), AdvisorJdbc.jsonb(h.diffJson()));
+        AdvisorJdbc.jsonb(h.memoryJson()), h.parentAdviceId(), AdvisorJdbc.jsonb(h.diffJson()), AdvisorJdbc.jsonb(h.regime()));
   }
 
   /**
@@ -290,7 +291,16 @@ public class AdviceWriter {
       .memoryJson(readNullableMap(rs, "memory_json"))
       .parentAdviceId(AdvisorJdbc.nullableLong(rs, "parent_advice_id"))
       .diffJson(readNullableMap(rs, "diff_json"))
+      .regime(readRegime(rs))
       .build();
+
+  /**
+   * regime_json 을 합성 국면 레코드로 (NULL 이면 null — M6 이전 행·MORNING·QUANT 섀도).
+   */
+  private static MarketRegime readRegime(ResultSet rs) throws SQLException {
+    String json = rs.getString("regime_json");
+    return json == null || json.isBlank() ? null : AdvisorJson.MAPPER.readValue(json, MarketRegime.class);
+  }
 
   /**
    * JSONB 맵 컬럼을 그대로 읽되 NULL 은 null 로 둔다(AdvisorJdbc.jsonMap 은 빈 맵) — memory_json 은 "주입 없음" 과 "빈 요약" 을 구분해야 한다.

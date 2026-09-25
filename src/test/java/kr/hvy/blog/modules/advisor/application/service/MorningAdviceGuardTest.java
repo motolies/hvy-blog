@@ -9,6 +9,7 @@ import kr.hvy.blog.modules.advisor.client.llm.MorningAdviceResponse;
 import kr.hvy.blog.modules.advisor.domain.code.PickAction;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -114,6 +115,28 @@ class MorningAdviceGuardTest {
     assertThat(r.kept()).hasSize(4);
     assertThat(r.drops()).isEmpty();
     assertThat(r.stats()).containsEntry("missingDecision", 4);
+  }
+
+  @Test
+  @DisplayName("M6: 저녁 정책 한도를 그대로 적용 — ADD LONG 확신은 상한으로 내리고, LONG 상한 초과는 확신 낮은 ADD 부터 제거, KEEP 은 건드리지 않는다")
+  void appliesEveningPolicy() {
+    MarketRegime.Policy policy = new MarketRegime.Policy("regime-policy-v1", 4, 0.65, 2);
+    MorningAdviceResponse response = new MorningAdviceResponse(
+        List.of(decision("000001", "KEEP", "a"), decision("000002", "KEEP", "b"), decision("000003", "KEEP", "c"), decision("000004", "KEEP", "d")),
+        List.of(addition("000005", "LONG", "0.80", "e"), addition("000006", "LONG", "0.60", "f")), null);
+
+    MorningAdviceGuard.Result r = guard.validate(response, evening, candidates, policy);
+
+    assertThat(r.added()).extracting(PickRow::ticker).containsExactly("000005");
+    assertThat(r.added().getFirst().conviction()).isEqualTo(0.65);
+    assertThat(r.kept()).filteredOn(p -> p.ticker().equals("000001")).extracting(PickRow::conviction).as("저녁이 이미 통과시킨 KEEP").containsExactly(0.80);
+    assertThat(r.picks().stream().filter(p -> p.direction() == PickDirection.LONG).count()).isEqualTo(4);
+    assertThat(r.stats()).containsEntry("policyCappedConviction", 1).containsEntry("policyTruncatedLong", 1).containsEntry("policyVersion", "regime-policy-v1");
+    assertThat(r.violations()).contains(Map.of("ticker", "000006", "rule", "policyTruncatedLong"));
+
+    MorningAdviceGuard.Result legacy = guard.validate(response, evening, candidates);
+    assertThat(legacy.added()).as("정책 없는 저녁(M6 이전)은 기존 규칙").extracting(PickRow::ticker).containsExactlyInAnyOrder("000005", "000006");
+    assertThat(legacy.stats()).doesNotContainKeys("policyCappedConviction", "policyTruncatedLong", "policyVersion");
   }
 
   private static PickRow pick(String ticker, int rank, PickDirection direction, double conviction) {

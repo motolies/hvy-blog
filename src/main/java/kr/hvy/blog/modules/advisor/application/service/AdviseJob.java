@@ -23,6 +23,7 @@ import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.LessonRow;
 import kr.hvy.blog.modules.advisor.domain.model.MarketFeatures;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.NewsBlock;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.domain.model.PromptInputRow;
@@ -43,8 +44,8 @@ import org.springframework.stereotype.Component;
 /**
  * 일일 판단 파이프라인 (ADVISE, 평일 19:30~19:55 KST).
  * <pre>
- * 게이트 → 채점·IC 증분(격리) → 시장 특징 → 스크리닝(활성 가중치, 픽 유니버스) → QUANT_TOPN·QUANT_TOPN_BROAD 섀도 저장 → 프롬프트(실적 블록·교훈은 표본 게이트 뒤,
- * recentOutcomes 확정 빈도표는 확정 노트 게이트 뒤 — 격리) → LLM 판단(strict 스키마) → 가드 → LIVE 저장(memory_json)·입력 스냅샷 → Slack 발행 →
+ * 게이트 → 채점·IC 증분(격리) → 시장 특징(합성 국면·테마 포함) → 스크리닝(활성 가중치, 픽 유니버스) → QUANT_TOPN·QUANT_TOPN_BROAD 섀도 저장 → 프롬프트(실적 블록·교훈은 표본 게이트 뒤,
+ * recentOutcomes 확정 빈도표는 확정 노트 게이트 뒤 — 격리) → LLM 판단(strict 스키마) → 가드(정책 표 한도) → LIVE 저장(regime_json)(memory_json)·입력 스냅샷 → Slack 발행 →
  * (메모리가 하나라도 실렸고 nomem-weeks 창 안이면) LLM_NOMEM 섀도 → (뉴스가 실렸고 nonews-weeks 창 안이면) LLM_NONEWS 섀도
  * </pre>
  * 스크리닝·판단·저장은 실패하면 잡 전체가 FAILED(부분 추천 금지). 채점·노트·섀도·발행 실패는 격리되어 PARTIAL 로 남는다.
@@ -259,8 +260,13 @@ public class AdviseJob implements AdvisorJob {
     MarketJudgeClient.JudgeResult jr = judged[0];
     execution.recordLlmUsage(jr.model(), PromptResources.ADVICE_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
     List<CandidateRow> included = candidates.subList(0, payload.candidatesIncluded());
-    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorContext, trendCodes, news);
+    // M6: 합성 국면의 사전 등록 정책 표 한도를 가드가 기계 강제한다(LIVE·ADHOC·LLM 섀도 모두 같은 한도 — 섀도가 LIVE 와 한 요인만 다르게)
+    MarketRegime.Policy policy = market[0].policy();
+    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorContext, trendCodes, news, policy);
     execution.putMetadata("guard", guarded.stats());
+    if (market[0].regime() != null) {
+      execution.putMetadata("regime", market[0].regime().labelText());
+    }
     if (guarded.tooFew(properties.getPickMin())) {
       promptInputs.upsert(new PromptInputRow(execution.runId(), AdviceVariant.LIVE, PromptResources.ADVICE_VERSION, prompts.adviceSha256(),
           payload.json(), AdvisorJson.write(jr.options()), jr.rawText()));
@@ -281,7 +287,7 @@ public class AdviseJob implements AdvisorJob {
         .dataAsOf(market[0].dataAsOf()).entryDate(market[0].entryDate()).exitDate(market[0].exitDate()).newsIds(payload.newsIds())
         .promptVersion(PromptResources.ADVICE_VERSION).model(jr.model()).systemFingerprint(jr.responseId())
         .weightSetId(result.weightSetId()).activeLessonIds(activeLessons.stream().map(LessonRow::lessonId).toList())
-        .dataQuality(decision.quality()).guard(guarded.stats()).memoryJson(memoryJson)
+        .dataQuality(decision.quality()).guard(guarded.stats()).memoryJson(memoryJson).regime(market[0].regime())
         .build();
     final long[] adviceId = new long[1];
     steps.runOrThrow("SAVE", () -> {
@@ -439,7 +445,7 @@ public class AdviseJob implements AdvisorJob {
     execution.recordLlmUsage(jr.model(), PromptResources.ADVICE_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
     List<CandidateRow> included = screened.candidates().subList(0, payload.candidatesIncluded());
     Map<String, MarketTrendCode> trendCodes = market.trendCodes();
-    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorContext, trendCodes, news);
+    AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorContext, trendCodes, news, market.policy());
     AdviceHeader header = AdviceHeader.builder().runId(execution.runId()).baseDate(screened.baseDate()).adviceKind(AdviceKind.DAILY)
         .variant(variant).horizonDays(properties.getHorizonDays())
         .regimeCode(guarded.regime()).kospiDir(guarded.kospiDir()).kosdaqDir(guarded.kosdaqDir()).pUp(guarded.pUp())
@@ -448,7 +454,7 @@ public class AdviseJob implements AdvisorJob {
         .dataAsOf(market.dataAsOf()).entryDate(market.entryDate()).exitDate(market.exitDate()).newsIds(payload.newsIds())
         .promptVersion(PromptResources.ADVICE_VERSION).model(jr.model()).systemFingerprint(jr.responseId())
         .weightSetId(screened.weightSetId()).activeLessonIds(lessons.stream().map(LessonRow::lessonId).toList())
-        .dataQuality(decision.quality()).guard(guarded.stats()).memoryJson(memoryJson(recentOutcomes, lessons, scoreboard)).build();
+        .dataQuality(decision.quality()).guard(guarded.stats()).memoryJson(memoryJson(recentOutcomes, lessons, scoreboard)).regime(market.regime()).build();
     long id = adviceWriter.insertHeader(header);
     adviceWriter.insertCandidates(id, included);
     adviceWriter.insertPicks(id, guarded.picks());

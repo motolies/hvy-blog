@@ -23,6 +23,7 @@ import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.MorningVerdict;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
+import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 import kr.hvy.blog.modules.advisor.domain.model.GlobalLink;
 import kr.hvy.blog.modules.advisor.domain.model.MorningCheckRow;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
@@ -158,7 +159,9 @@ public class MorningAdviseJob implements AdvisorJob {
     steps.runOrThrow("JUDGE", () -> called.set(judge.call(prompts.morningSystem(), payload, schema, MorningAdviceResponse.class)));
     MarketJudgeClient.CallResult<MorningAdviceResponse> jr = called.get();
     execution.recordLlmUsage(jr.model(), PromptResources.MORNING_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
-    MorningAdviceGuard.Result guarded = guard.validate(jr.value(), eveningPicks, candidates);
+    // M6: 아침은 국면을 다시 판단하지 않는다 — 저녁이 확정한 정책 표 한도(regime_json.policy)를 같은 표로 적용한다. M6 이전 저녁은 null(기존 규칙)
+    MarketRegime.Policy policy = evening.regime() == null ? null : evening.regime().policy();
+    MorningAdviceGuard.Result guarded = guard.validate(jr.value(), eveningPicks, candidates, policy);
     Map<String, Object> guardJson = new LinkedHashMap<>(guarded.stats());
     if (!guarded.violations().isEmpty()) {
       guardJson.put("violations", guarded.violations());

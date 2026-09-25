@@ -19,13 +19,15 @@ import org.springframework.stereotype.Component;
 public class PromptResources {
 
   /**
+   * advice-v8 (2026-09-25, M6): 입력 regime(합성 국면 = 규칙 추세 × KOSPI σ20 백분위 변동성 국면, 사전 등록 정책 표 regime-policy-v1 의 오늘 한도 — 가드가 강제)·
+   * theme(KOSPI200 섹터 대분류 강약, PIT 구성) 블록, 후보 theme 열, 규칙 13(국면별 행동 지침·정책 한도)·14(테마 해석). 나머지는 v7 그대로.
    * advice-v7 (2026-09-25): 종목 후보를 KOSPI200 구성종목(PIT, advisor.pick-universe)으로 한정 — 입력 pickUniverse 키, candidates 설명(백분위는 KOSPI 전체 기준),
    * 규칙은 v6 그대로. advice-v6 (2026-09-21): sectors 에 업종 지수 기간 모멘텀(rs5/rs20/rs60·mom·consistent·overheated, KOSPI 대비 초과)·후보에 secRs60/secCons, 주도 섹터는
    * consistent 우선(규칙 8)·secCons=0/overheated 픽 확신 0.70 상한(규칙 11, 가드 클램프)·양시장 문장은 cw5 한정. v5 (2026-09-13) 는 종목 후보를 KOSPI 로 한정
    * (advisor.markets)·thesis 300자/risk 150자 + 근거→해석→기대 흐름 구조(Slack 이 전문을 싣는다). v4 는 news 블록 입력 + citedNews 출력. v3 는 market.global
    * r20/r60 + market.link(β·상관) 입력. v2 는 dataAsOf·window·dataQuality·market.trend 입력, trendOutlook 출력. 옛 파일은 비교용으로 남긴다.
    */
-  public static final String ADVICE_VERSION = "advice-v7";
+  public static final String ADVICE_VERSION = "advice-v8";
   /** lesson-v2 (2026-09-13): condition 에 trend 키 */
   public static final String LESSON_VERSION = "lesson-v2";
   /**
@@ -55,7 +57,7 @@ public class PromptResources {
   private final String morningSha256;
 
   public PromptResources() {
-    this.adviceSystem = load(BASE + "advice-system-v7.md");
+    this.adviceSystem = load(BASE + "advice-system-v8.md");
     this.adviceSha256 = sha256(adviceSystem);
     this.lessonSystem = load(BASE + "lesson-system-v2.md");
     this.lessonSha256 = sha256(lessonSystem);

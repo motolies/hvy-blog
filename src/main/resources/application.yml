@@ -283,7 +283,7 @@ advisor:
     non-consistent-conviction-cap: 0.70   # advice-v6: secCons=0(세 구간 초과 미충족)·overheated 섹터 LONG 픽의 확신 상한 — 가드가 기계 클램프(stats capNonConsistent/capOverheated)
     overheated-sigma: 2.0         # 섹터 과열 = 업종 지수 5일 수익률 > 배수 × σ_5d(KOSPI)
   prompt:
-    version: advice-v6            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문, v6 섹터 기간 모멘텀(업종 지수 rs5/20/60·consistent·overheated, 2026-09-21). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
+    version: advice-v8            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문, v6 섹터 기간 모멘텀(업종 지수 rs5/20/60·consistent·overheated, 2026-09-21), v7 KOSPI200 후보, v8 합성 국면·정책 표·테마(M6, 2026-09-25). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
   news:                           # 뉴스 입력(advice-v4). tb_stock_news(scheduler.stock-eventfeed, GDELT 헤드라인) 가 쌓여 있어야 한다. 주입 시점은 계획 Phase 1d(구조화 사건)에서 결정
     enabled: ${NEWS_ENABLED:false}
@@ -352,6 +352,23 @@ advisor:
     min-finalized: 10             # 확정 노트가 이보다 적으면 recentOutcomes 블록 생략
     max-rows: 5                   # recentOutcomes 빈도표 최대 행 수(class × secCons)
     cutoff: "20:00"               # recentOutcomes 확정 마감(KST) — 사후 재실행(baseDate=)에서 이 시각 이후 확정·관측된 노트가 새어 들지 않게(advisor.news.cutoff 와 같은 뜻)
+  regime:                         # 합성 국면(M6, advice-v8): 규칙 추세 × 변동성 국면(KOSPI σ20 의 기준일 이전 분포 백분위) → 사전 등록 정책 표. regime_json 에 저장
+    index-code: "0001"            # 국면 기준 지수(픽 유니버스 KOSPI 의 벤치)
+    vol-window-days: 20           # σ20 = 직전 20거래일 ret_1d 표본 표준편차
+    vol-lookback-years: 5         # 백분위 분포 창(기준일 이전만 — 룩어헤드 없음). 이력이 짧으면 가능한 범위 전부
+    vol-min-history-days: 250     # 분포 표본이 이보다 적으면 vol=UNKNOWN(고변동 가산 없음)
+    vol-low-pct: 0.30             # 백분위 < 0.30 LOW
+    vol-high-pct: 0.80            # 백분위 ≥ 0.80 HIGH
+    policy:                       # ★ 사전 등록 정책 표 — 수치를 바꾸면 version 을 올린다(새 버전). 가드(AdviceGuard·MorningAdviceGuard)가 기계 강제
+      version: regime-policy-v1
+      bull: { long-max-reduction: 0 }                                    # 기존 상한 그대로
+      sideways: { long-max-reduction: 0, conviction-cap: 0.80 }          # LONG 확신 ≤ 0.80
+      bear: { long-max-reduction: 2, conviction-cap: 0.70, avoid-max: 4 } # LONG ≤ max(pick-min, pick-max−2), 확신 ≤ 0.70, AVOID ≤ 4
+      vol-high-conviction-penalty: 0.05                                  # 변동성 HIGH 면 확신 상한 −0.05 (상한 없던 국면은 0.90 에서)
+  theme:                          # 테마 블록(M6): KOSPI200 구성(PIT) 종목을 kospi200_sector 대분류별로 집계. CUSTOM 매핑 보류
+    strong-rs20: 0.02             # rs20 ≥ +0.02 & rs60 > 0 → STRONG, rs20 ≤ −0.02 & rs60 < 0 → WEAK
+    min-members: 3                # 지표 있는 구성 종목이 이보다 적은 대분류는 제외
+    leaders: 3                    # 대표 종목명(60일 거래대금 상위) 수 — 코드 의미 단서
   retention-days: 180             # 프롬프트 입력 스냅샷 보존
   # Slack #hvy-advisor 채팅 봇 (chat-v1, 2026-09-13). Socket Mode 수신 — 공개 URL·서명 검증 없음, app-level 토큰 1개.
   # 토큰·채널·허용 사용자 중 하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨). bot 토큰은 slack.token(SLACK_BOT_TOKEN) 재사용

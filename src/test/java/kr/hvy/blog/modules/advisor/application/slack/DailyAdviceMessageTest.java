@@ -149,4 +149,22 @@ class DailyAdviceMessageTest {
     }
     return "";
   }
+
+  @Test
+  @DisplayName("종목 헤딩 꼬리에 시장·픽 유니버스 라벨(advice-v7)이 붙고, 없는 라벨은 뺀다. 수시 판단은 제목과 안내 줄이 다르다")
+  void universeLabelAndAdhocTitle() {
+    kr.hvy.blog.modules.advisor.domain.model.AdviceHeader header = kr.hvy.blog.modules.advisor.domain.model.AdviceHeader.builder()
+        .baseDate(java.time.LocalDate.of(2026, 9, 24)).horizonDays(5).adviceKind(kr.hvy.blog.modules.advisor.domain.code.AdviceKind.DAILY).build();
+    DailyAdviceMessage both = DailyAdviceMessage.builder().header(header).picks(List.of()).candidates(Map.of()).marketLabel("KOSPI").universeLabel("KOSPI200")
+        .scoreboardLines(List.of()).runId(1L).build();
+    assertThat(both.headingLabel()).isEqualTo(" · KOSPI · 유니버스: KOSPI200");
+    assertThat(both.title()).isEqualTo("📈 2026-09-24 시장 판단 (5거래일)");
+    DailyAdviceMessage none = DailyAdviceMessage.builder().header(header).picks(List.of()).candidates(Map.of()).scoreboardLines(List.of()).runId(1L).build();
+    assertThat(none.headingLabel()).isEmpty();
+
+    DailyAdviceMessage adhoc = DailyAdviceMessage.builder().header(header.toBuilder().adviceKind(kr.hvy.blog.modules.advisor.domain.code.AdviceKind.ADHOC).build())
+        .picks(List.of()).candidates(Map.of()).scoreboardLines(List.of()).runId(1L).build();
+    assertThat(adhoc.title()).isEqualTo("📈 2026-09-24 수시 판단 (5거래일)");
+    assertThat(adhoc.toBlocks().toString()).contains("성과 집계");
+  }
 }

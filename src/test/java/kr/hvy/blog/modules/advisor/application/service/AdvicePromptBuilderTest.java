@@ -33,7 +33,7 @@ class AdvicePromptBuilderTest {
   void buildsCompactJson() {
     PromptPayload payload = builder.build(market(), screening(3), null, List.of(), Map.of("MOM_20D", 0.123456789), DataQuality.OK);
     String json = payload.json();
-    assertThat(json).startsWith("{\"asOf\":\"2026-09-11\",\"horizonDays\":5,\"market\":{\"index\":[");
+    assertThat(json).startsWith("{\"asOf\":\"2026-09-11\",\"horizonDays\":5,\"pickUniverse\":\"KOSPI200\",\"market\":{\"index\":[");
     assertThat(json).contains("\"columns\":[\"tkr\",\"name\",\"sec\",\"score\",\"r20\"");
     assertThat(json).contains("[\"T00\",\"종목0\",\"G2510\",0.5,0.0123,");
     assertThat(json).contains("\"weights\":{\"MOM_20D\":0.1235}");

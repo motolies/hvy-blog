@@ -6,6 +6,7 @@ import java.time.LocalTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
 import kr.hvy.blog.modules.stock.domain.code.MarketType;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -53,6 +54,13 @@ public class AdvisorProperties {
    * 시장 국면·추세 전망(KOSPI·KOSDAQ 지수)과 섹터 지표(양시장 전체)는 이 값과 무관하다.
    */
   private List<String> markets = List.of("KOSPI");
+
+  /**
+   * 종목 픽 후보 유니버스(advice-v7, 2026-09-25). 기본 KOSPI200 — 스크리닝 백분위를 {@link #markets} 유니버스 전체로 매긴 뒤 후보에만 거른다.
+   * IC·가중치·백분위 모집단은 그대로라 값을 바꿔도 IC_BACKFILL 은 필요 없다. KOSPI200 구성 이력(tb_stock_master_history)이 수집 시작일부터만 있어
+   * IC 유니버스까지 좁히면 과거 구간이 현재 구성종목으로 걸러지는 룩어헤드가 된다. ALL 이면 QUANT_TOPN_BROAD 섀도는 QUANT_TOPN 과 같아 돌리지 않는다.
+   */
+  private PickUniverse pickUniverse = PickUniverse.KOSPI200;
 
   /** 가드 통과 후 픽이 이 수 미만이면 run FAILED (발행 안 함) */
   private int pickMin = 3;
@@ -107,8 +115,8 @@ public class AdvisorProperties {
           trend.getScoreHorizonDays(), diagnosticHorizons);
     }
     if (isConfigured()) {
-      log.info("advisor 설정 확인: judge={}, assist={}, horizon={}일, markets={}, candidates={}, picks={}~{}, trend=[{}..{}] confirm {}일",
-          model.getJudge(), model.getAssist(), horizonDays, markets, candidateLimit, pickMin, pickMax, trend.getBearThreshold(),
+      log.info("advisor 설정 확인: judge={}, assist={}, horizon={}일, markets={}, pickUniverse={}, candidates={}, picks={}~{}, trend=[{}..{}] confirm {}일",
+          model.getJudge(), model.getAssist(), horizonDays, markets, pickUniverse, candidateLimit, pickMin, pickMax, trend.getBearThreshold(),
           trend.getBullThreshold(), trend.getConfirmDays());
     } else {
       log.warn("advisor 가 켜져 있으나 OpenAI 키(OPENAI_API_KEY) 또는 모델 ID(ADVISOR_JUDGE_MODEL/ADVISOR_ASSIST_MODEL)가 비어 있어 잡 실행 시 거부됩니다");

@@ -136,6 +136,7 @@ public class AdvicePromptBuilder {
     Map<String, Object> root = new LinkedHashMap<>();
     root.put("asOf", screening.baseDate().toString());
     root.put("horizonDays", properties.getHorizonDays());
+    root.put("pickUniverse", properties.getPickUniverse().getCode());
 
     Map<String, Object> m = new LinkedHashMap<>();
     List<Map<String, Object>> indices = new ArrayList<>();

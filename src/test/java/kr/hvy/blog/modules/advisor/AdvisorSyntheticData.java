@@ -15,7 +15,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * PG 테스트 공용 합성 데이터: 40종목 × 30영업일, adj_close(t) = 100 + i·t (시가=종가), 지수 2500 상수, 거래대금 20억, change_rate 0.5.
- * MOM_20D = i/40, 외국인 5일 순매수 = (i−20)·1e8, 섹터 S0~S3 (i mod 4), KOSPI/KOSDAQ 는 i 홀짝.
+ * MOM_20D = i/40, 외국인 5일 순매수 = (i−20)·1e8, 섹터 S0~S3 (i mod 4), KOSPI/KOSDAQ 는 i 홀짝, KOSPI200 은 {@link #kospi200(int)}(이력 1행).
  * <p>
  * advice-v6: 섹터 S0~S3 의 업종 지수 행(tb_stock_index_master·tb_stock_index_daily, 지수 코드 = 섹터 코드)도 넣는다 — 기울기가 달라 시장 대비 초과(rs)
  * 의 부호가 갈린다({@link #sectorIndexClose}). 30영업일이라 ret_60d(rs60) 는 null 이다. 업종 지수 행은 vw_stock_market_calendar(0001 만)·유니버스에
@@ -60,8 +60,12 @@ public final class AdvisorSyntheticData {
     }
     for (int i = 0; i < TICKERS; i++) {
       String t = ticker(i);
-      jdbc.update("INSERT INTO tb_stock_master (ticker, stock_name, market_type, security_group, created_at, updated_at) VALUES (?, ?, ?, 'ST', NOW(), NOW())",
-          t, "종목" + i, i % 2 == 0 ? "KOSPI" : "KOSDAQ");
+      jdbc.update("INSERT INTO tb_stock_master (ticker, stock_name, market_type, security_group, is_kospi200, created_at, updated_at) "
+          + "VALUES (?, ?, ?, 'ST', ?, NOW(), NOW())", t, "종목" + i, i % 2 == 0 ? "KOSPI" : "KOSDAQ", kospi200(i));
+      // 마스터 SCD2 이력(advice-v7 PIT 구성 여부): 첫 영업일부터 유효한 현재 행 1개
+      jdbc.update("INSERT INTO tb_stock_master_history (ticker, valid_from, stock_name, market_type, security_group, is_kospi200, is_krx300, is_suspended, "
+          + "is_administrative, is_active, snapshot_hash) VALUES (?, ?, ?, ?, 'ST', ?, FALSE, FALSE, FALSE, TRUE, 'h')",
+          t, DATES.getFirst(), "종목" + i, i % 2 == 0 ? "KOSPI" : "KOSDAQ", kospi200(i));
       jdbc.update("INSERT INTO tb_stock_sector_map (ticker, sector_code, valid_from, sector_name, source) VALUES (?, ?, ?, ?, 'KRX')",
           t, "S" + (i % 4), DATES.getFirst(), "섹터" + (i % 4));
       for (int k = 0; k < DATES.size(); k++) {
@@ -118,6 +122,13 @@ public final class AdvisorSyntheticData {
       case 2 -> k <= base - 60 ? 1200 : k <= base - 20 ? 920 : k <= base - 5 ? 950 : 1000;
       default -> 1000 * Math.pow(1.001, k);
     };
+  }
+
+  /**
+   * 합성 KOSPI200 구성 여부: KOSPI(짝수) 중 i mod 6 ≠ 4 — T04·T10·T16·T22·T28·T34 는 KOSPI 이지만 비구성종목이라 픽 유니버스 필터가 실제로 걸러 낸다.
+   */
+  public static boolean kospi200(int i) {
+    return i % 2 == 0 && i % 6 != 4;
   }
 
   public static String ticker(int i) {

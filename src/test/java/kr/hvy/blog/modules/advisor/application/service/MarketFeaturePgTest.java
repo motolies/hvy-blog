@@ -80,6 +80,8 @@ class MarketFeaturePgTest {
     NamedParameterJdbcTemplate named = new NamedParameterJdbcTemplate(ds);
     properties = new AdvisorProperties(new MockEnvironment());
     properties.setMarkets(List.of("KOSPI", "KOSDAQ"));
+    // 섹터 S0~S3 후보가 모두 나와야 하는 단언이라 픽 필터 없이 본다(KOSPI200 필터는 AdvisorScreeningPgTest)
+    properties.setPickUniverse(kr.hvy.blog.modules.advisor.domain.code.PickUniverse.ALL);
     MarketCalendarService calendar = Mockito.mock(MarketCalendarService.class);
     Mockito.when(calendar.isTradingDay(ArgumentMatchers.any())).thenAnswer(inv -> {
       DayOfWeek day = ((LocalDate) inv.getArgument(0)).getDayOfWeek();

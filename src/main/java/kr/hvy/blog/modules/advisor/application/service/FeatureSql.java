@@ -25,6 +25,10 @@ public final class FeatureSql {
    * <p>
    * sector_rs_5d/20d/60d(advice-v6) 는 소속 업종 지수(six, index_code = sector_code)의 같은 창 수익률에서 벤치 지수(ix)의 수익률을 뺀
    * 시장 대비 초과다. 업종 지수 행이 없거나 창이 짧으면 NULL 로 남는다(SECTOR_MOM_20D/60D 시그널·후보 secRs5/20/60·secCons 특징의 원천).
+   * <p>
+   * is_kospi200(advice-v7) 는 그 거래일에 유효한 마스터 SCD2 이력 행([valid_from, valid_to) 반열림, 겹치지 않아 행이 늘지 않는다)의 구성 여부다 — PIT.
+   * 라이브 기준일에는 현재 행(valid_to IS NULL)이 곧 당일 스냅샷이다. 이력 시작 전 날짜는 NULL(모름)이며 tb_stock_master 의 현재 값으로 채우지 않는다
+   * (과거 구간을 오늘 구성종목으로 거르는 룩어헤드). 후보 필터(advisor.pick-universe)에만 쓰고 IC·백분위는 이 컬럼을 보지 않는다.
    */
   public static String featureCtes() {
     return """
@@ -61,7 +65,8 @@ public final class FeatureSql {
                    CASE WHEN vo.vol_n >= 15 THEN vo.vol_20d END AS vol_20d,
                    ix.ret_20d AS index_ret_20d,
                    six.ret_5d - ix.ret_5d AS sector_rs_5d, six.ret_20d - ix.ret_20d AS sector_rs_20d, six.ret_60d - ix.ret_60d AS sector_rs_60d,
-                   p.close_price AS raw_close
+                   p.close_price AS raw_close,
+                   mh.is_kospi200
             FROM base b
                      JOIN tb_stock_daily_metric m ON m.ticker = b.ticker AND m.trade_date = b.trade_date
                      JOIN tb_stock_master ms ON ms.ticker = m.ticker
@@ -73,6 +78,8 @@ public final class FeatureSql {
                      LEFT JOIN mv_stock_index_metric ix ON ix.index_code = CASE ms.market_type WHEN 'KOSPI' THEN '0001' ELSE '1001' END
                                                        AND ix.trade_date = m.trade_date
                      LEFT JOIN mv_stock_index_metric six ON six.index_code = sm.sector_code AND six.trade_date = m.trade_date
+                     LEFT JOIN tb_stock_master_history mh ON mh.ticker = m.ticker AND mh.valid_from <= m.trade_date
+                                                        AND (mh.valid_to IS NULL OR mh.valid_to > m.trade_date)
             WHERE ms.market_type IN (:markets)
         )
         """;

@@ -18,6 +18,7 @@ import kr.hvy.blog.modules.advisor.domain.code.LessonStatus;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
+import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.LessonRow;
@@ -42,7 +43,7 @@ import org.springframework.stereotype.Component;
 /**
  * 일일 판단 파이프라인 (ADVISE, 평일 19:30~19:55 KST).
  * <pre>
- * 게이트 → 채점·IC 증분(격리) → 시장 특징 → 스크리닝(활성 가중치) → QUANT_TOPN 섀도 저장 → 프롬프트(실적 블록·교훈은 표본 게이트 뒤,
+ * 게이트 → 채점·IC 증분(격리) → 시장 특징 → 스크리닝(활성 가중치, 픽 유니버스) → QUANT_TOPN·QUANT_TOPN_BROAD 섀도 저장 → 프롬프트(실적 블록·교훈은 표본 게이트 뒤,
  * recentOutcomes 확정 빈도표는 확정 노트 게이트 뒤 — 격리) → LLM 판단(strict 스키마) → 가드 → LIVE 저장(memory_json)·입력 스냅샷 → Slack 발행 →
  * (메모리가 하나라도 실렸고 nomem-weeks 창 안이면) LLM_NOMEM 섀도 → (뉴스가 실렸고 nonews-weeks 창 안이면) LLM_NONEWS 섀도
  * </pre>
@@ -185,6 +186,7 @@ public class AdviseJob implements AdvisorJob {
       throw new IllegalStateException("후보가 너무 적습니다: " + result.candidates().size() + " (universe " + result.universeSize() + ")");
     }
     execution.putMetadata("markets", properties.getMarkets());
+    execution.putMetadata("pickUniverse", properties.getPickUniverse().getCode());
     execution.putMetadata("universe", result.universeSize());
     execution.putMetadata("cut", result.cutSize());
     execution.putMetadata("candidates", result.candidates().size());
@@ -194,8 +196,16 @@ public class AdviseJob implements AdvisorJob {
     // ③ 정량 top-N 섀도 (LLM 없음) — 격리
     if (adhoc) {
       steps.skip("SHADOW_QUANT", ADHOC_SKIP);
+      steps.skip("SHADOW_QUANT_BROAD", ADHOC_SKIP);
     } else {
-      steps.run("SHADOW_QUANT", () -> saveQuantShadow(execution, result, decision, market[0]));
+      steps.run("SHADOW_QUANT", () -> saveQuantShadow(AdviceVariant.QUANT_TOPN, "shadowQuantAdviceId", execution, result, decision, market[0]));
+      // 유니버스 제한의 대조군(advice-v7): 같은 가중치·규칙으로 픽 필터만 뺀 top-N. 설정이 ALL 이면 QUANT_TOPN 과 같아 돌리지 않는다
+      if (properties.getPickUniverse() == PickUniverse.ALL) {
+        steps.skip("SHADOW_QUANT_BROAD", "pick-universe=ALL (QUANT_TOPN 과 동일)");
+      } else {
+        steps.run("SHADOW_QUANT_BROAD", () -> saveQuantShadow(AdviceVariant.QUANT_TOPN_BROAD, "shadowQuantBroadAdviceId", execution,
+            screening.screen(baseDate, PickUniverse.ALL), decision, market[0]));
+      }
     }
 
     // ④ 프롬프트: 실적 블록·교훈은 누적 픽 게이트를 넘긴 뒤에만
@@ -295,6 +305,7 @@ public class AdviseJob implements AdvisorJob {
       DailyAdviceMessage message = DailyAdviceMessage.builder()
           .header(header.toBuilder().adviceId(adviceId[0]).build()).picks(guarded.picks()).candidates(byTicker)
           .marketLabel(String.join("·", properties.getMarkets()))
+          .universeLabel(properties.getPickUniverse().getCode())
           .scoreboardLines(scoreboard[0].slackLines()).runId(execution.runId())
           .promptTokens(execution.promptTokens()).completionTokens(execution.completionTokens())
           .costText(execution.costUsd().signum() > 0 ? "$" + execution.costUsd().setScale(4, java.math.RoundingMode.HALF_UP) : null)
@@ -387,16 +398,18 @@ public class AdviseJob implements AdvisorJob {
   }
 
   /**
-   * 정량 top-N 동일가중 섀도: LLM 없이 점수 상위 N 을 LONG·확신 0.55 로 저장 (LLM 부가가치의 대조군).
+   * 정량 top-N 동일가중 섀도: LLM 없이 점수 상위 N 을 LONG·확신 0.55 로 저장. QUANT_TOPN 은 LLM 부가가치의 대조군, QUANT_TOPN_BROAD 는 픽 유니버스 제한의 대조군
+   * (result 가 ALL 유니버스 스크리닝) — 둘은 후보 모집단만 다르고 규칙·N 이 같다.
    */
-  private void saveQuantShadow(AdvisorExecution execution, ScreeningResult result, AdvisorGateService.Decision decision, MarketFeatures market) {
-    if (adviceWriter.find(result.baseDate(), AdviceKind.DAILY, AdviceVariant.QUANT_TOPN).isPresent()) {
+  private void saveQuantShadow(AdviceVariant variant, String metadataKey, AdvisorExecution execution, ScreeningResult result,
+      AdvisorGateService.Decision decision, MarketFeatures market) {
+    if (adviceWriter.find(result.baseDate(), AdviceKind.DAILY, variant).isPresent()) {
       return;
     }
     int n = Math.min(properties.getShadow().getQuantTopN(), result.candidates().size());
     Map<String, MarketTrendCode> trendCodes = market.trendCodes();
     AdviceHeader header = AdviceHeader.builder().runId(execution.runId()).baseDate(result.baseDate()).adviceKind(AdviceKind.DAILY)
-        .variant(AdviceVariant.QUANT_TOPN).horizonDays(properties.getHorizonDays()).weightSetId(result.weightSetId())
+        .variant(variant).horizonDays(properties.getHorizonDays()).weightSetId(result.weightSetId())
         .trendKospi(trendCodes.get("0001")).trendKosdaq(trendCodes.get("1001")).entryDate(market.entryDate()).exitDate(market.exitDate())
         .dataQuality(decision.quality()).promptVersion("quant").model("quant-top-" + n).build();
     long id = adviceWriter.insertHeader(header);
@@ -406,7 +419,7 @@ public class AdviseJob implements AdvisorJob {
       picks.add(PickRow.builder().ticker(result.candidates().get(i).ticker()).pickRank(i + 1).direction(PickDirection.LONG).conviction(0.55).build());
     }
     adviceWriter.insertPicks(id, picks);
-    execution.putMetadata("shadowQuantAdviceId", id);
+    execution.putMetadata(metadataKey, id);
   }
 
   /**

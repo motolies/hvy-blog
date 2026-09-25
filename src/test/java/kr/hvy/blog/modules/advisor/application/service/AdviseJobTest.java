@@ -21,6 +21,7 @@ import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorTriggerType;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
+import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
 import kr.hvy.blog.modules.advisor.domain.code.WeightSetSource;
 import kr.hvy.blog.modules.advisor.domain.entity.AdvisorRun;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
@@ -94,6 +95,8 @@ class AdviseJobTest {
     job = new AdviseJob(properties, gate, icService, marketFeatures, screening, weightSets, new AdvicePromptBuilder(properties), new PromptResources(),
         new MarketJudgeClient(ChatClient.create(stub), "judge-x"), adviceWriter, promptInputs, lessons, notifier, hookProvider, newsProvider,
         recentOutcomes);
+    // 기존 흐름 단언(헤더 수·advice id 순서)은 BROAD 섀도 없이 본다 — 기본값 KOSPI200 의 BROAD 섀도는 kospi200AddsBroadShadow 가 따로 본다
+    properties.setPickUniverse(PickUniverse.ALL);
     when(hookProvider.getIfAvailable()).thenReturn(null);
     when(newsProvider.getIfAvailable()).thenReturn(newsFeatures);
     when(recentOutcomes.block(any())).thenReturn(Optional.empty());
@@ -146,7 +149,7 @@ class AdviseJobTest {
     assertThat(live.weightSetId()).isEqualTo(1L);
     assertThat(live.leadingSectors()).hasSize(1);
     assertThat(live.leadingSectors().getFirst().consistent()).as("advice-v6: 섹터 맥락(SectorContext)의 consistent 가 주도 섹터 콜에 실린다").isTrue();
-    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION).isEqualTo("advice-v6");
+    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION).isEqualTo("advice-v7");
     assertThat(live.guard()).as("T00 은 secCons=1·비과열이라 클램프 없음").doesNotContainKeys("capNonConsistent", "capOverheated");
     assertThat(live.trendKospi()).as("규칙 추세는 시장 특징에서").isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
     assertThat(live.trendKosdaq()).as("KOSDAQ 추세 없음(픽스처)").isNull();
@@ -282,6 +285,35 @@ class AdviseJobTest {
   private AdvisorExecution adhocExecution() {
     AdvisorRun run = AdvisorRun.builder().runId(1300L).jobType(AdvisorJobType.ADVISE_ADHOC).triggerType(AdvisorTriggerType.CHAT).baseDate(base).build();
     return new AdvisorExecution(run, base, properties);
+  }
+
+  @Test
+  @DisplayName("advice-v7: 픽 유니버스가 KOSPI200 이면 필터 없는(ALL) 스크리닝으로 QUANT_TOPN_BROAD 섀도를 LLM 없이 하나 더 저장하고, Slack 에 유니버스 라벨을 붙인다")
+  void kospi200AddsBroadShadow() {
+    properties.setPickUniverse(PickUniverse.KOSPI200);
+    when(screening.screen(base, PickUniverse.ALL)).thenReturn(AdvicePromptBuilderTest.screening(10));
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SUCCESS);
+    assertThat(llmCalls.get()).as("BROAD 는 비용 0").isEqualTo(1);
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter, org.mockito.Mockito.times(3)).insertHeader(headers.capture());
+    assertThat(headers.getAllValues()).extracting(AdviceHeader::variant)
+        .containsExactly(AdviceVariant.QUANT_TOPN, AdviceVariant.QUANT_TOPN_BROAD, AdviceVariant.LIVE);
+    AdviceHeader broad = headers.getAllValues().get(1);
+    assertThat(broad.adviceKind()).isEqualTo(AdviceKind.DAILY);
+    assertThat(broad.model()).isEqualTo("quant-top-" + properties.getShadow().getQuantTopN());
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<kr.hvy.blog.modules.advisor.domain.model.CandidateRow>> candidates = ArgumentCaptor.forClass(List.class);
+    verify(adviceWriter, org.mockito.Mockito.times(3)).insertCandidates(anyLong(), candidates.capture());
+    assertThat(candidates.getAllValues().get(1)).as("BROAD 후보는 ALL 스크리닝 결과").hasSize(10);
+    assertThat(execution.metadata("shadowQuantBroadAdviceId")).isEqualTo(843L);
+    assertThat(execution.metadata("pickUniverse")).isEqualTo("KOSPI200");
+    ArgumentCaptor<SlackMessage> message = ArgumentCaptor.forClass(SlackMessage.class);
+    verify(notifier).publish(message.capture());
+    assertThat(message.getValue().toBlocks().toString()).contains("유니버스: KOSPI200");
   }
 
   /** RecentOutcomesService 가 만든 형식의 빈도표 2행 */

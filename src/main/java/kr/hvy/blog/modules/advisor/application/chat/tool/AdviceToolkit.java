@@ -208,7 +208,7 @@ public class AdviceToolkit {
     }
     m.put("picks", pickList);
     ToolJson.put(m, "publishedAt", h.publishedAt() == null ? null : h.publishedAt().toString());
-    m.put("note", "픽 유니버스는 advisor.markets " + advisor.getMarkets() + " 한정, 국면·추세는 양시장. 이 판단은 투자 자문이 아니라 개인 실험"
+    m.put("note", "픽 후보는 " + advisor.getMarkets() + " 중 " + advisor.getPickUniverse().getDesc() + "(현재 설정), 국면·추세는 양시장. 이 판단은 투자 자문이 아니라 개인 실험"
         + (h.adviceKind() == AdviceKind.ADHOC ? ". 채팅 요청 수시 판단 — 성과 집계 제외" : ""));
     return m;
   }
@@ -391,7 +391,8 @@ public class AdviceToolkit {
   }
 
   @Tool(name = "screeningTop", description = "정량 스크리닝 상위 종목(판단과 같은 규칙: 시그널 백분위 가중 합, 1차 컷, 섹터당 상한). 종목마다 시그널 백분위(0~1)를 함께 주므로 "
-      + "'왜 점수가 높지', '지금 정량 상위는?' 에 답할 수 있다. 유니버스는 advisor.markets 시장 한정. LLM 픽이 아니라 순수 정량 순위다.")
+      + "'왜 점수가 높지', '지금 정량 상위는?' 에 답할 수 있다. 백분위는 advisor.markets 시장 전체 기준이고 종목은 픽 유니버스(기본 KOSPI200 구성종목) 안에서만 고른다. "
+      + "LLM 픽이 아니라 순수 정량 순위다.")
   public Map<String, Object> screeningTop(
       @ToolParam(required = false, description = MarketToolkit.AS_OF_DESC) String baseDate,
       @ToolParam(required = false, description = "종목 수 1~20 (기본 10)") Integer limit, ToolContext context) {
@@ -413,6 +414,7 @@ public class AdviceToolkit {
       Map<String, Object> m = ToolJson.obj();
       m.put("asOf", result.baseDate().toString());
       m.put("markets", advisor.getMarkets());
+      m.put("pickUniverse", advisor.getPickUniverse().getCode());
       m.put("universe", result.universeSize());
       m.put("cut", result.cutSize());
       m.put("weightSetId", result.weightSetId());

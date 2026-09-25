@@ -58,6 +58,8 @@ public class DailyAdviceMessage implements SlackMessage {
   private final Map<String, CandidateRow> candidates;
   /** 후보 유니버스 시장 라벨(예: "KOSPI", advisor.markets). 종목 헤딩에 붙는다. null 이면 생략 */
   private final String marketLabel;
+  /** 픽 유니버스 라벨(예: "KOSPI200", advisor.pick-universe, advice-v7). 종목 헤딩에 "유니버스: …" 로 붙는다. null 이면 생략 */
+  private final String universeLabel;
   /** 전일 채점 요약 줄들 (없으면 빈 목록) */
   private final List<String> scoreboardLines;
   private final long runId;
@@ -80,6 +82,20 @@ public class DailyAdviceMessage implements SlackMessage {
   public String getFallbackText() {
     return String.format("%s %s: %s, 종목 %d개", header.baseDate(), header.adviceKind() == AdviceKind.ADHOC ? "수시 판단" : "시장 판단",
         header.regimeCode(), picks.size());
+  }
+
+  /**
+   * 종목 헤딩 꼬리: " · KOSPI · 유니버스: KOSPI200". 없는 라벨은 뺀다.
+   */
+  String headingLabel() {
+    StringBuilder sb = new StringBuilder();
+    if (marketLabel != null && !marketLabel.isBlank()) {
+      sb.append(" · ").append(marketLabel.strip());
+    }
+    if (universeLabel != null && !universeLabel.isBlank()) {
+      sb.append(" · 유니버스: ").append(universeLabel.strip());
+    }
+    return sb.toString();
   }
 
   /**
@@ -111,7 +127,7 @@ public class DailyAdviceMessage implements SlackMessage {
     blocks.add(divider());
     blocks.add(section(s -> s.text(markdownText("*주도 섹터*  " + sectorText()))));
     blocks.add(divider());
-    String label = marketLabel == null || marketLabel.isBlank() ? "" : " · " + marketLabel.strip();
+    String label = headingLabel();
     blocks.add(section(s -> s.text(markdownText(String.format("*종목 (%d)%s*%n```%s```", picks.size(), label, pickTable())))));
     for (PickRow p : picks) {
       String note = pickNote(p);

@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
 import kr.hvy.blog.modules.advisor.domain.code.SignalCode;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.ScreeningResult;
@@ -19,7 +20,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * 정량 깔때기: 유니버스(advisor.markets 시장, KOSPI 기본 ≈ 수백) → 1차 컷 → 종합 점수 상위 N(섹터당 ≤k). LLM 은 이 후보만 본다.
+ * 정량 깔때기: 유니버스(advisor.markets 시장, KOSPI 기본 ≈ 수백) → 1차 컷 → 픽 유니버스(advisor.pick-universe, 기본 KOSPI200) → 종합 점수 상위 N(섹터당 ≤k).
+ * LLM 은 이 후보만 본다.
  * <p>
  * 백분위는 1차 컷이 아니라 유니버스 전체 기준으로 매겨 IC 와 같은 척도를 쓴다. 결과 후보에는 그날의 시그널 백분위·가중치·원값을
  * 스냅샷으로 넣어(동결) 가중치가 바뀌어도 재현된다.
@@ -32,6 +34,12 @@ public class CandidateScreeningService {
   /** 1차 컷: 20일 모멘텀 양수 또는 거래대금 급증, 그리고 60일선 위 (하락 추세 전체를 LLM 에 보낼 이유가 없다) */
   static final String FIRST_CUT = "(f.ret_20d > 0 OR f.tv_ratio_5_60 > 1.3) AND f.adj_close > f.ma_60";
 
+  /**
+   * 픽 유니버스 필터(advice-v7). 백분위(pct CTE)를 유니버스 전체로 매긴 뒤 후보 행에만 건다 — 필터를 feat 에 걸면 백분위 모집단이 바뀌어 점수 척도가
+   * IC 와 어긋난다. 구성 이력이 없는 날(NULL)은 KOSPI200 모드에서 후보가 되지 않는다.
+   */
+  static final String PICK_FILTER = "(CAST(:allUniverse AS boolean) OR COALESCE(f.is_kospi200, FALSE))";
+
   private final NamedParameterJdbcTemplate jdbc;
   private final WeightSetRepository weightSets;
   private final AdvisorProperties properties;
@@ -40,14 +48,28 @@ public class CandidateScreeningService {
    * 활성 가중치 세트로 기준일 후보를 뽑는다.
    */
   public ScreeningResult screen(LocalDate baseDate) {
-    WeightSet set = weightSets.active().orElseThrow(() -> new IllegalStateException("활성 가중치 세트가 없습니다 (advisor-seed.sql 적용 필요)"));
-    return screen(baseDate, set, properties.getCandidateLimit(), properties.getMaxPerSector());
+    return screen(baseDate, properties.getPickUniverse());
   }
 
   /**
-   * 지정 세트·상한으로 후보를 뽑는다 (섀도·재현용).
+   * 활성 가중치 세트로 지정 픽 유니버스의 후보를 뽑는다 (QUANT_TOPN_BROAD 섀도는 ALL).
+   */
+  public ScreeningResult screen(LocalDate baseDate, PickUniverse universe) {
+    WeightSet set = weightSets.active().orElseThrow(() -> new IllegalStateException("활성 가중치 세트가 없습니다 (advisor-seed.sql 적용 필요)"));
+    return screen(baseDate, set, properties.getCandidateLimit(), properties.getMaxPerSector(), universe);
+  }
+
+  /**
+   * 지정 세트·상한으로 설정된 픽 유니버스의 후보를 뽑는다 (채팅 screeningTop·재현용).
    */
   public ScreeningResult screen(LocalDate baseDate, WeightSet set, int limit, int maxPerSector) {
+    return screen(baseDate, set, limit, maxPerSector, properties.getPickUniverse());
+  }
+
+  /**
+   * 지정 세트·상한·픽 유니버스로 후보를 뽑는다. universeSize·cutSize 는 픽 필터 전(백분위 모집단) 값이다.
+   */
+  public ScreeningResult screen(LocalDate baseDate, WeightSet set, int limit, int maxPerSector, PickUniverse universe) {
     List<SignalCode> signals = SignalCode.scorable().stream()
         .filter(s -> set.enabledWeights().containsKey(s.getCode()))
         .toList();
@@ -59,6 +81,7 @@ public class CandidateScreeningService {
     params.put("limit", limit);
     params.put("maxPerSector", maxPerSector);
     params.put("markets", properties.getMarkets());
+    params.put("allUniverse", universe == PickUniverse.ALL);
 
     String sql = FeatureSql.featureCtes()
         + ", pct AS (\n"
@@ -68,9 +91,10 @@ public class CandidateScreeningService {
         + "scored AS (\n"
         + "    SELECT pct.*, " + FeatureSql.scoreExpression(signals) + " AS score,\n"
         + "           (SELECT COUNT(*) FROM feat) AS universe_size,\n"
-        + "           (SELECT COUNT(*) FROM feat f WHERE " + FIRST_CUT + ") AS cut_size\n"
+        + "           (SELECT COUNT(*) FROM feat f WHERE " + FIRST_CUT + ") AS cut_size,\n"
+        + "           (SELECT COUNT(*) FROM feat f WHERE " + FIRST_CUT + " AND " + PICK_FILTER + ") AS eligible_size\n"
         + "    FROM pct\n"
-        + "    WHERE " + FIRST_CUT.replace("f.", "pct.") + "\n"
+        + "    WHERE " + FIRST_CUT.replace("f.", "pct.") + " AND " + PICK_FILTER.replace("f.", "pct.") + "\n"
         + "),\n"
         + "ranked AS (\n"
         + "    SELECT scored.*, ROW_NUMBER() OVER (PARTITION BY COALESCE(sector_code, '-') ORDER BY score DESC, ticker) AS sector_rn\n"
@@ -80,15 +104,17 @@ public class CandidateScreeningService {
 
     long started = System.currentTimeMillis();
     List<RowHolder> rows = jdbc.query(sql, params, (rs, i) -> read(rs, signals, weights));
-    int universe = rows.isEmpty() ? countUniverse(baseDate) : rows.getFirst().universeSize;
+    int universeSize = rows.isEmpty() ? countUniverse(baseDate) : rows.getFirst().universeSize;
     int cut = rows.isEmpty() ? 0 : rows.getFirst().cutSize;
+    int eligible = rows.isEmpty() ? 0 : rows.getFirst().eligibleSize;
     List<CandidateRow> candidates = new java.util.ArrayList<>();
     for (int i = 0; i < rows.size(); i++) {
       candidates.add(rows.get(i).row.toBuilder().quantRank(i + 1).build());
     }
-    log.info("스크리닝: base={}, universe={}, cut={}, candidates={}, weightSet={}, {}ms", baseDate, universe, cut, candidates.size(),
-        set.weightSetId(), System.currentTimeMillis() - started);
-    return new ScreeningResult(baseDate, universe, cut, set.weightSetId(), candidates);
+    // eligible = 1차 컷 ∩ 픽 유니버스. 후보가 candidate-limit 에 못 미치면 섹터 상한·KOSPI200 필터가 과한지 이 값으로 가늠한다
+    log.info("스크리닝: base={}, pickUniverse={}, universe={}, cut={}, eligible={}, candidates={}, weightSet={}, {}ms", baseDate, universe.getCode(), universeSize,
+        cut, eligible, candidates.size(), set.weightSetId(), System.currentTimeMillis() - started);
+    return new ScreeningResult(baseDate, universeSize, cut, set.weightSetId(), candidates);
   }
 
   /**
@@ -100,7 +126,7 @@ public class CandidateScreeningService {
     return n == null ? 0 : n;
   }
 
-  private record RowHolder(CandidateRow row, int universeSize, int cutSize) {
+  private record RowHolder(CandidateRow row, int universeSize, int cutSize, int eligibleSize) {
   }
 
   private static RowHolder read(ResultSet rs, List<SignalCode> signals, Map<String, Double> weights) throws SQLException {
@@ -149,7 +175,7 @@ public class CandidateScreeningService {
         .refRawClose(rs.getBigDecimal("raw_close"))
         .refAdjClose(nullable(rs, "adj_close"))
         .build();
-    return new RowHolder(row, rs.getInt("universe_size"), rs.getInt("cut_size"));
+    return new RowHolder(row, rs.getInt("universe_size"), rs.getInt("cut_size"), rs.getInt("eligible_size"));
   }
 
   private static void putFeature(Map<String, Object> features, String key, ResultSet rs, String column) throws SQLException {

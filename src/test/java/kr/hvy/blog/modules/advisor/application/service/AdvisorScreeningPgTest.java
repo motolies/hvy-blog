@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import kr.hvy.blog.modules.advisor.AdvisorSyntheticData;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
 import kr.hvy.blog.modules.advisor.domain.code.SignalCode;
 import kr.hvy.blog.modules.advisor.domain.code.WeightSetSource;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
@@ -84,6 +85,8 @@ class AdvisorScreeningPgTest {
     properties.getIc().setMinNEff(1);
     // 합성 시드는 i 홀짝으로 KOSPI/KOSDAQ 를 나눈다 — 아래 단언(유니버스 40·IC n=40·HAVING ≥30)은 양시장 기준. KOSPI 한정은 kospiOnlyUniverse 가 따로 본다
     properties.setMarkets(List.of("KOSPI", "KOSDAQ"));
+    // 스크리닝 메커니즘 단언(양시장·섹터 S1 포함)은 픽 필터 없이 본다. KOSPI200 필터는 kospi200PickUniverse 가 따로 본다
+    properties.setPickUniverse(PickUniverse.ALL);
     WeightSetRepository weightSets = new WeightSetRepository(jdbc);
     screening = new CandidateScreeningService(named, weightSets, properties);
     icService = new SignalIcService(named, new SignalIcWriter(new BatchUpsertSupport(jdbc), jdbc), weightSets, properties);
@@ -151,6 +154,67 @@ class AdvisorScreeningPgTest {
     CandidateRow top = result.candidates().stream().filter(c -> c.ticker().equals("T38")).findFirst().orElseThrow();
     assertThat(top.signals().get("MOM_20D").pct()).as("KOSPI 안 최대 모멘텀이 백분위 1.0 (양시장이면 T39 가 1.0)").isEqualTo(1.0);
     assertThat(top.signals().get("MOM_20D").raw()).isCloseTo(38 / 40.0, org.assertj.core.data.Offset.offset(1e-6));
+  }
+
+  @Test
+  @DisplayName("KOSPI200 픽 유니버스(advice-v7): 후보 전원이 기준일 구성종목이고, 유니버스·1차 컷·백분위·feat 행 수는 필터 전과 같다")
+  void kospi200PickUniverse() {
+    ScreeningResult all = screening.screen(BASE);
+    properties.setPickUniverse(PickUniverse.KOSPI200);
+    ScreeningResult k200 = screening.screen(BASE);
+
+    assertThat(k200.candidates()).isNotEmpty()
+        .allMatch(c -> AdvisorSyntheticData.kospi200(Integer.parseInt(c.ticker().substring(1))), "합성 KOSPI200 구성종목");
+    assertThat(k200.candidates()).extracting(CandidateRow::ticker).doesNotContain("T39", "T34", "T28");
+    assertThat(all.candidates()).extracting(CandidateRow::ticker).as("필터가 실제로 무언가를 걸렀다").contains("T39");
+    assertThat(k200.universeSize()).as("백분위 모집단 불변").isEqualTo(all.universeSize()).isEqualTo(40);
+    assertThat(k200.cutSize()).isEqualTo(all.cutSize());
+    assertThat(k200.candidates()).extracting(CandidateRow::quantRank).as("순위는 거른 뒤 1부터 다시")
+        .containsExactlyElementsOf(java.util.stream.IntStream.rangeClosed(1, k200.candidates().size()).boxed().toList());
+    Map<String, CandidateRow> allByTicker = all.candidates().stream().collect(Collectors.toMap(CandidateRow::ticker, c -> c));
+    for (CandidateRow c : k200.candidates()) {
+      if (allByTicker.containsKey(c.ticker())) {
+        assertThat(c.signals()).as(c.ticker() + " 백분위는 유니버스 전체 기준 그대로").isEqualTo(allByTicker.get(c.ticker()).signals());
+        assertThat(c.quantScore()).isEqualTo(allByTicker.get(c.ticker()).quantScore());
+      }
+    }
+    // IC·백분위가 쓰는 feat 행 수 = 유니버스 행 수 (이력 LEFT JOIN 이 행을 늘리거나 줄이지 않는다), 30영업일 전체
+    Map<String, Object> range = Map.of("from", DATES.getFirst(), "to", BASE, "markets", properties.getMarkets());
+    NamedParameterJdbcTemplate named = new NamedParameterJdbcTemplate(jdbc);
+    Integer featRows = named.queryForObject(FeatureSql.featureCtes() + " SELECT COUNT(*) FROM feat", range, Integer.class);
+    Integer universeRows = named.queryForObject("SELECT COUNT(*) FROM vw_stock_universe_daily u JOIN tb_stock_master ms ON ms.ticker = u.ticker "
+        + "WHERE u.trade_date BETWEEN :from AND :to AND ms.market_type IN (:markets)", range, Integer.class);
+    assertThat(featRows).isEqualTo(universeRows).isEqualTo(40 * DATES.size());
+  }
+
+  @Test
+  @DisplayName("KOSPI200 구성 여부는 PIT: 이력 행이 바뀐 날부터만 참이고, 이력 시작 전 날짜는 NULL(현재 마스터 값으로 채우지 않는다)")
+  void kospi200IsPointInTime() {
+    LocalDate joined = DATES.get(25);
+    try {
+      // T04: 비구성 → D25 편입. T06: 이력 시작을 D10 으로 늦춰 그 전은 모름
+      jdbc.update("UPDATE tb_stock_master_history SET valid_to = ? WHERE ticker = 'T04'", joined);
+      jdbc.update("INSERT INTO tb_stock_master_history (ticker, valid_from, stock_name, market_type, security_group, is_kospi200, is_krx300, "
+          + "is_suspended, is_administrative, is_active, snapshot_hash) VALUES ('T04', ?, '종목4', 'KOSPI', 'ST', TRUE, FALSE, FALSE, FALSE, TRUE, 'h2')", joined);
+      jdbc.update("UPDATE tb_stock_master_history SET valid_from = ? WHERE ticker = 'T06'", DATES.get(10));
+      NamedParameterJdbcTemplate named = new NamedParameterJdbcTemplate(jdbc);
+      Map<String, Object> range = Map.of("from", DATES.getFirst(), "to", BASE, "markets", properties.getMarkets());
+      Map<String, Boolean> t04 = new java.util.HashMap<>();
+      Map<String, Boolean> t06 = new java.util.HashMap<>();
+      named.query(FeatureSql.featureCtes() + " SELECT ticker, trade_date, is_kospi200 FROM feat WHERE ticker IN ('T04', 'T06')", range, rs -> {
+        Boolean flag = (Boolean) rs.getObject("is_kospi200");
+        (rs.getString("ticker").equals("T04") ? t04 : t06).put(rs.getObject("trade_date", LocalDate.class).toString(), flag);
+      });
+      assertThat(t04.get(DATES.get(24).toString())).isFalse();
+      assertThat(t04.get(joined.toString())).isTrue();
+      assertThat(t04.get(BASE.toString())).isTrue();
+      assertThat(t06.get(DATES.get(9).toString())).as("이력 시작 전은 모름").isNull();
+      assertThat(t06.get(DATES.get(10).toString())).isTrue();
+    } finally {
+      jdbc.update("DELETE FROM tb_stock_master_history WHERE ticker = 'T04' AND valid_from = ?", joined);
+      jdbc.update("UPDATE tb_stock_master_history SET valid_to = NULL WHERE ticker = 'T04'");
+      jdbc.update("UPDATE tb_stock_master_history SET valid_from = ? WHERE ticker = 'T06'", DATES.getFirst());
+    }
   }
 
   @Test

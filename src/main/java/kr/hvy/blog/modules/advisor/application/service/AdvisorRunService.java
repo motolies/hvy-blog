@@ -62,6 +62,14 @@ public class AdvisorRunService {
   }
 
   /**
+   * since 이후 시작한 잡 run 수. SKIPPED(게이트로 본문을 돌리지 않은 run)는 비용이 없으므로 세지 않는다 — 채팅 수시 판단 일 상한용.
+   */
+  @Transactional(readOnly = true)
+  public long countStartedSince(AdvisorJobType jobType, Instant since) {
+    return repository.countByJobTypeAndStatusNotAndStartedAtGreaterThanEqual(jobType, AdvisorStatus.SKIPPED, since);
+  }
+
+  /**
    * 종료 상태로 전환한다. 이미 종료 상태면 덮어쓰지 않는다.
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)

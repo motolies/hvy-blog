@@ -13,7 +13,9 @@ import lombok.Getter;
 @AllArgsConstructor
 public enum AdvisorTriggerType implements EnumCode<String> {
   SCHEDULER("SCHEDULER", "스케줄러"),
-  API("API", "관리자 API");
+  API("API", "관리자 API"),
+  /** Slack 채팅 봇 도구(requestAdvice, chat-v2) — API 처럼 실행기에 제출해 비동기로 돈다 */
+  CHAT("CHAT", "채팅 봇 요청");
 
   private final String code;
   private final String desc;

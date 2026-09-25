@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.application.chat.AdhocAdviceRequester;
 import kr.hvy.blog.modules.advisor.application.chat.AdvisorChatProperties;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorKpiService;
 import kr.hvy.blog.modules.advisor.application.service.CandidateScreeningService;
@@ -23,6 +24,14 @@ import kr.hvy.blog.modules.advisor.application.service.GlobalLinkService;
 import kr.hvy.blog.modules.advisor.application.service.MarketFeatureService;
 import kr.hvy.blog.modules.advisor.application.service.MarketTrendService;
 import kr.hvy.blog.modules.advisor.application.service.TradingCalendar;
+import kr.hvy.blog.modules.advisor.AdvisorSyntheticData;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
+import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
+import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
+import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
+import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
+import kr.hvy.blog.modules.advisor.domain.model.PickRow;
 import kr.hvy.blog.modules.advisor.repository.jdbc.AdviceWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.IntradayCheckWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter;
@@ -107,7 +116,8 @@ class AdvisorChatToolPgTest {
     market = new MarketToolkit(support, features, trends, links, properties);
     stock = new StockToolkit(support, reader, new DerivedViewRefresher(jdbc), new StockNewsWriter(new BatchUpsertSupport(jdbc), jdbc));
     advice = new AdviceToolkit(support, adviceWriter, new ScoreWriter(new BatchUpsertSupport(jdbc), jdbc), new MorningCheckWriter(jdbc),
-        new IntradayCheckWriter(jdbc), new CandidateScreeningService(named, weightSets, properties), weightSets, new AdvisorKpiService(named, properties), properties);
+        new IntradayCheckWriter(jdbc), new CandidateScreeningService(named, weightSets, properties), weightSets, new AdvisorKpiService(named, properties), properties,
+        mock(AdhocAdviceRequester.class));
     calendar = new CalendarToolkit(support, reader, features, adviceWriter, tradingCalendar);
     scope = new ChatRequestScope(Instant.now().plusSeconds(60));
     context = new ToolContext(scope.toToolContext());
@@ -214,7 +224,7 @@ class AdvisorChatToolPgTest {
   @Test
   @DisplayName("판단 도구 — 판단이 없으면 no_data, 스크리닝은 시드 가중치로 동작하고 상한을 지킨다")
   void adviceTools() {
-    assertThat(advice.latestAdvice(null, context)).containsEntry("error", ToolJson.ERROR_NO_DATA);
+    assertThat(advice.latestAdvice(null, null, context)).containsEntry("error", ToolJson.ERROR_NO_DATA);
     assertThat(advice.adviceChecks(FUTURE.toString(), context)).containsEntry("error", ToolJson.ERROR_NO_DATA);
 
     Map<String, Object> screen = advice.screeningTop(FUTURE.toString(), 99, context);
@@ -231,6 +241,62 @@ class AdvisorChatToolPgTest {
     assertThat(variants).extracting(v -> v.get("variant")).contains("LIVE", "QUANT_TOPN");
     assertThat((String) perf.get("note")).contains("표본");
     assertThat(scope.calls()).containsExactly("latestAdvice", "adviceChecks", "screeningTop", "performanceSummary");
+  }
+
+  @Test
+  @DisplayName("chat-v2 판단 도구 — latestAdvice(kind)·horizonPicks·compareAdvice 가 종류를 섞지 않고, 없는 종류는 '아직 발행 전' no_data")
+  void adviceKindTools() {
+    Long runId = jdbc.queryForObject("INSERT INTO tb_advisor_run (job_type, trigger_type, status, created_at, updated_at) "
+        + "VALUES ('ADVISE', 'API', 'SUCCESS', NOW(), NOW()) RETURNING run_id", Long.class);
+    AdviceWriter writer = new AdviceWriter(jdbc);
+    LocalDate d = DATES.get(20);
+    try {
+      long daily = insertAdvice(writer, runId, AdviceKind.DAILY, d, List.of(1, 2, 3), List.of(1, 2));
+      long adhoc = insertAdvice(writer, runId, AdviceKind.ADHOC, d.plusDays(1), List.of(4, 5), List.of(4));
+
+      Map<String, Object> latest = advice.latestAdvice(null, null, context);
+      assertThat(latest).containsEntry("adviceId", daily).containsEntry("kind", "DAILY");
+      assertThat(advice.latestAdvice(null, "adhoc", context)).containsEntry("adviceId", adhoc).containsEntry("kind", "ADHOC");
+      assertThat(advice.latestAdvice(null, "WEEKLY", context)).containsEntry("error", ToolJson.ERROR_BAD_ARGUMENT);
+      Map<String, Object> h20 = advice.horizonPicks(20, null, context);
+      assertThat(h20).containsEntry("error", ToolJson.ERROR_NO_DATA);
+      assertThat((String) h20.get("message")).contains("H20").contains("아직 발행 전");
+      assertThat(advice.horizonPicks(5, null, context)).containsEntry("adviceId", daily);
+      assertThat(advice.horizonPicks(7, null, context)).containsEntry("error", ToolJson.ERROR_BAD_ARGUMENT);
+
+      Map<String, Object> noMorning = advice.compareAdvice(null, context);
+      assertThat(noMorning).containsEntry("error", ToolJson.ERROR_NO_DATA).containsEntry("eveningAdviceId", daily);
+
+      long morning = insertAdvice(writer, runId, AdviceKind.MORNING, d, List.of(1, 2, 3), List.of(2, 3));
+      Map<String, Object> compared = advice.compareAdvice(d.toString(), context);
+      assertThat(compared).containsEntry("eveningAdviceId", daily).containsEntry("morningAdviceId", morning).containsEntry("declared", false);
+      assertThat(compared.get("counts")).isEqualTo(Map.of("KEEP", 1L, "ADD", 1L, "DROP", 1L));
+      @SuppressWarnings("unchecked")
+      List<Map<String, Object>> changes = (List<Map<String, Object>>) compared.get("changes");
+      assertThat(changes).extracting(c -> c.get("action")).containsExactly("KEEP", "ADD", "DROP");
+      assertThat(changes.get(2)).containsEntry("tk", AdvisorSyntheticData.ticker(1)).containsKey("nm").doesNotContainKey("morning");
+      assertThat(scope.calls()).contains("latestAdvice", "horizonPicks", "compareAdvice");
+    } finally {
+      jdbc.update("DELETE FROM tb_advisor_advice WHERE run_id = ?", runId);
+      jdbc.update("DELETE FROM tb_advisor_run WHERE run_id = ?", runId);
+    }
+  }
+
+  /**
+   * 헤더·후보·픽을 저장한다. 픽 순위는 목록 순서.
+   */
+  private static long insertAdvice(AdviceWriter writer, long runId, AdviceKind kind, LocalDate baseDate, List<Integer> candidates, List<Integer> picks) {
+    long id = writer.insertHeader(AdviceHeader.builder().runId(runId).baseDate(baseDate).adviceKind(kind).variant(AdviceVariant.LIVE).horizonDays(5)
+        .dataQuality(DataQuality.OK).promptVersion("advice-v6").model("m").build());
+    writer.insertCandidates(id, candidates.stream().map(i -> CandidateRow.builder().ticker(AdvisorSyntheticData.ticker(i)).quantRank(i).quantScore(0.5)
+        .stockName("종목" + i).marketType("KOSPI").benchIndexCode("0001").signals(Map.of()).build()).toList());
+    List<PickRow> rows = new java.util.ArrayList<>();
+    for (int r = 0; r < picks.size(); r++) {
+      rows.add(PickRow.builder().ticker(AdvisorSyntheticData.ticker(picks.get(r))).pickRank(r + 1).direction(PickDirection.LONG).conviction(0.6)
+          .thesis("근거").build());
+    }
+    writer.insertPicks(id, rows);
+    return id;
   }
 
   @Test

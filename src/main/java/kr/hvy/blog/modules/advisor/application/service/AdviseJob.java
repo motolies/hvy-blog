@@ -56,6 +56,9 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "advisor.enabled", havingValue = "true")
 public class AdviseJob implements AdvisorJob {
 
+  /** 수시 판단(ADHOC)이 건너뛰는 단계의 사유 */
+  static final String ADHOC_SKIP = "수시 판단(ADHOC)은 학습·평가 루프 밖";
+
   private final AdvisorProperties properties;
   private final AdvisorGateService gate;
   private final SignalIcService icService;
@@ -126,9 +129,25 @@ public class AdviseJob implements AdvisorJob {
 
   @Override
   public void execute(AdvisorExecution execution) {
+    advise(execution, AdviceKind.DAILY);
+  }
+
+  /**
+   * 판단 파이프라인 본문. kind 가 ADHOC(채팅 수시 판단, {@link AdhocAdviseJob})이면 같은 입력·프롬프트·가드로 LIVE 1건만 만들고
+   * 학습·평가 루프를 건드리는 단계(채점·IC·QUANT_TOPN·교훈 적용 카운트·LLM 섀도)는 전부 건너뛴다 — 수시 판단은 KPI·300 게이트·IC 밖이다.
+   */
+  void advise(AdvisorExecution execution, AdviceKind kind) {
+    boolean adhoc = kind == AdviceKind.ADHOC;
     LocalDate baseDate = execution.baseDate();
+    execution.putMetadata("adviceKind", kind.getCode());
     AdvisorGateService.Decision decision = gate.decide(baseDate, LocalTime.now(MarketClock.KST));
-    if (!decision.ready()) {
+    if (adhoc) {
+      Optional<String> blocked = adhocBlocked(baseDate, decision);
+      if (blocked.isPresent()) {
+        execution.skip(blocked.get());
+        return;
+      }
+    } else if (!decision.ready()) {
       execution.skip(decision.reason());
       if (decision.pastDeadline()) {
         notifier.alert(String.format("[AI 판단 미실행] %s — %s%n마감(%s KST)까지 DAILY 수집이 끝나지 않아 오늘 판단을 건너뜁니다. "
@@ -143,13 +162,18 @@ public class AdviseJob implements AdvisorJob {
     // ① 채점·IC (격리 — 실패해도 오늘 판단은 진행, 직전 가중치·실적으로)
     final Scoreboard[] scoreboard = {Scoreboard.empty()};
     ScoreHook hook = scoreHook.getIfAvailable();
-    if (hook != null) {
-      steps.run("SCORE", () -> scoreboard[0] = hook.scoreDue(execution));
+    if (adhoc) {
+      steps.skip("SCORE", ADHOC_SKIP);
+      steps.skip("IC", ADHOC_SKIP);
     } else {
-      steps.skip("SCORE", "채점 훅 없음");
+      if (hook != null) {
+        steps.run("SCORE", () -> scoreboard[0] = hook.scoreDue(execution));
+      } else {
+        steps.skip("SCORE", "채점 훅 없음");
+      }
+      // IC 청크는 steps::run 으로 돌아 청크마다 단계 기록·flush·취소 감지를 받는다. 바깥 IC 단계는 청크 밖 조회(마지막 IC 일·캘린더) 실패를 격리한다
+      steps.run("IC", () -> icService.computeIncremental(steps::run).ifPresent(r -> r.record(execution)));
     }
-    // IC 청크는 steps::run 으로 돌아 청크마다 단계 기록·flush·취소 감지를 받는다. 바깥 IC 단계는 청크 밖 조회(마지막 IC 일·캘린더) 실패를 격리한다
-    steps.run("IC", () -> icService.computeIncremental(steps::run).ifPresent(r -> r.record(execution)));
 
     // ② 시장 특징·스크리닝 (필수)
     final MarketFeatures[] market = new MarketFeatures[1];
@@ -168,7 +192,11 @@ public class AdviseJob implements AdvisorJob {
     WeightSet weightSet = weightSets.find(result.weightSetId()).orElseThrow();
 
     // ③ 정량 top-N 섀도 (LLM 없음) — 격리
-    steps.run("SHADOW_QUANT", () -> saveQuantShadow(execution, result, decision, market[0]));
+    if (adhoc) {
+      steps.skip("SHADOW_QUANT", ADHOC_SKIP);
+    } else {
+      steps.run("SHADOW_QUANT", () -> saveQuantShadow(execution, result, decision, market[0]));
+    }
 
     // ④ 프롬프트: 실적 블록·교훈은 누적 픽 게이트를 넘긴 뒤에만
     boolean memoryOn = adviceWriter.countLivePicks(AdviceKind.DAILY) >= properties.getLesson().getMinPicks();
@@ -235,7 +263,7 @@ public class AdviseJob implements AdvisorJob {
 
     // ⑦ LIVE 저장 (필수)
     AdviceHeader header = AdviceHeader.builder()
-        .runId(execution.runId()).baseDate(baseDate).adviceKind(AdviceKind.DAILY).variant(AdviceVariant.LIVE)
+        .runId(execution.runId()).baseDate(baseDate).adviceKind(kind).variant(AdviceVariant.LIVE)
         .horizonDays(properties.getHorizonDays())
         .regimeCode(guarded.regime()).kospiDir(guarded.kospiDir()).kosdaqDir(guarded.kosdaqDir()).pUp(guarded.pUp())
         .regimeRationale(guarded.rationale()).leadingSectors(guarded.sectors()).summary(guarded.summary())
@@ -252,7 +280,8 @@ public class AdviseJob implements AdvisorJob {
       adviceWriter.insertPicks(adviceId[0], guarded.picks());
       promptInputs.upsert(new PromptInputRow(execution.runId(), AdviceVariant.LIVE, PromptResources.ADVICE_VERSION, prompts.adviceSha256(),
           payload.json(), AdvisorJson.write(jr.options()), jr.rawText()));
-      for (LessonRow lesson : activeLessons) {
+      // 교훈 적용 카운트는 효과 판정(적용−비적용)의 분모라 DAILY 만 올린다
+      for (LessonRow lesson : adhoc ? List.<LessonRow>of() : activeLessons) {
         int applied = (int) included.stream().filter(c -> c.appliedLessonIds() != null && c.appliedLessonIds().contains(lesson.lessonId())).count();
         lessons.addApplied(lesson.lessonId(), applied);
       }
@@ -279,6 +308,11 @@ public class AdviseJob implements AdvisorJob {
     });
 
     // ⑨ 섀도 (격리). 요인 분리: NOMEM = 뉴스 그대로·메모리(recentOutcomes·lessons·scoreboard) 없음, NONEWS = 메모리 그대로·뉴스 없음 — LIVE 와 정확히 한 요인만 다르다
+    if (adhoc) {
+      steps.skip("SHADOW_NOMEM", ADHOC_SKIP);
+      steps.skip("SHADOW_NONEWS", ADHOC_SKIP);
+      return;
+    }
     if (memoryInjected && nomemShadowOpen(baseDate)) {
       steps.run("SHADOW_NOMEM", () -> saveLlmShadow(AdviceVariant.LLM_NOMEM, execution, market[0], tagged, weightSet, sectorContext, decision,
           null, List.of(), news, "shadowNomemAdviceId", null));
@@ -291,6 +325,19 @@ public class AdviseJob implements AdvisorJob {
     } else {
       steps.skip("SHADOW_NONEWS", news == null ? "뉴스 없음" : "뉴스 섀도 기간 종료");
     }
+  }
+
+  /**
+   * 수시 판단을 막을 사유. DAILY 게이트의 "이미 판단함"(DAILY LIVE 존재)과 마감은 수시 판단과 무관하므로 영업일·입력 준비만 보고,
+   * 같은 기준일 ADHOC 가 이미 있으면 막는다 — 유니크 (base_date, advice_kind, variant) 때문이기도 하지만, 기준일이 같으면 입력(일봉 지표)이 같아
+   * 다시 돌려도 LLM 표본 잡음만 달라진다.
+   */
+  Optional<String> adhocBlocked(LocalDate baseDate, AdvisorGateService.Decision decision) {
+    if (!decision.tradingDay() || !decision.dataReady()) {
+      return Optional.of(decision.reason());
+    }
+    return adviceWriter.find(baseDate, AdviceKind.ADHOC, AdviceVariant.LIVE)
+        .map(existing -> "이미 수시 판단이 있습니다: " + baseDate + " (advice=" + existing.adviceId() + ")");
   }
 
   /**

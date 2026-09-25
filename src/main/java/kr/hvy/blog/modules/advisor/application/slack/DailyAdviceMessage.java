@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
 import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
 import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
@@ -46,6 +47,7 @@ import lombok.Builder;
 @Builder
 public class DailyAdviceMessage implements SlackMessage {
 
+  static final String ADHOC_NOTE = "💬 채팅 요청으로 만든 수시 판단입니다 — 19:30 일일 판단과 같은 입력·규칙이지만 성과 집계(KPI·채점·학습)에서 제외됩니다.";
   public static final String DISCLAIMER = "⚠️ 투자 자문이 아닙니다. 개인 실험(정량 스크리닝 + LLM 판단) 결과이며 어떤 손실도 책임지지 않습니다.";
   static final DateTimeFormatter MMDD = DateTimeFormatter.ofPattern("MM-dd");
   /** 미국 데이터가 이 영업일 수 이상 뒤처지면 경고 표시 */
@@ -76,13 +78,26 @@ public class DailyAdviceMessage implements SlackMessage {
 
   @Override
   public String getFallbackText() {
-    return String.format("%s 시장 판단: %s, 종목 %d개", header.baseDate(), header.regimeCode(), picks.size());
+    return String.format("%s %s: %s, 종목 %d개", header.baseDate(), header.adviceKind() == AdviceKind.ADHOC ? "수시 판단" : "시장 판단",
+        header.regimeCode(), picks.size());
+  }
+
+  /**
+   * 헤더 제목. 수시 판단은 "시장 판단" 대신 "수시 판단" — 채팅 스레드 히스토리가 "📈 YYYY-MM-DD 시장 판단" 루트를 19:30 판단으로 인식하므로
+   * 같은 문구를 쓰면 수시 판단 스레드의 질문이 그날 DAILY 로 연결된다.
+   */
+  String title() {
+    String label = header.adviceKind() == AdviceKind.ADHOC ? "수시 판단" : "시장 판단";
+    return String.format("📈 %s %s (%d거래일)", header.baseDate(), label, header.horizonDays());
   }
 
   @Override
   public List<LayoutBlock> toBlocks() {
     List<LayoutBlock> blocks = new ArrayList<>();
-    blocks.add(header(h -> h.text(plainText(String.format("📈 %s 시장 판단 (%d거래일)", header.baseDate(), header.horizonDays())))));
+    blocks.add(header(h -> h.text(plainText(title()))));
+    if (header.adviceKind() == AdviceKind.ADHOC) {
+      blocks.add(context(List.of(markdownText(ADHOC_NOTE))));
+    }
     String trend = trendText();
     if (trend != null) {
       blocks.add(section(s -> s.text(markdownText(trend))));

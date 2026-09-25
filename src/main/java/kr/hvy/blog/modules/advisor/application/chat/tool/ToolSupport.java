@@ -51,6 +51,24 @@ public class ToolSupport {
    * 도구 본문 실행. 결과 맵을 그대로 돌려주고, 어떤 예외도 오류 맵으로 바꾼다.
    */
   public Map<String, Object> run(String tool, ToolContext context, Supplier<Map<String, Object>> body) {
+    return execute(tool, context, () -> readOnly.execute(status -> {
+      jdbc.execute("SET LOCAL statement_timeout = " + Math.max(1, properties.getToolTimeoutSeconds()) * 1_000);
+      return body.get();
+    }));
+  }
+
+  /**
+   * 쓰기 도구(requestAdvice) 실행 — 읽기 전용 트랜잭션·statement_timeout 없이 호출 기록·마감·예외 변환만 적용한다.
+   * run 생성은 AdvisorRunService 의 REQUIRES_NEW 가 스스로 연다. 읽기 전용 트랜잭션 안에서 부르면 그 커넥션을 붙잡은 채 새 커넥션을 하나 더 쓰게 된다.
+   */
+  public Map<String, Object> runWithoutTransaction(String tool, ToolContext context, Supplier<Map<String, Object>> body) {
+    return execute(tool, context, body);
+  }
+
+  /**
+   * 공통 실행: 호출 기록·소프트 마감 → 본문 → 예외를 오류 맵으로.
+   */
+  private Map<String, Object> execute(String tool, ToolContext context, Supplier<Map<String, Object>> body) {
     Optional<ChatRequestScope> scope = ChatRequestScope.from(context);
     if (scope.isPresent() && scope.get().enter(tool)) {
       log.warn("advisor chat 도구 마감 초과: tool={}", tool);
@@ -58,10 +76,7 @@ public class ToolSupport {
     }
     long started = System.currentTimeMillis();
     try {
-      Map<String, Object> result = readOnly.execute(status -> {
-        jdbc.execute("SET LOCAL statement_timeout = " + Math.max(1, properties.getToolTimeoutSeconds()) * 1_000);
-        return body.get();
-      });
+      Map<String, Object> result = body.get();
       log.debug("advisor chat 도구 {}: {}ms", tool, System.currentTimeMillis() - started);
       return result == null ? ToolJson.noData(null) : result;
     } catch (QueryTimeoutException e) {

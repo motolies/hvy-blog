@@ -4,6 +4,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Optional;
+import kr.hvy.blog.modules.advisor.application.service.AdvisorRunService;
+import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.repository.jdbc.ChatWriter;
 import kr.hvy.blog.modules.stock.domain.model.MarketClock;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +35,7 @@ public class ChatBudgetGuard {
   private final AdvisorChatProperties properties;
   private final ChatWriter chatWriter;
   private final RedissonClient redissonClient;
+  private final AdvisorRunService runService;
 
   /**
    * 통과면 빈 Optional. 거부면 사유(예산 소진 / 쿨다운 n초).
@@ -64,6 +67,29 @@ public class ChatBudgetGuard {
     } catch (Exception e) {
       log.warn("advisor chat 예산 조회 실패 — 통과시킨다: {}", e.toString());
       return Optional.empty();
+    }
+  }
+
+  /**
+   * 채팅 수시 판단(requestAdvice)의 일 상한 — 오늘(KST) 시작한 ADVISE_ADHOC run 수(SKIPPED 제외)가 상한 이상이면 거부. 질문 토큰 예산과 별개인 이유:
+   * 판단 1건은 판단 모델 호출이라 채팅 답변 수십 건 비용이다. 다른 방어선과 달리 조회 실패는 <b>거부</b>한다 — 비싼 쓰기 동작을 확인 없이 열지 않는다.
+   */
+  public Optional<Refusal> checkAdhocQuota() {
+    int limit = properties.getAdhocDailyLimit();
+    if (limit <= 0) {
+      return Optional.of(new Refusal("ADHOC_DISABLED", "수시 판단 요청이 꺼져 있습니다(advisor.chat.adhoc-daily-limit=0)."));
+    }
+    try {
+      Instant dayStart = LocalDate.now(MarketClock.KST).atStartOfDay(MarketClock.KST).toInstant();
+      long used = runService.countStartedSince(AdvisorJobType.ADVISE_ADHOC, dayStart);
+      if (used >= limit) {
+        log.info("advisor chat 수시 판단 일 상한 도달: used={}, limit={}", used, limit);
+        return Optional.of(new Refusal("ADHOC_LIMIT", String.format("오늘 수시 판단 요청 한도(%d회)를 다 썼습니다(%d회 사용). 내일(KST 자정) 다시 요청해 주세요.", limit, used)));
+      }
+      return Optional.empty();
+    } catch (Exception e) {
+      log.warn("advisor chat 수시 판단 상한 조회 실패 — 거부한다: {}", e.toString());
+      return Optional.of(new Refusal("ADHOC_UNKNOWN", "수시 판단 한도를 확인하지 못해 요청을 받지 않았습니다. 잠시 후 다시 요청해 주세요."));
     }
   }
 

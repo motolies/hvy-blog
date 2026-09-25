@@ -84,6 +84,9 @@ public class AdvisorChatProperties {
   /** 일일 토큰 예산(입력+출력, KST 자정 기준). 0 이면 무제한 */
   private long dailyTokenBudget = 300_000;
 
+  /** 채팅 수시 판단(requestAdvice, chat-v2) 일 상한(KST 자정 기준, 전체 사용자 합). 0 이면 도구가 요청을 전부 거부한다 */
+  private int adhocDailyLimit = 3;
+
   /** 같은 사용자의 연속 질문 최소 간격(초) */
   private int perUserCooldownSeconds = 20;
 
@@ -95,6 +98,13 @@ public class AdvisorChatProperties {
 
   /** event_id 중복 제거 Redis TTL(분). DB uk_advisor_chat_event 가 2차 방어선 */
   private int dedupTtlMinutes = 10;
+
+  /**
+   * 허용 사용자인지 — Socket Mode 라우터의 1단계 필터와 같은 목록을 쓰기 도구가 한 번 더 확인한다.
+   */
+  public boolean isAllowedUser(String userId) {
+    return userId != null && allowedUserIds != null && allowedUserIds.contains(userId.trim());
+  }
 
   /**
    * hvy-common SlackClient 와 같은 bot 토큰(slack.token). 없으면 빈 문자열.

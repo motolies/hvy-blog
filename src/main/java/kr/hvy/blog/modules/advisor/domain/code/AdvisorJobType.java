@@ -18,7 +18,12 @@ public enum AdvisorJobType implements EnumCode<String> {
   /** 07:30 아침 점검: 밤사이 미국 마감을 β 로 환산한 예상 갭으로 직전 판단을 유지/강화/주의 판정 (규칙 기반, 원 판단 불변) */
   MORNING_CHECK("MORNING_CHECK", "아침 해외 반영 점검", false),
   WEEKLY_REVIEW("WEEKLY_REVIEW", "주간 검토 (가중치·보정·교훈·보고)", true),
-  IC_BACKFILL("IC_BACKFILL", "시그널 IC 사전 추정", true);
+  IC_BACKFILL("IC_BACKFILL", "시그널 IC 사전 추정", true),
+  /**
+   * 채팅 봇 requestAdvice 가 여는 수시 판단(advice_kind=ADHOC, chat-v2). ADVISE 와 잡 유형을 나눈 이유: RUNNING 부분 유니크가 잡 유형 단위라
+   * 같은 유형이면 채팅 요청이 도는 동안 19:30 스케줄 ADVISE 가 "이미 실행 중" 으로 거부된다.
+   */
+  ADVISE_ADHOC("ADVISE_ADHOC", "수시 판단(채팅 요청)", true);
 
   private final String code;
   private final String desc;

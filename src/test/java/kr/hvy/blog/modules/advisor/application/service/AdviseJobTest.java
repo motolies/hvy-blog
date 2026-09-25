@@ -228,6 +228,62 @@ class AdviseJobTest {
     assertThat(job.nomemShadowOpen(base)).isTrue();
   }
 
+  @Test
+  @DisplayName("수시 판단(ADHOC): DAILY 가 이미 있는 날도 돌고, 채점·IC·정량 섀도·LLM 섀도·교훈 카운트 없이 LIVE 1건을 kind=ADHOC 로 저장·발행한다")
+  void adhocSavesOnlyLiveWithAdhocKind() {
+    // 같은 기준일 DAILY 가 이미 있다(alreadyDone) — DAILY 게이트는 막지만 수시 판단은 막지 않는다
+    when(gate.decide(any(), any())).thenReturn(new AdvisorGateService.Decision(true, true, true, false, DataQuality.OK, "이미 판단이 있습니다"));
+    when(recentOutcomes.block(base)).thenReturn(Optional.of(outcomesBlock()));   // 메모리가 실려도 NOMEM 섀도는 돌지 않아야 한다
+    properties.getNews().setEnabled(false);
+    AdviseJob.ScoreHook hook = mock(AdviseJob.ScoreHook.class);
+    when(hookProvider.getIfAvailable()).thenReturn(hook);
+
+    AdvisorExecution execution = adhocExecution();
+    new AdhocAdviseJob(job).execute(execution);
+
+    assertThat(execution.isSkipped()).isFalse();
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SUCCESS);
+    assertThat(llmCalls.get()).as("LIVE 1회만").isEqualTo(1);
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter).insertHeader(headers.capture());
+    assertThat(headers.getValue().adviceKind()).isEqualTo(AdviceKind.ADHOC);
+    assertThat(headers.getValue().variant()).isEqualTo(AdviceVariant.LIVE);
+    verify(hook, never()).scoreDue(any());
+    verify(icService, never()).computeIncremental(any());
+    verify(lessons, never()).addApplied(anyLong(), org.mockito.ArgumentMatchers.anyInt());
+    ArgumentCaptor<SlackMessage> message = ArgumentCaptor.forClass(SlackMessage.class);
+    verify(notifier).publish(message.capture());
+    assertThat(message.getValue().getFallbackText()).contains("수시 판단");
+    assertThat(execution.metadata("adviceKind")).isEqualTo("ADHOC");
+    assertThat(execution.metadata("skip.SHADOW_QUANT")).isEqualTo(AdviseJob.ADHOC_SKIP);
+    assertThat(execution.metadata("skip.SHADOW_NOMEM")).isEqualTo(AdviseJob.ADHOC_SKIP);
+    assertThat(execution.metadata("skip.SCORE")).isEqualTo(AdviseJob.ADHOC_SKIP);
+  }
+
+  @Test
+  @DisplayName("수시 판단(ADHOC): 같은 기준일 ADHOC 가 이미 있거나 입력이 준비되지 않았으면 LLM 없이 SKIPPED")
+  void adhocSkipsWhenExistsOrNotReady() {
+    when(adviceWriter.find(base, AdviceKind.ADHOC, AdviceVariant.LIVE)).thenReturn(Optional.of(AdviceHeader.builder().adviceId(77L).build()));
+    AdvisorExecution existing = adhocExecution();
+    new AdhocAdviseJob(job).execute(existing);
+    assertThat(existing.isSkipped()).isTrue();
+    assertThat(existing.skipReason()).contains("advice=77");
+
+    when(adviceWriter.find(base, AdviceKind.ADHOC, AdviceVariant.LIVE)).thenReturn(Optional.empty());
+    when(gate.decide(any(), any())).thenReturn(new AdvisorGateService.Decision(true, false, false, true, DataQuality.OK, "DAILY 미완료"));
+    AdvisorExecution notReady = adhocExecution();
+    new AdhocAdviseJob(job).execute(notReady);
+    assertThat(notReady.isSkipped()).isTrue();
+    verify(notifier, never()).alert(any(), org.mockito.ArgumentMatchers.anyBoolean());   // 수시 판단은 마감 경보를 울리지 않는다
+    assertThat(llmCalls.get()).isZero();
+    verify(adviceWriter, never()).insertHeader(any());
+  }
+
+  private AdvisorExecution adhocExecution() {
+    AdvisorRun run = AdvisorRun.builder().runId(1300L).jobType(AdvisorJobType.ADVISE_ADHOC).triggerType(AdvisorTriggerType.CHAT).baseDate(base).build();
+    return new AdvisorExecution(run, base, properties);
+  }
+
   /** RecentOutcomesService 가 만든 형식의 빈도표 2행 */
   private static java.util.Map<String, Object> outcomesBlock() {
     java.util.Map<String, Object> block = new java.util.LinkedHashMap<>();

@@ -27,8 +27,12 @@ public class PromptResources {
   public static final String ADVICE_VERSION = "advice-v6";
   /** lesson-v2 (2026-09-13): condition 에 trend 키 */
   public static final String LESSON_VERSION = "lesson-v2";
-  /** chat-v1 (2026-09-13): Slack #hvy-advisor 채팅 봇 시스템 프롬프트 — 도구 결과만 인용·기준일 명시·조건부 시나리오·면책은 코드가 부착 */
-  public static final String CHAT_VERSION = "chat-v1";
+  /**
+   * chat-v2 (2026-09-25): 도구 선택 절 신설 — 생성 요청은 requestAdvice, 호라이즌은 horizonPicks, 저녁·아침 비교는 compareAdvice, latestAdvice 는 kind 로 종류 선택.
+   * 규칙 1 을 "도구가 없으면 없다고 답" 에서 "맞는 도구를 먼저 부르고 no_data 면 없다고 답" 으로 바꿨다 — v1 문구 때문에 생성 요청에 "어드바이스 툴이 없다" 고 답하던 결함.
+   * chat-v1 (2026-09-13): Slack #hvy-advisor 채팅 봇 시스템 프롬프트 — 도구 결과만 인용·기준일 명시·조건부 시나리오·면책은 코드가 부착
+   */
+  public static final String CHAT_VERSION = "chat-v2";
   /** note-v1 (2026-09-21): 12:00 장중 점검의 픽별 회고(오답노트) 시스템 프롬프트 — assist 모델, 티커 없는 일반화 가설 */
   public static final String NOTE_VERSION = "note-v1";
   static final String BASE = "prompts/advisor/";
@@ -47,7 +51,7 @@ public class PromptResources {
     this.adviceSha256 = sha256(adviceSystem);
     this.lessonSystem = load(BASE + "lesson-system-v2.md");
     this.lessonSha256 = sha256(lessonSystem);
-    this.chatSystem = load(BASE + "chat-system-v1.md");
+    this.chatSystem = load(BASE + "chat-system-v2.md");
     this.chatSha256 = sha256(chatSystem);
     this.noteSystem = load(BASE + "intraday-note-system-v1.md");
     this.noteSha256 = sha256(noteSystem);

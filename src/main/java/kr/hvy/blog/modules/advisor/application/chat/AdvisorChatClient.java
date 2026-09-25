@@ -68,7 +68,7 @@ public class AdvisorChatClient implements ChatAnswerer {
   @Override
   public ChatResult answer(IncomingQuestion question) {
     SlackThreadHistory.History history = threadHistory.load(question, null);
-    ChatRequestScope scope = new ChatRequestScope(Instant.now().plusSeconds(Math.max(10, properties.getAnswerTimeoutSeconds())));
+    ChatRequestScope scope = new ChatRequestScope(Instant.now().plusSeconds(Math.max(10, properties.getAnswerTimeoutSeconds())), question.userId());
     long started = System.currentTimeMillis();
     ChatResponse response = chatClient.prompt()
         .system(promptResources.chatSystem())

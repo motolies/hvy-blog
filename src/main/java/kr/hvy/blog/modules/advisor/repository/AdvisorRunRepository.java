@@ -24,6 +24,11 @@ public interface AdvisorRunRepository extends JpaRepository<AdvisorRun, Long>, J
       List<AdvisorStatus> statuses);
 
   /**
+   * 지정 시각 이후 시작한 잡 run 수(제외 상태 뺌) — 채팅 수시 판단의 일 상한 판정용.
+   */
+  long countByJobTypeAndStatusNotAndStartedAtGreaterThanEqual(AdvisorJobType jobType, AdvisorStatus excluded, Instant since);
+
+  /**
    * 오래 RUNNING 으로 남은 run 을 FAILED 로 일괄 정리한다 (프로세스 강제 종료 복구).
    */
   @Modifying

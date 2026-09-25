@@ -76,6 +76,13 @@ public class AdvisorOrchestrator {
    * 설정 누락·미등록 잡은 {@link AdvisorRequestException}.
    */
   public TriggerResult trigger(AdvisorJobType jobType, LocalDate baseDate, AdvisorTriggerType triggerType) {
+    return trigger(jobType, baseDate, triggerType, Map.of());
+  }
+
+  /**
+   * 부가 메타를 run 과 실행 컨텍스트 양쪽에 싣고 실행한다(채팅 요청자 등). 메타는 run 생성 시점부터 남아야 실패·취소된 run 에서도 요청 출처를 볼 수 있다.
+   */
+  public TriggerResult trigger(AdvisorJobType jobType, LocalDate baseDate, AdvisorTriggerType triggerType, Map<String, Object> extraMetadata) {
     LocalDate effectiveDate = baseDate == null ? MarketClock.today() : baseDate;
     boolean scheduled = triggerType == AdvisorTriggerType.SCHEDULER;
     AdvisorJob job;
@@ -95,6 +102,7 @@ public class AdvisorOrchestrator {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("baseDate", effectiveDate.toString());
         metadata.put("requested", baseDate != null);
+        metadata.putAll(extraMetadata);
         run = runService.start(jobType, triggerType, effectiveDate, metadata);
       } catch (DataIntegrityViolationException e) {
         // 사전 조회와 INSERT 사이에 끼어든 경합: 부분 유니크 인덱스가 막았다. 새 트랜잭션에서 id 를 찾아 409 로 돌린다
@@ -108,8 +116,10 @@ public class AdvisorOrchestrator {
     }
     AdvisorExecution execution = new AdvisorExecution(run, effectiveDate, properties);
     execution.putMetadata("requested", baseDate != null); // 잡이 "요청된 날짜인지" 를 알 수 있게 (IC_BACKFILL 의 시작일 결정)
+    extraMetadata.forEach(execution::putMetadata);
 
-    boolean async = triggerType == AdvisorTriggerType.API && jobType.isLongRunning();
+    // 스케줄러만 호출 스레드에서 동기 실행한다(ShedLock 락 유지). 관리자 API·채팅 요청은 호출자를 붙잡지 않도록 실행기에 넘긴다
+    boolean async = triggerType != AdvisorTriggerType.SCHEDULER && jobType.isLongRunning();
     if (!async) {
       execute(job, execution);
       return new TriggerResult(runService.get(run.getRunId()), false);

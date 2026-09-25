@@ -19,6 +19,10 @@ public final class ToolJson {
   public static final String ERROR_DEADLINE = "deadline";
   public static final String ERROR_BAD_ARGUMENT = "bad_argument";
   public static final String ERROR_INTERNAL = "internal";
+  /** 허용 사용자가 아니라 쓰기 도구를 쓸 수 없음 */
+  public static final String ERROR_FORBIDDEN = "forbidden";
+  /** 일 상한 등 사용 한도 초과 */
+  public static final String ERROR_LIMIT = "limit";
 
   private ToolJson() {
   }

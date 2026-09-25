@@ -326,6 +326,34 @@ class AdviceScoringPgTest {
   }
 
   @Test
+  @DisplayName("채팅 수시 판단(ADHOC)은 같은 기준일·LIVE 에 있어도 KPI·300 게이트·채점 대상에 섞이지 않는다 (chat-v2)")
+  void adhocAdviceExcludedFromKpiAndGate() {
+    long daily = insertAdvice(AdviceKind.DAILY, D.get(10), AdviceVariant.LIVE, List.of(1, 5, 10, 30),
+        Map.of(5, PickDirection.LONG, 30, PickDirection.LONG, 10, PickDirection.AVOID), null);
+    scoring.score(adviceWriter.findById(daily).orElseThrow(), 5, ScoreStage.PROVISIONAL);
+    AdvisorKpiService.VariantSummary before = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+    int regimeBefore = kpi.regimeSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast()).calls();
+    List<AdvisorKpiService.CalibrationRow> calibrationBefore = kpi.calibration(D.getFirst(), D.getLast());
+
+    long adhoc = insertAdvice(AdviceKind.ADHOC, D.get(10), AdviceVariant.LIVE, List.of(1, 5, 10, 30),
+        Map.of(1, PickDirection.LONG, 5, PickDirection.LONG, 10, PickDirection.LONG, 30, PickDirection.LONG), null);
+    // 누군가 실수로 ADHOC 을 채점해도 KPI 는 DAILY 만 본다
+    scoring.score(adviceWriter.findById(adhoc).orElseThrow(), 5, ScoreStage.PROVISIONAL);
+
+    assertThat(adviceWriter.countLivePicks(AdviceKind.DAILY)).as("300 게이트").isEqualTo(3);
+    assertThat(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, D.get(10))).map(AdviceHeader::adviceId).contains(daily);
+    assertThat(adviceWriter.findLatest(AdviceKind.ADHOC, AdviceVariant.LIVE, D.get(10))).map(AdviceHeader::adviceId).contains(adhoc);
+    AdvisorKpiService.VariantSummary after = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+    assertThat(after.advices()).isEqualTo(before.advices());
+    assertThat(after.picks()).isEqualTo(before.picks());
+    assertThat(after.meanExcess()).isEqualTo(before.meanExcess());
+    assertThat(after.poolMeanExcess()).isEqualTo(before.poolMeanExcess());
+    assertThat(kpi.regimeSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast()).calls()).isEqualTo(regimeBefore);
+    assertThat(kpi.calibration(D.getFirst(), D.getLast())).isEqualTo(calibrationBefore);
+    assertThat(scoreJob.unscored(5)).extracting(AdviceHeader::adviceId).doesNotContain(adhoc);
+  }
+
+  @Test
   @DisplayName("추세 전망 채점(h=20): 라벨이 안 바뀌면 BEYOND_20D 적중, WITHIN_5D 는 빗나감, 무효화는 QUIET·전환 없음이면 적중, NONE 은 MISSING, √h 밴드")
   void trendOutlookScoring() {
     // 합성 지수는 2500 상수·MA 성분 0, 종목은 전부 MA20 위라 breadth +1 → 두 시장 모두 SIDEWAYS 로 고정

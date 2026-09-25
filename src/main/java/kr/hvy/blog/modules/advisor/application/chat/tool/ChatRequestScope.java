@@ -20,11 +20,25 @@ public final class ChatRequestScope {
   public static final String KEY = "advisor.chat.scope";
 
   private final Instant deadline;
+  /** 질문한 Slack 사용자 ID — 쓰기 도구(requestAdvice)의 허용 사용자 재확인용. 모델이 아니라 코드가 채우므로 위조할 수 없다 */
+  private final String userId;
   private final List<String> calls = Collections.synchronizedList(new ArrayList<>());
   private final List<LocalDate> asOfs = Collections.synchronizedList(new ArrayList<>());
 
   public ChatRequestScope(Instant deadline) {
+    this(deadline, null);
+  }
+
+  public ChatRequestScope(Instant deadline, String userId) {
     this.deadline = deadline;
+    this.userId = userId;
+  }
+
+  /**
+   * 질문자 Slack 사용자 ID. 컨텍스트 없이 만든 범위(테스트)는 빈 Optional.
+   */
+  public Optional<String> userId() {
+    return Optional.ofNullable(userId);
   }
 
   /**

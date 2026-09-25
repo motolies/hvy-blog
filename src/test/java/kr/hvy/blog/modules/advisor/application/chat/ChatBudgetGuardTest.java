@@ -13,6 +13,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Optional;
+import kr.hvy.blog.modules.advisor.application.service.AdvisorRunService;
+import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
 import kr.hvy.blog.modules.advisor.repository.jdbc.ChatWriter;
 import kr.hvy.blog.modules.stock.domain.model.MarketClock;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +30,7 @@ class ChatBudgetGuardTest {
   private ChatWriter writer;
   private RedissonClient redisson;
   private RBucket<Object> bucket;
+  private AdvisorRunService runService;
   private ChatBudgetGuard guard;
 
   @BeforeEach
@@ -42,7 +45,9 @@ class ChatBudgetGuardTest {
     bucket = mock(RBucket.class);
     when(redisson.getBucket(anyString())).thenReturn(bucket);
     when(bucket.setIfAbsent(any(), any(Duration.class))).thenReturn(true);
-    guard = new ChatBudgetGuard(properties, writer, redisson);
+    runService = mock(AdvisorRunService.class);
+    when(properties.getAdhocDailyLimit()).thenReturn(3);
+    guard = new ChatBudgetGuard(properties, writer, redisson, runService);
   }
 
   static IncomingQuestion question() {
@@ -109,5 +114,29 @@ class ChatBudgetGuardTest {
     when(writer.tokensSince(any())).thenThrow(new IllegalStateException("db down"));
     when(redisson.getBucket(anyString())).thenThrow(new IllegalStateException("redis down"));
     assertThat(guard.check(question())).isEmpty();
+  }
+
+  @Test
+  @DisplayName("수시 판단 일 상한 — 오늘(KST) ADVISE_ADHOC run 이 상한 미만이면 통과, 도달하면 ADHOC_LIMIT 거부")
+  void adhocQuota() {
+    Instant dayStart = LocalDate.now(MarketClock.KST).atStartOfDay(MarketClock.KST).toInstant();
+    when(runService.countStartedSince(AdvisorJobType.ADVISE_ADHOC, dayStart)).thenReturn(2L);
+    assertThat(guard.checkAdhocQuota()).isEmpty();
+
+    when(runService.countStartedSince(AdvisorJobType.ADVISE_ADHOC, dayStart)).thenReturn(3L);
+    Optional<ChatBudgetGuard.Refusal> refusal = guard.checkAdhocQuota();
+    assertThat(refusal).isPresent();
+    assertThat(refusal.get().code()).isEqualTo("ADHOC_LIMIT");
+    assertThat(refusal.get().message()).contains("3회");
+  }
+
+  @Test
+  @DisplayName("수시 판단 상한 0 은 전부 거부, 조회 실패도 거부한다(비싼 쓰기 동작은 확인 없이 열지 않는다)")
+  void adhocQuotaFailsClosed() {
+    when(runService.countStartedSince(any(), any())).thenThrow(new IllegalStateException("db down"));
+    assertThat(guard.checkAdhocQuota()).get().extracting(ChatBudgetGuard.Refusal::code).isEqualTo("ADHOC_UNKNOWN");
+
+    when(properties.getAdhocDailyLimit()).thenReturn(0);
+    assertThat(guard.checkAdhocQuota()).get().extracting(ChatBudgetGuard.Refusal::code).isEqualTo("ADHOC_DISABLED");
   }
 }

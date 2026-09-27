@@ -43,9 +43,10 @@ import org.springframework.stereotype.Component;
 /**
  * 아침 재판정 (MORNING_ADVISE, 평일 07:40 KST — 07:30 MORNING_CHECK 뒤, 08:50 발행 마감).
  * <pre>
- * 게이트(영업일·마감·직전 영업일 DAILY LIVE·중복·저녁 입력 스냅샷) → 밤사이 블록(미국 r1·β 갭·환율·섹터 연동 심볼·07:30 점검) →
+ * 게이트(영업일·마감·직전 영업일 DAILY LIVE·중복·저녁 입력 스냅샷·저녁 후보) → 밤사이 블록(미국 r1·β 갭·환율·섹터 연동 심볼·07:30 점검) →
  * LLM 판단(strict, 매일 호출) → 가드(KEEP/DROP 은 저녁 픽, ADD 는 저녁 후보) → MORNING LIVE 저장(parent·diff_json·픽 action) → Slack 발행
  * </pre>
+ * 매수 전용(morning-v2, 2026-09-27): 저녁이 관망(0픽)이어도 재판정한다(ADD 만 가능). 전부 DROP 한 0픽 아침도 정상 저장·발행한다.
  * 저녁과 <b>같은 base_date·진입(D+1 시가)·청산 창</b>이라 ScoreJob 이 같은 창으로 채점하고, 같은 기준일 MORNING − DAILY 픽 평균 초과가 곧
  * 밤사이 정보의 가치를 재는 대응 비교다(AdvisorKpiService.morningVsDaily). 그래서 섀도가 필요 없다.
  * <p>
@@ -130,12 +131,14 @@ public class MorningAdviseJob implements AdvisorJob {
       return;
     }
     Optional<PromptInputRow> snapshot = promptInputs.find(evening.runId(), AdviceVariant.LIVE);
+    // 매수 전용(morning-v2): 저녁이 관망(0픽)이어도 후보가 있으면 재판정한다 — 밤사이 정보로 ADD 만 가능하다
     List<PickRow> eveningPicks = adviceWriter.picks(evening.adviceId());
-    if (snapshot.isEmpty() || eveningPicks.isEmpty()) {
-      execution.skip("저녁 입력 스냅샷 또는 픽이 없습니다 (advice=" + evening.adviceId() + ", run=" + evening.runId() + ")");
+    List<CandidateRow> candidates = adviceWriter.candidates(evening.adviceId());
+    if (snapshot.isEmpty() || candidates.isEmpty()) {
+      execution.skip("저녁 입력 스냅샷 또는 후보가 없습니다 (advice=" + evening.adviceId() + ", run=" + evening.runId() + ")");
       return;
     }
-    List<CandidateRow> candidates = adviceWriter.candidates(evening.adviceId());
+    execution.putMetadata("eveningPicks", eveningPicks.size());
     AdvisorSteps steps = new AdvisorSteps(execution);
 
     // ① 밤사이 블록 (필수 — 없으면 재판정할 정보가 없다)

@@ -55,8 +55,9 @@ class AdvisorOpenAiManualTest {
     System.out.println("=== 응답 ===\n" + result.rawText());
     System.out.println("=== usage in/out/reasoning/cached: " + result.usage().getPromptTokens() + "/" + result.usage().getCompletionTokens()
         + "/" + result.reasoningTokens() + "/" + result.cachedTokens() + ", " + result.options());
-    assertThat(result.response().picks()).isNotEmpty();
+    // 매수 전용(advice-v9): 빈 picks(관망)도 정상 답이라 개수는 단언하지 않는다
     assertThat(result.response().picks()).allMatch(p -> payload.candidateTickers().contains(p.ticker()));
+    assertThat(result.response().picks()).as("스키마에 direction 이 없다").allMatch(p -> p.direction() == null);
     assertThat(result.response().picks()).allMatch(p -> AdviceSchemaFactory.CONVICTIONS.contains(p.conviction()));
     // advice-v2: 2단계 중첩 객체(trendOutlook.kospi.invalidation)를 Responses strict text.format 이 수용하는지가 실측의 핵심
     assertThat(result.response().trendOutlook()).as("trendOutlook 블록").isNotNull();

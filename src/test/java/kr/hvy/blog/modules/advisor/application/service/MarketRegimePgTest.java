@@ -136,7 +136,7 @@ class MarketRegimePgTest {
   }
 
   @Test
-  @DisplayName("분포 표본이 vol-min-history-days 미만이면 UNKNOWN, 합성 국면은 추세 × 변동성 → 정책 표(BEAR·HIGH: LONG≤8, 확신≤0.65, AVOID≤4)")
+  @DisplayName("분포 표본이 vol-min-history-days 미만이면 UNKNOWN, 합성 국면은 추세 × 변동성 → 정책 표 v2(BEAR·HIGH: LONG≤8, 확신≤0.65)")
   void composesTrendVolAndPolicy() {
     properties.getRegime().setIndexCode("9001");
     MarketRegimeService.VolReading early = regimes.vol(VOL_DATES.get(150));
@@ -147,7 +147,7 @@ class MarketRegimePgTest {
     MarketRegime regime = regimes.regime(VBASE, List.of(bear));
     assertThat(regime.labelText()).isEqualTo("BEAR·HIGH");
     assertThat(regime.trendScore()).isEqualTo(-3);
-    assertThat(regime.policy()).isEqualTo(new MarketRegime.Policy("regime-policy-v1", 8, 0.65, 4));
+    assertThat(regime.policy()).isEqualTo(new MarketRegime.Policy("regime-policy-v2", 8, 0.65));
 
     MarketRegime noTrend = regimes.regime(VBASE, List.of());
     assertThat(noTrend.trend()).isNull();
@@ -207,7 +207,7 @@ class MarketRegimePgTest {
     Long runId = jdbc.queryForObject("INSERT INTO tb_advisor_run (job_type, trigger_type, status, created_at, updated_at) "
         + "VALUES ('ADVISE', 'API', 'SUCCESS', NOW(), NOW()) RETURNING run_id", Long.class);
     MarketRegime regime = new MarketRegime("0001", BASE, MarketTrendCode.SIDEWAYS, 1, VolRegimeCode.NORMAL, 0.5423, 0.0112, 1200,
-        new MarketRegime.Policy("regime-policy-v1", 10, 0.80, 2),
+        new MarketRegime.Policy("regime-policy-v2", 10, 0.80),
         List.of(new MarketRegime.Theme("5", 30, 0.01, 0.031, 0.02, 0.62, ThemeStrength.STRONG, List.of("삼성전자", "SK하이닉스"))));
     AdviceWriter writer = new AdviceWriter(jdbc);
     AdviceHeader header = AdviceHeader.builder().runId(runId).baseDate(BASE).adviceKind(AdviceKind.DAILY).variant(AdviceVariant.LIVE).horizonDays(5)
@@ -222,5 +222,10 @@ class MarketRegimePgTest {
     List<String> columns = jdbc.queryForList("SELECT column_name FROM information_schema.columns WHERE table_name = 'tb_advisor_advice' ORDER BY ordinal_position",
         String.class);
     assertThat(columns.getLast()).as("컬럼은 맨 뒤에 추가").isEqualTo("regime_json");
+
+    // regime-policy-v1 시절 행에는 policy.avoidMax 가 남아 있다 — v2 레코드(avoidMax 없음)로도 읽혀야 과거 판단 조회(채팅·관리자·아침 재판정)가 깨지지 않는다
+    jdbc.update("UPDATE tb_advisor_advice SET regime_json = jsonb_set(regime_json, '{policy,avoidMax}', '4') WHERE advice_id = ?", id);
+    assertThat(jdbc.queryForObject("SELECT regime_json->'policy'->>'avoidMax' FROM tb_advisor_advice WHERE advice_id = ?", String.class, id)).isEqualTo("4");
+    assertThat(writer.findById(id).orElseThrow().regime().policy()).isEqualTo(regime.policy());
   }
 }

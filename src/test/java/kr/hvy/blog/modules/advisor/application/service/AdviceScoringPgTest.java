@@ -609,6 +609,65 @@ class AdviceScoringPgTest {
     assertThat(saved.outlookOf("0001").invalidation()).isEqualTo(kr.hvy.blog.modules.advisor.domain.code.InvalidationType.BELOW_MA60);
   }
 
+  @Test
+  @DisplayName("매수 전용: 관망(0픽) 판단도 후보가 채점되고, KPI 는 그날 후보군을 부가가치 기준선에서 빼 abstainDays·abstainPoolMeanExcess 로 따로 낸다. "
+      + "대응 비교는 한쪽만 관망이면 그쪽 초과를 0(현금)으로 둔다")
+  void abstainDaysKpiAndCashPairs() {
+    // D10: 저녁 T05·T30 매수 → 아침 전부 DROP(관망). D11: 저녁 관망(후보 T03·T07) → 아침 T03 ADD
+    long daily10 = insertAdvice(AdviceKind.DAILY, D.get(10), AdviceVariant.LIVE, List.of(1, 5, 10, 30),
+        Map.of(5, PickDirection.LONG, 30, PickDirection.LONG), null);
+    long daily11 = insertAdvice(AdviceKind.DAILY, D.get(11), AdviceVariant.LIVE, List.of(3, 7), Map.of(), null);
+    scoreJob.scoreDue(execution(D.getLast()));
+    assertThat(scoreWriter.candidateScores(daily11)).as("관망 판단도 후보군은 채점된다(관망이 맞았는지의 근거)").isNotEmpty();
+
+    Map<String, Double> excess = new java.util.HashMap<>();
+    for (long id : List.of(daily10, daily11)) {
+      scoreWriter.candidateScores(id).stream().filter(r -> r.horizonDays() == 5).forEach(r -> excess.put(r.ticker(), r.excessRet()));
+    }
+    double t05 = excess.get(AdvisorSyntheticData.ticker(5));
+    double t30 = excess.get(AdvisorSyntheticData.ticker(30));
+    double pool10 = List.of(1, 5, 10, 30).stream().mapToDouble(i -> excess.get(AdvisorSyntheticData.ticker(i))).average().orElseThrow();
+    double pool11 = List.of(3, 7).stream().mapToDouble(i -> excess.get(AdvisorSyntheticData.ticker(i))).average().orElseThrow();
+
+    AdvisorKpiService.VariantSummary live = kpi.variantSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+    assertThat(live.picks()).isEqualTo(2);
+    assertThat(live.poolMeanExcess()).as("픽이 있는 D10 후보군만 — 관망일 D11 후보군은 섞지 않는다").isCloseTo(pool10, within(1e-12));
+    assertThat(live.valueAdd()).isCloseTo((t05 + t30) / 2 - pool10, within(1e-12));
+    assertThat(live.abstainDays()).isEqualTo(1);
+    assertThat(live.abstainPoolMeanExcess()).isCloseTo(pool11, within(1e-12));
+    assertThat(kpi.variantSummary(AdviceVariant.QUANT_TOPN, D.getFirst(), D.getLast()).abstainDays()).as("판단이 없으면 0").isZero();
+
+    insertMorning(D.get(10), daily10, List.of(1, 5, 10, 30), List.of(), false);
+    insertMorning(D.get(11), daily11, List.of(3, 7),
+        List.of(PickRow.builder().ticker(AdvisorSyntheticData.ticker(3)).pickRank(1).direction(PickDirection.LONG).conviction(0.6)
+            .action(kr.hvy.blog.modules.advisor.domain.code.PickAction.ADD).actionReason("추가").build()), true);
+    scoreJob.scoreDue(execution(D.getLast()));
+
+    AdvisorKpiService.MorningVsDaily pair = kpi.morningVsDaily(D.getFirst(), D.getLast());
+    assertThat(pair.pairs()).extracting(AdvisorKpiService.MorningPair::baseDate).containsExactly(D.get(10), D.get(11));
+    AdvisorKpiService.MorningPair allDrop = pair.pairs().getFirst();
+    assertThat(allDrop.morningMean()).as("아침 관망 = 현금 0").isZero();
+    assertThat(allDrop.morningPicks()).isZero();
+    assertThat(allDrop.diff()).isCloseTo(-(t05 + t30) / 2, within(1e-12));
+    AdvisorKpiService.MorningPair addOnly = pair.pairs().get(1);
+    assertThat(addOnly.dailyMean()).as("저녁 관망 = 현금 0").isZero();
+    assertThat(addOnly.diff()).isCloseTo(excess.get(AdvisorSyntheticData.ticker(3)), within(1e-12));
+    assertThat(pair.triggered().n()).isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("대응 비교: 양쪽 다 관망인 날, LONG 픽이 있는데 아직 채점되지 않은 쪽이 있는 날은 짝에서 빠진다")
+  void pairsSkipBothAbstainAndUnscored() {
+    long daily10 = insertAdvice(AdviceKind.DAILY, D.get(10), AdviceVariant.LIVE, List.of(1, 5), Map.of(), null);
+    insertMorning(D.get(10), daily10, List.of(1, 5), List.of(), false);
+    // D26 은 청산일(D+5)이 캘린더 밖이라 채점되지 않는다 — 저녁 매수·아침 관망이어도 짝이 성립하지 않는다
+    long daily26 = insertAdvice(AdviceKind.DAILY, D.get(26), AdviceVariant.LIVE, List.of(3, 7), Map.of(3, PickDirection.LONG), null);
+    insertMorning(D.get(26), daily26, List.of(3, 7), List.of(), false);
+    scoreJob.scoreDue(execution(D.getLast()));
+
+    assertThat(kpi.morningVsDaily(D.getFirst(), D.getLast()).pairs()).isEmpty();
+  }
+
   private long insertAdvice(LocalDate baseDate, AdviceVariant variant, List<Integer> candidateIdx, Map<Integer, PickDirection> picks) {
     return insertAdvice(AdviceKind.DAILY, baseDate, variant, candidateIdx, picks, null);
   }

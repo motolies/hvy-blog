@@ -296,7 +296,6 @@ public class AdvicePromptBuilder {
       p.put("version", r.policy().version());
       p.put("longMax", r.policy().longMax());
       p.put("convictionCap", r.policy().convictionCap());
-      p.put("avoidMax", r.policy().avoidMax());
       p.put("enforced", true);
       m.put("policy", p);
     }

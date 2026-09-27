@@ -276,14 +276,14 @@ advisor:
   candidate-limit: 30             # LLM 후보 상한 (≈2,500 토큰)
   max-per-sector: 4
   markets: [KOSPI]                # 스크리닝·rank-IC 유니버스 시장(MarketType 코드, advice-v5). 바꾸면 IC_BACKFILL 을 baseDate 없이 재실행해 IC 재기준화
-  pick-min: 3                     # 가드 후 픽이 이보다 적으면 FAILED(미발행)
+  pick-min: 3                     # 스크리닝 후보가 이보다 적으면 FAILED. 가드 뒤 픽 하한은 아니다 — 매수 전용(advice-v9)은 0픽(관망)도 발행
   pick-max: 10                    # Slack 은 픽마다 section 1개 — 36 초과면 블록 50 상한
   advise:
     deadline: "19:55"             # DAILY 완료 대기 마감(KST). 이후 미완료면 SKIPPED + #hvy-error
     non-consistent-conviction-cap: 0.70   # advice-v6: secCons=0(세 구간 초과 미충족)·overheated 섹터 LONG 픽의 확신 상한 — 가드가 기계 클램프(stats capNonConsistent/capOverheated)
     overheated-sigma: 2.0         # 섹터 과열 = 업종 지수 5일 수익률 > 배수 × σ_5d(KOSPI)
   prompt:
-    version: advice-v8            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문, v6 섹터 기간 모멘텀(업종 지수 rs5/20/60·consistent·overheated, 2026-09-21), v7 KOSPI200 후보, v8 합성 국면·정책 표·테마(M6, 2026-09-25). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
+    version: advice-v9            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문, v6 섹터 기간 모멘텀(업종 지수 rs5/20/60·consistent·overheated, 2026-09-21), v7 KOSPI200 후보, v8 합성 국면·정책 표·테마(M6, 2026-09-25), v9 매수 전용·0픽 관망(2026-09-27). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
   news:                           # 뉴스 입력(advice-v4). tb_stock_news(scheduler.stock-eventfeed, GDELT 헤드라인) 가 쌓여 있어야 한다. 주입 시점은 계획 Phase 1d(구조화 사건)에서 결정
     enabled: ${NEWS_ENABLED:false}
@@ -360,13 +360,13 @@ advisor:
     vol-low-pct: 0.30             # 백분위 < 0.30 LOW
     vol-high-pct: 0.80            # 백분위 ≥ 0.80 HIGH
     policy:                       # ★ 사전 등록 정책 표 — 수치를 바꾸면 version 을 올린다(새 버전). 가드(AdviceGuard·MorningAdviceGuard)가 기계 강제
-      version: regime-policy-v1
+      version: regime-policy-v2       # v2(2026-09-27): 매수 전용 — AVOID 최대 열 삭제, LONG 상한 바닥 1
       bull: { long-max-reduction: 0 }                                    # 기존 상한 그대로
       sideways: { long-max-reduction: 0, conviction-cap: 0.80 }          # LONG 확신 ≤ 0.80
-      bear: { long-max-reduction: 2, conviction-cap: 0.70, avoid-max: 4 } # LONG ≤ max(pick-min, pick-max−2), 확신 ≤ 0.70, AVOID ≤ 4
+      bear: { long-max-reduction: 2, conviction-cap: 0.70 }              # LONG ≤ max(1, pick-max−2), 확신 ≤ 0.70
       vol-high-conviction-penalty: 0.05                                  # 변동성 HIGH 면 확신 상한 −0.05 (상한 없던 국면은 0.90 에서)
-  h20:                            # 주간 20거래일 판단(M7, advice-h20-v1). 뉴스·메모리 없이 H20 가중치 세트로만(없으면 SKIP). 정책 표는 이 범위로 재계산
-    pick-min: 3                   # 가드 후 픽이 이보다 적으면 FAILED(미발행)
+  h20:                            # 주간 20거래일 판단(M7, advice-h20-v2). 뉴스·메모리 없이 H20 가중치 세트로만(없으면 SKIP). 정책 표는 이 범위로 재계산
+    pick-min: 3                   # 스크리닝 후보가 이보다 적으면 FAILED. 가드 뒤 0픽(관망)은 발행
     pick-max: 8                   # 픽 상한(확신 내림차순 절단)
   long-term:                      # 장기(H60·H180) 규칙 선택(M8, longterm-v1). 사전 고정 가중치 — 학습 안 함(n_eff 60≈23·180≈7). LLM 은 서술만
     weights: { MOM_12_1: 0.30, QUALITY_ROE: 0.20, QUALITY_DEBT: 0.15, OP_GROWTH: 0.15, LOW_VOL_60: 0.20 }   # ★ 바꾸면 guard_json.weights 로 사후 분리

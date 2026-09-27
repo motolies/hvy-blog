@@ -16,12 +16,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
 import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
 import kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode;
-import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.code.VolRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
@@ -38,13 +38,12 @@ import lombok.Builder;
 /**
  * 일일 판단 Block Kit 메시지 (#hvy-advisor, 멘션 없음).
  * <pre>
- * 헤더 → 추세(규칙) → 합성 국면·정책(M6) → 테마 강약(M6) → 국면(5일) → 추세 전망(LLM) → 데이터 기준·적용 구간 → 주도 섹터 → 종목 표(고정폭: 순위 코드 종목명 방향 확신 점수)
- * → 픽마다 근거·리스크 인용 블록(전문) → 최근 채점 → 총평 → run 메타 → 면책
+ * 헤더 → 추세(규칙) → 합성 국면·정책(M6) → 테마 강약(M6) → 국면(5일) → 추세 전망(LLM) → 데이터 기준·적용 구간 → 주도 섹터 → 종목 헤딩 + 종목 표(table 블록:
+ * 순위 종목명 코드 테마 확신 점수) → 픽마다 근거·리스크 인용 블록(전문) → 최근 채점 → 총평 → run 메타 → 면책
  * </pre>
- * 종목 표는 고정폭 코드 블록(Block Kit fields 는 2열 고정이라 표가 깨진다)이며 폭은 {@link SlackWidth} 로 한글 2칸을 계산한다. 모바일 코드 블록이
- * 40칸 남짓에서 접히므로 표는 39칸 안에 두고 근거·리스크는 표 밖 인용 블록으로 내렸다. 근거·리스크는 **픽마다 section 1개** 에 전문을 싣는다(advice-v5) —
- * 픽 10개를 section 1개(3,000자 상한)에 몰아넣느라 한글 29자/19자로 잘랐던 v2~v4 결함의 수정. 픽당 최대 ≈830자(가드 400+300+헤더), 블록 수는
- * 고정 16 + 픽 수(≤ pick-max 10) 로 메시지 상한 50 안이다. 하단 면책 문구는 고정이다.
+ * 종목 표는 Block Kit table 블록({@link SlackTableBlock}, 2026-09-27)이다 — 고정폭 코드 블록은 모바일에서 40칸 남짓에 접혀 열이 깨졌다. 매수 전용(advice-v9)이라
+ * 방향 열이 없고, 0픽(관망)이면 표 대신 "{@value #ABSTAIN_TEXT}" 와 summary 첫 줄을 싣는다. 근거·리스크는 **픽마다 section 1개** 에 전문을 싣는다(advice-v5).
+ * 픽당 최대 ≈830자(가드 400+300+헤더), 블록 수는 고정 17 + 픽 수(≤ pick-max 10) 로 메시지 상한 50 안이다. 하단 면책 문구는 고정이다.
  */
 @Builder
 public class DailyAdviceMessage implements SlackMessage {
@@ -52,6 +51,8 @@ public class DailyAdviceMessage implements SlackMessage {
   static final String ADHOC_NOTE = "💬 채팅 요청으로 만든 수시 판단입니다 — 19:30 일일 판단과 같은 입력·규칙이지만 성과 집계(KPI·채점·학습)에서 제외됩니다.";
   static final String H20_NOTE = "🗓 주간 20거래일 판단입니다 — 뉴스·오답노트 없이 추세·섹터·테마·국면으로 고른 20거래일 보유 관점이며, 일일 판단과 따로 20거래일 창으로 채점됩니다.";
   public static final String DISCLAIMER = "⚠️ 투자 자문이 아닙니다. 개인 실험(정량 스크리닝 + LLM 판단) 결과이며 어떤 손실도 책임지지 않습니다.";
+  /** 0픽(관망) 판단의 표 대체 문구 — 아침 재판정·fallback 도 같은 문구를 쓴다 */
+  public static final String ABSTAIN_TEXT = "추천 종목 없음 — 관망";
   static final DateTimeFormatter MMDD = DateTimeFormatter.ofPattern("MM-dd");
   /** 미국 데이터가 이 영업일 수 이상 뒤처지면 경고 표시 */
   static final int GLOBAL_STALE_DAYS = 2;
@@ -83,7 +84,25 @@ public class DailyAdviceMessage implements SlackMessage {
 
   @Override
   public String getFallbackText() {
-    return String.format("%s %s: %s, 종목 %d개", header.baseDate(), kindLabel(), header.regimeCode(), picks.size());
+    String body = picks.isEmpty() ? ABSTAIN_TEXT + abstainReason().map(r -> " (" + r + ")").orElse("") : "매수 " + picks.size() + "개";
+    return String.format("%s %s: %s, %s", header.baseDate(), kindLabel(), header.regimeCode(), body);
+  }
+
+  /**
+   * 관망 사유 한 줄: summary 의 첫 문장(프롬프트 v9 규칙 8 이 관망이면 이유를 첫 문장에 쓰게 한다). 없으면 empty.
+   */
+  Optional<String> abstainReason() {
+    return firstLine(header.summary());
+  }
+
+  /** 문단의 첫 줄·첫 문장(마침표·줄바꿈 기준, 공백 정리). 비면 empty */
+  static Optional<String> firstLine(String text) {
+    if (text == null || text.isBlank()) {
+      return Optional.empty();
+    }
+    String line = text.strip().split("\\R", 2)[0];
+    int dot = line.indexOf(". ");
+    return Optional.of(dot > 0 ? line.substring(0, dot + 1) : line);
   }
 
   /**
@@ -147,7 +166,13 @@ public class DailyAdviceMessage implements SlackMessage {
     blocks.add(section(s -> s.text(markdownText("*주도 섹터*  " + sectorText()))));
     blocks.add(divider());
     String label = headingLabel();
-    blocks.add(section(s -> s.text(markdownText(String.format("*종목 (%d)%s*%n```%s```", picks.size(), label, pickTable())))));
+    if (picks.isEmpty()) {
+      String reason = abstainReason().map(r -> "\n" + r).orElse("");
+      blocks.add(section(s -> s.text(markdownText(String.format("*종목 (0)%s*%n*%s*%s", label, ABSTAIN_TEXT, reason)))));
+    } else {
+      blocks.add(section(s -> s.text(markdownText(String.format("*매수 종목 (%d)%s*", picks.size(), label)))));
+      blocks.add(pickTable());
+    }
     for (PickRow p : picks) {
       String note = pickNote(p);
       blocks.add(section(s -> s.text(markdownText(note))));
@@ -192,7 +217,7 @@ public class DailyAdviceMessage implements SlackMessage {
   }
 
   /**
-   * 합성 국면·정책 한 줄(M6): "*국면(규칙)*  BEAR · 변동성 HIGH(87%) · 정책: LONG≤8, 확신≤0.65, AVOID≤4". 국면이 없으면(M6 이전·계산 실패) null.
+   * 합성 국면·정책 한 줄(M6): "*국면(규칙)*  BEAR · 변동성 HIGH(87%) · 정책: 매수≤8, 확신≤0.65". 국면이 없으면(M6 이전·계산 실패) null.
    * 확신 상한이 없으면 확신 항목을 뺀다.
    */
   String policyText() {
@@ -208,11 +233,10 @@ public class DailyAdviceMessage implements SlackMessage {
     }
     MarketRegime.Policy p = r.policy();
     if (p != null) {
-      sb.append(" · 정책: LONG≤").append(p.longMax());
+      sb.append(" · 정책: 매수≤").append(p.longMax());
       if (p.convictionCap() != null) {
         sb.append(String.format(", 확신≤%.2f", p.convictionCap()));
       }
-      sb.append(", AVOID≤").append(p.avoidMax());
     }
     return sb.toString();
   }
@@ -300,28 +324,43 @@ public class DailyAdviceMessage implements SlackMessage {
         .collect(Collectors.joining(" · "));
   }
 
-  /** 종목명 열 폭(칸). 한글 6자까지 그대로, 그 이상은 … 절단 */
-  static final int NAME_CELLS = 13;
+  /** 종목 표 열: 순위 · 종목명 · 코드 · 테마 · 확신 · 점수(숫자 열은 오른쪽 정렬, 종목명은 줄바꿈 허용) */
+  static final List<SlackTableBlock.Column> PICK_COLUMNS = List.of(
+      SlackTableBlock.Column.right("순위"), SlackTableBlock.Column.wrapped("종목명"), SlackTableBlock.Column.left("코드"),
+      SlackTableBlock.Column.left("테마"), SlackTableBlock.Column.right("확신"), SlackTableBlock.Column.right("점수"));
 
   /**
-   * 고정폭 표: 순위(4) 코드(6) 종목명(13) 방향(4) 확신(4) 점수(4) + 구분 공백 5 = 40칸. 근거는 표 밖 {@link #pickNotes()}.
+   * 종목 표(table 블록): 순위·종목명·코드·테마·확신·점수. 근거는 표 밖 {@link #pickNote(PickRow)}. 방향 열은 없다(매수 전용).
    */
-  String pickTable() {
-    StringBuilder sb = new StringBuilder();
-    sb.append(SlackWidth.padRight("순위", 4)).append(' ').append(SlackWidth.padRight("코드", 6)).append(' ').append(SlackWidth.padRight("종목명", NAME_CELLS))
-        .append(' ').append(SlackWidth.padRight("방향", 4)).append(' ').append(SlackWidth.padRight("확신", 4)).append(' ').append("점수").append('\n');
+  SlackTableBlock pickTable() {
+    List<List<String>> rows = new ArrayList<>();
     for (PickRow p : picks) {
       CandidateRow c = candidates.get(p.ticker());
       String name = c == null || c.stockName() == null ? p.ticker() : c.stockName();
       String score = c == null ? "-" : String.format("%.2f", c.quantScore());
-      sb.append(SlackWidth.padRight(String.format("%2d", p.pickRank()), 4)).append(' ')
-          .append(SlackWidth.padRight(p.ticker(), 6)).append(' ')
-          .append(SlackWidth.padRight(name, NAME_CELLS)).append(' ')
-          .append(SlackWidth.padRight(p.direction() == PickDirection.AVOID ? "회피" : "매수", 4)).append(' ')
-          .append(String.format("%.2f", p.conviction())).append(' ')
-          .append(score).append('\n');
+      rows.add(List.of(String.valueOf(p.pickRank()), name, p.ticker(), themeLabel(c), String.format("%.2f", p.conviction()), score));
     }
-    return sb.toString().stripTrailing();
+    return SlackTableBlock.of(PICK_COLUMNS, rows);
+  }
+
+  /**
+   * 테마 열: 후보 특징의 theme 코드(KOSPI200 섹터 대분류, M6). 대분류 코드는 이름표가 없어(1자리 KIS 마스터 코드) 그날 테마 표의 대표 종목을 붙인다
+   * — 헤더 테마 줄과 같은 "5[삼성전자]" 표기. 대표 종목이 없으면 코드만, 테마가 없으면(편입 이력 없음) "-".
+   */
+  String themeLabel(CandidateRow c) {
+    Object code = c == null || c.features() == null ? null : c.features().get("theme");
+    if (!(code instanceof String theme) || theme.isBlank()) {
+      return "-";
+    }
+    MarketRegime r = header.regime();
+    if (r != null && r.themes() != null) {
+      for (MarketRegime.Theme t : r.themes()) {
+        if (theme.equals(t.code()) && t.leaders() != null && !t.leaders().isEmpty()) {
+          return theme + "[" + t.leaders().getFirst() + "]";
+        }
+      }
+    }
+    return theme;
   }
 
   /**

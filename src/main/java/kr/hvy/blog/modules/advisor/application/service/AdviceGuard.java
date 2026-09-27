@@ -27,14 +27,16 @@ import org.apache.commons.lang3.StringUtils;
 /**
  * 판단 출력 검증(환각·범위·개수·인젝션). 스키마 enum 이 1차 방어, 여기가 2차 방어다.
  * <ul>
- *   <li>후보 밖 티커·중복·모르는 direction 은 제거</li>
+ *   <li>후보 밖 티커·중복은 제거</li>
+ *   <li>매수 전용(advice-v9, 2026-09-27): 스키마에 direction 이 없어 모든 픽은 LONG 이다. 스키마 밖 응답이 AVOID(avoidRemoved)·모르는 값(badDirection)을
+ *       실어 오면 픽을 제거하고 제거율에 넣는다. 픽 하한은 없다 — 0픽(관망)도 정상 결과다</li>
  *   <li>확신값은 허용 목록 밖이면 가장 가까운 허용값으로, 국면 확신도 동일</li>
  *   <li>citedFeatures 의 값이 입력 특징과 허용오차(상대 2% 또는 절대 1e-4) 밖이면 픽 제거(근거 위조)</li>
- *   <li>픽 > max 는 확신 내림차순 상위만, AVOID 는 최대 2개, 픽 < min 이면 tooFew</li>
+ *   <li>픽 > max 는 확신 내림차순 상위만</li>
  *   <li>텍스트에서 <!channel>·<!here>·제어문자 제거, 길이 절단</li>
  *   <li>advice-v6: secCons=0 후보·overheated 섹터의 LONG 픽은 확신을 advisor.advise.non-consistent-conviction-cap 으로 클램프(제거 아님, stats
  *       capNonConsistent/capOverheated). 주도 섹터 콜에는 입력 sectors 의 consistent 를 채운다</li>
- *   <li>advice-v8(M6): 합성 국면의 사전 등록 정책 표(RegimePolicy) — LONG 확신 상한 클램프, AVOID 상한(기본 2 → 약세 4), LONG 개수 상한(확신 낮은 LONG 부터 제거).
+ *   <li>advice-v8(M6)·regime-policy-v2: 합성 국면의 사전 등록 정책 표(RegimePolicy) — LONG 확신 상한 클램프, LONG 개수 상한(확신 낮은 LONG 부터 제거).
  *       정책이 없으면(국면 미계산·추세 없음) 기존 규칙과 같다. 정책 적용 내역은 stats.policy 에 남고 픽 제거율(removed)에는 넣지 않는다 — 정책은 모델 이탈이 아니라
  *       사전에 정한 한도라 PARTIAL 경보를 울릴 이유가 없다</li>
  * </ul>
@@ -96,7 +98,6 @@ public final class AdviceGuard {
   }
 
   public static final double REMOVAL_ALERT_RATIO = 0.30;
-  static final int MAX_AVOID = 2;
   static final int THESIS_LIMIT = 400;
   static final int RISK_LIMIT = 300;
   static final int RATIONALE_LIMIT = 900;
@@ -109,8 +110,9 @@ public final class AdviceGuard {
                        List<SectorCall> sectors, List<PickRow> picks, String summary, Map<String, Object> stats, int originalPicks, int removed,
                        List<TrendOutlook> outlooks) {
 
-    public boolean tooFew(int min) {
-      return picks.size() < min;
+    /** 가드 뒤 매수 픽이 없다(관망) — 실패가 아니라 정상 결과다 */
+    public boolean abstained() {
+      return picks.isEmpty();
     }
 
     public double removalRatio() {
@@ -142,7 +144,7 @@ public final class AdviceGuard {
   }
 
   /**
-   * @param policy 합성 국면의 정책 표 한도(M6). null 이면 기존 규칙(LONG 상한 = pick-max, 확신 상한 없음, AVOID ≤ 2)
+   * @param policy 합성 국면의 정책 표 한도(M6). null 이면 기존 규칙(LONG 상한 = pick-max, 확신 상한 없음)
    */
   public Result validate(AdviceResponse response, List<CandidateRow> candidates, SectorContext sectors, Map<String, MarketTrendCode> trends,
       NewsBlock news, MarketRegime.Policy policy) {
@@ -150,7 +152,8 @@ public final class AdviceGuard {
   }
 
   /**
-   * 판단 종류별 픽 개수 범위(M7). DAILY·ADHOC 은 advisor.pick-min/max, H20 은 advisor.h20.pick-min/max.
+   * 판단 종류별 픽 개수 범위(M7). DAILY·ADHOC 은 advisor.pick-min/max, H20 은 advisor.h20.pick-min/max. 가드는 max(전체 상한)만 쓴다 — min 은 매수 전용
+   * 판단(2026-09-27)부터 "스크리닝 후보 수 최소"(AdviseJob) 의미뿐이다.
    */
   public record PickBounds(int min, int max) {
 
@@ -161,7 +164,7 @@ public final class AdviceGuard {
   }
 
   /**
-   * @param bounds 픽 개수 범위 — 전체 상한 절단과 tooFewPicks 기록에 쓴다(정책 LONG 상한은 policy 가 이미 같은 범위로 계산돼 있어야 한다)
+   * @param bounds 픽 개수 범위 — 전체 상한 절단에 쓴다(정책 LONG 상한은 policy 가 이미 같은 상한으로 계산돼 있어야 한다)
    */
   public Result validate(AdviceResponse response, List<CandidateRow> candidates, SectorContext sectors, Map<String, MarketTrendCode> trends,
       NewsBlock news, MarketRegime.Policy policy, PickBounds bounds) {
@@ -225,8 +228,7 @@ public final class AdviceGuard {
           removed++;
           continue;
         }
-        PickDirection direction = enumOr(PickDirection.class, p.direction(), null, stats, "badDirection");
-        if (direction == null) {
+        if (!longOnly(p.direction(), stats)) {
           removed++;
           continue;
         }
@@ -237,13 +239,11 @@ public final class AdviceGuard {
           continue;
         }
         double conviction = conviction(p.conviction(), stats, "clampedConviction");
-        if (direction == PickDirection.LONG) {
-          conviction = capBySector(conviction, candidate, overheatedSectors, stats);
-          conviction = policyCounter.capConviction(conviction);
-        }
+        conviction = capBySector(conviction, candidate, overheatedSectors, stats);
+        conviction = policyCounter.capConviction(conviction);
         picks.add(PickRow.builder()
             .ticker(p.ticker())
-            .direction(direction)
+            .direction(PickDirection.LONG)
             .conviction(conviction)
             .thesis(sanitize(p.thesis(), THESIS_LIMIT, stats))
             .riskNote(sanitize(p.risk(), RISK_LIMIT, stats))
@@ -251,15 +251,6 @@ public final class AdviceGuard {
             .citedNews(checkCitedNews(p.citedNews(), p.ticker(), newsTickers, stats))
             .build());
       }
-    }
-    // AVOID 상한 (정책 표가 있으면 그 값 — 약세장 4)
-    int avoidMax = policy == null ? MAX_AVOID : policy.avoidMax();
-    List<PickRow> avoids = picks.stream().filter(p -> p.direction() == PickDirection.AVOID).toList();
-    if (avoids.size() > avoidMax) {
-      List<PickRow> drop = avoids.stream().sorted((a, b) -> Double.compare(a.conviction(), b.conviction())).limit(avoids.size() - avoidMax).toList();
-      picks.removeAll(drop);
-      removed += drop.size();
-      stats.put("truncatedAvoid", drop.size());
     }
     // 확신 내림차순, 정책 LONG 상한(확신 낮은 LONG 부터 제거), 전체 상한
     picks.sort((a, b) -> Double.compare(b.conviction(), a.conviction()));
@@ -272,8 +263,8 @@ public final class AdviceGuard {
     for (int i = 0; i < picks.size(); i++) {
       ranked.add(picks.get(i).toBuilder().pickRank(i + 1).build());
     }
-    if (ranked.size() < bounds.min()) {
-      stats.put("tooFewPicks", ranked.size());
+    if (ranked.isEmpty()) {
+      stats.put("abstain", true);
     }
     stats.put("originalPicks", original);
     stats.put("removed", removed);
@@ -306,7 +297,7 @@ public final class AdviceGuard {
       return policy.convictionCap();
     }
 
-    /** 확신 내림차순으로 정렬된 픽에서 LONG 을 정책 상한까지만 남긴다(AVOID 는 그대로) */
+    /** 확신 내림차순으로 정렬된 픽에서 LONG 을 정책 상한까지만 남긴다 */
     List<PickRow> limitLongs(List<PickRow> sorted) {
       if (policy == null) {
         return sorted;
@@ -329,7 +320,6 @@ public final class AdviceGuard {
       m.put("version", policy.version());
       m.put("longMax", policy.longMax());
       m.put("convictionCap", policy.convictionCap());
-      m.put("avoidMax", policy.avoidMax());
       m.put("cappedConviction", cappedConviction);
       m.put("truncatedLong", truncatedLong);
       return m;
@@ -340,7 +330,6 @@ public final class AdviceGuard {
    * advice-v6 섹터 규칙의 기계 클램프: 후보의 secCons 가 0(소속 업종 지수가 1주·1개월·3개월 중 하나라도 시장에 미달) 이거나 소속 섹터가 overheated 면
    * LONG 확신을 advisor.advise.non-consistent-conviction-cap 으로 내린다 — 제거가 아니라 클램프라 픽 제거율에 넣지 않는다. 실제로 내려간 경우만
    * capNonConsistent·capOverheated 를 세어 프롬프트 규칙 11 의 준수율을 관찰한다. secCons null(업종 지수 없음·창 부족)은 클램프하지 않는다.
-   * AVOID 는 대상이 아니다 — 지속 미충족·과열은 매수 위험이지 회피의 근거를 약하게 하는 요인이 아니다.
    */
   private double capBySector(double conviction, CandidateRow candidate, Set<String> overheatedSectors, Map<String, Object> stats) {
     double cap = properties.getAdvise().getNonConsistentConvictionCap();
@@ -458,6 +447,22 @@ public final class AdviceGuard {
       }
     }
     return kept;
+  }
+
+  /**
+   * 매수 전용 판정(advice-v9·morning-v2 공용): direction 이 없거나(스키마 정상) LONG 이면 true. AVOID 는 avoidRemoved, 그 밖 값은 badDirection 으로
+   * 세고 false — 호출자가 픽을 버린다. AVOID 를 LONG 으로 바꿔 살리지 않는 이유: 모델이 "피하라" 고 한 종목을 매수로 저장하면 뜻이 뒤집힌다.
+   */
+  static boolean longOnly(String direction, Map<String, Object> stats) {
+    if (direction == null || direction.isBlank()) {
+      return true;
+    }
+    String code = direction.trim().toUpperCase();
+    if (PickDirection.LONG.getCode().equals(code)) {
+      return true;
+    }
+    increment(stats, PickDirection.AVOID.getCode().equals(code) ? "avoidRemoved" : "badDirection");
+    return false;
   }
 
   /**

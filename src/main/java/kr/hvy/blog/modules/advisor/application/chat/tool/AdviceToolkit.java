@@ -70,7 +70,8 @@ public class AdviceToolkit {
   static final String KIND_CODES = Arrays.stream(AdviceKind.values()).map(AdviceKind::getCode).collect(Collectors.joining("|"));
 
   @Tool(name = "latestAdvice", description = "봇이 발행한 판단(LIVE): 시장 국면(RISK_ON/NEUTRAL/RISK_OFF)과 KOSPI·KOSDAQ 방향·확신, 근거, 추세 라벨과 지속 전망, 주도 섹터, "
-      + "적용 구간(진입·청산일), 규칙 합성 국면(ruleRegime: 추세×변동성·정책 표 한도·테마 강약), 종목 픽(순위·코드·이름·LONG/AVOID·확신·thesis 근거·risk 리스크). kind 로 종류를 고른다: DAILY(19:30 일일, 기본)·MORNING(아침 재판정)·"
+      + "적용 구간(진입·청산일), 규칙 합성 국면(ruleRegime: 추세×변동성·정책 표 한도·테마 강약), 종목 픽(순위·코드·이름·확신·thesis 근거·risk 리스크 — 2026-09-27 부터 매수 추천만, 픽이 비면 그날은 관망이며 summary 가 이유다. "
+      + "그 전 판단에는 direction=AVOID(회피) 픽이 남아 있을 수 있다). kind 로 종류를 고른다: DAILY(19:30 일일, 기본)·MORNING(아침 재판정)·"
       + "H20/H60/H180(장기 호라이즌)·ADHOC(채팅 요청 수시 판단). baseDate 를 주면 그날 또는 그 이전 마지막 판단. "
       + "'오늘 판단 근거 설명해줘', '왜 이 종목을 골랐어', '아직 유효해?' 에 쓰고 thesis·risk 원문을 인용한다(새로 짓지 않는다). 해당 종류가 없으면 no_data 다.")
   public Map<String, Object> latestAdvice(@ToolParam(required = false, description = "판단 기준일 yyyy-MM-dd. 생략하면 가장 최근") String baseDate,

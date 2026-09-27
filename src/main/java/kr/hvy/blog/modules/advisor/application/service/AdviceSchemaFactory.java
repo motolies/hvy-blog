@@ -7,7 +7,6 @@ import java.util.Map;
 import kr.hvy.blog.modules.advisor.domain.code.DirectionCall;
 import kr.hvy.blog.modules.advisor.domain.code.InvalidationType;
 import kr.hvy.blog.modules.advisor.domain.code.MarketRegimeCode;
-import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.code.TrendHorizon;
 import kr.hvy.common.core.code.base.EnumCode;
 
@@ -15,6 +14,9 @@ import kr.hvy.common.core.code.base.EnumCode;
  * 판단 출력 JSON 스키마(OpenAI strict). 그날의 후보 티커·섹터 코드를 enum 으로 주입해 환각을 API 계층에서 막는다.
  * <p>
  * strict 규칙: 모든 객체는 additionalProperties=false, 모든 속성이 required. 이산 확신값은 문자열 enum 으로 받아 가드가 double 로 바꾼다.
+ * <p>
+ * 매수 전용(advice-v9·advice-h20-v2, 2026-09-27): 픽에 direction 이 없다 — 모든 픽은 매수(LONG)이고 가드가 LONG 으로 저장한다. picks 에 minItems 를 두지 않아
+ * 빈 배열(관망)이 스키마상 정상이다. v8 까지는 LONG|AVOID 였고 "picks 5~10개" 가 AVOID 로 개수를 채우게 만들었다.
  */
 public final class AdviceSchemaFactory {
 
@@ -36,7 +38,6 @@ public final class AdviceSchemaFactory {
   public static Map<String, Object> schema(List<String> candidateTickers, List<String> sectorCodes, List<String> newsIds) {
     Map<String, Object> pick = object(Map.of(
         "ticker", enumOf(candidateTickers),
-        "direction", enumOf(List.of(PickDirection.LONG.getCode(), PickDirection.AVOID.getCode())),
         "conviction", enumOf(CONVICTIONS),
         "thesis", string(),
         "risk", string(),

@@ -12,7 +12,7 @@ public record MorningAdviceResponse(List<Decision> decisions, List<Addition> add
   public record Decision(String ticker, String action, String reason) {
   }
 
-  /** 저녁 후보 중 새로 올릴 픽 1개 */
+  /** 저녁 후보 중 새로 올릴 매수 픽 1개. direction 은 morning-v2 스키마에 없어 보통 null — AVOID 가 오면 가드가 제거·기록한다(방어용 필드) */
   public record Addition(String ticker, String direction, String conviction, String thesis, String risk, String reason) {
   }
 }

@@ -45,12 +45,15 @@ public record MarketRegime(
   /**
    * 사전 등록 정책 표의 한도(advisor.regime.policy). 수치를 바꾸면 version 을 올린다 — 판단마다 regime_json 에 버전과 함께 남아 사후 분리가 된다.
    *
-   * @param version       정책 표 버전 (예: regime-policy-v1)
-   * @param longMax       LONG 픽 상한 (pick-min 이상)
+   * <p>
+   * regime-policy-v2(2026-09-27, 매수 전용)에서 avoidMax 를 뺐다. v1 시절 regime_json 에 남은 avoidMax 키는 역직렬화 때 무시된다
+   * (Jackson 3 기본 FAIL_ON_UNKNOWN_PROPERTIES=false — MarketRegimeTest 가 고정).
+   *
+   * @param version       정책 표 버전 (예: regime-policy-v2)
+   * @param longMax       LONG 픽 상한 (1 이상)
    * @param convictionCap LONG 확신 상한 (허용 이산값으로 내림, null 이면 상한 없음)
-   * @param avoidMax      AVOID 픽 상한
    */
-  public record Policy(String version, int longMax, Double convictionCap, int avoidMax) {
+  public record Policy(String version, int longMax, Double convictionCap) {
   }
 
   /**

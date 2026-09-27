@@ -16,7 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
 /**
- * 아침 재판정 가드: KEEP/DROP 은 저녁 픽에만, ADD 는 저녁 후보 안·저녁 픽 밖만, 결정 누락은 KEEP 보충, 하한 미달은 DROP 되돌림, 상한·AVOID 초과는 ADD 부터 제거.
+ * 아침 재판정 가드: KEEP/DROP 은 저녁 픽에만, ADD 는 저녁 후보 안·저녁 픽 밖만(매수 전용 — AVOID ADD 는 제거), 결정 누락은 KEEP 보충, 하한 없음(전부 DROP 허용),
+ * 상한 초과는 ADD 부터 제거, 저녁 관망(0픽)이어도 ADD 가능.
  */
 class MorningAdviceGuardTest {
 
@@ -73,32 +74,59 @@ class MorningAdviceGuardTest {
   }
 
   @Test
-  @DisplayName("결정이 빠진 저녁 픽은 KEEP 으로 보충되고, 픽 하한(3) 미달이면 DROP 을 저녁 순위대로 되돌린다")
-  void missingDecisionAndMinimum() {
+  @DisplayName("결정이 빠진 저녁 픽은 KEEP 으로 보충되고, 하한이 없어 DROP 을 되돌리지 않는다(morning-v2)")
+  void missingDecisionAndNoMinimum() {
     MorningAdviceResponse response = new MorningAdviceResponse(
         List.of(decision("000001", "DROP", "x"), decision("000002", "DROP", "y"), decision("000003", "DROP", "z")), List.of(), "s");
 
     MorningAdviceGuard.Result r = guard.validate(response, evening, candidates);
 
-    assertThat(r.stats()).containsEntry("missingDecision", 1).containsEntry("dropReverted", 2);
-    assertThat(r.picks()).hasSize(3);
-    assertThat(r.kept()).extracting(PickRow::ticker).containsExactlyInAnyOrder("000004", "000001", "000002");
-    assertThat(r.drops()).extracting(d -> d.evening().ticker()).containsExactly("000003");
-    assertThat(r.kept().stream().filter(p -> p.ticker().equals("000004")).findFirst().orElseThrow().actionReason())
-        .isEqualTo(MorningAdviceGuard.MISSING_DECISION_REASON);
+    assertThat(r.stats()).containsEntry("missingDecision", 1).doesNotContainKey("dropReverted");
+    assertThat(r.kept()).extracting(PickRow::ticker).containsExactly("000004");
+    assertThat(r.kept().getFirst().actionReason()).isEqualTo(MorningAdviceGuard.MISSING_DECISION_REASON);
+    assertThat(r.drops()).extracting(d -> d.evening().ticker()).containsExactly("000001", "000002", "000003");
   }
 
   @Test
-  @DisplayName("AVOID 는 KEEP 과 합쳐 2개, 전체는 pick-max 까지 — 넘치면 확신 낮은 ADD 부터 뺀다")
-  void capsTrimAddsFirst() {
+  @DisplayName("전부 DROP 이면 최종 0픽(관망)도 그대로 통과한다")
+  void allDropIsAbstain() {
+    MorningAdviceResponse response = new MorningAdviceResponse(
+        List.of(decision("000001", "DROP", "a"), decision("000002", "DROP", "b"), decision("000003", "DROP", "c"), decision("000004", "DROP", "d")),
+        List.of(), "밤사이 SOX −4% 로 전부 제외");
+
+    MorningAdviceGuard.Result r = guard.validate(response, evening, candidates);
+
+    assertThat(r.picks()).isEmpty();
+    assertThat(r.drops()).hasSize(4);
+    assertThat(r.violations()).isEmpty();
+    assertThat(r.stats()).containsEntry("keep", 0).containsEntry("add", 0).containsEntry("drop", 4);
+  }
+
+  @Test
+  @DisplayName("저녁이 관망(0픽)이어도 저녁 후보 안에서 ADD 할 수 있다 — 추가는 LONG 으로 저장된다")
+  void eveningAbstainAllowsAdd() {
+    MorningAdviceResponse response = new MorningAdviceResponse(List.of(), List.of(addition("000005", null, "0.60", "SOX +3%")), "s");
+
+    MorningAdviceGuard.Result r = guard.validate(response, List.of(), candidates);
+
+    assertThat(r.added()).extracting(PickRow::ticker).containsExactly("000005");
+    assertThat(r.added().getFirst().direction()).isEqualTo(PickDirection.LONG);
+    assertThat(r.added().getFirst().pickRank()).isEqualTo(1);
+    assertThat(r.kept()).isEmpty();
+    assertThat(r.drops()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("매수 전용: AVOID ADD 는 제거·avoidRemoved 위반으로 남고, 전체는 pick-max 까지 — 넘치면 확신 낮은 ADD 부터 뺀다")
+  void removesAvoidAddsAndTrimsAddsFirst() {
     properties.setPickMax(5);
     MorningAdviceResponse response = new MorningAdviceResponse(List.of(),
-        List.of(addition("000005", "AVOID", "0.60", "a1"), addition("000006", "AVOID", "0.55", "a2")), "s");
-    List<CandidateRow> more = new java.util.ArrayList<>(candidates);
-    MorningAdviceGuard.Result r = guard.validate(response, evening, more);
+        List.of(addition("000005", "AVOID", "0.60", "a1"), addition("000006", "LONG", "0.55", "a2")), "s");
+    MorningAdviceGuard.Result r = guard.validate(response, evening, candidates);
 
-    assertThat(r.stats()).containsEntry("truncatedAvoid", 1);
-    assertThat(r.added()).extracting(PickRow::ticker).containsExactly("000005");
+    assertThat(r.stats()).containsEntry("avoidRemoved", 1).doesNotContainKey("truncatedAvoid");
+    assertThat(r.violations()).contains(Map.of("ticker", "000005", "rule", "avoidRemoved"));
+    assertThat(r.added()).extracting(PickRow::ticker).containsExactly("000006");
     assertThat(r.picks()).hasSize(5);
 
     properties.setPickMax(4);
@@ -120,7 +148,7 @@ class MorningAdviceGuardTest {
   @Test
   @DisplayName("M6: 저녁 정책 한도를 그대로 적용 — ADD LONG 확신은 상한으로 내리고, LONG 상한 초과는 확신 낮은 ADD 부터 제거, KEEP 은 건드리지 않는다")
   void appliesEveningPolicy() {
-    MarketRegime.Policy policy = new MarketRegime.Policy("regime-policy-v1", 4, 0.65, 2);
+    MarketRegime.Policy policy = new MarketRegime.Policy("regime-policy-v2", 4, 0.65);
     MorningAdviceResponse response = new MorningAdviceResponse(
         List.of(decision("000001", "KEEP", "a"), decision("000002", "KEEP", "b"), decision("000003", "KEEP", "c"), decision("000004", "KEEP", "d")),
         List.of(addition("000005", "LONG", "0.80", "e"), addition("000006", "LONG", "0.60", "f")), null);
@@ -131,7 +159,7 @@ class MorningAdviceGuardTest {
     assertThat(r.added().getFirst().conviction()).isEqualTo(0.65);
     assertThat(r.kept()).filteredOn(p -> p.ticker().equals("000001")).extracting(PickRow::conviction).as("저녁이 이미 통과시킨 KEEP").containsExactly(0.80);
     assertThat(r.picks().stream().filter(p -> p.direction() == PickDirection.LONG).count()).isEqualTo(4);
-    assertThat(r.stats()).containsEntry("policyCappedConviction", 1).containsEntry("policyTruncatedLong", 1).containsEntry("policyVersion", "regime-policy-v1");
+    assertThat(r.stats()).containsEntry("policyCappedConviction", 1).containsEntry("policyTruncatedLong", 1).containsEntry("policyVersion", "regime-policy-v2");
     assertThat(r.violations()).contains(Map.of("ticker", "000006", "rule", "policyTruncatedLong"));
 
     MorningAdviceGuard.Result legacy = guard.validate(response, evening, candidates);

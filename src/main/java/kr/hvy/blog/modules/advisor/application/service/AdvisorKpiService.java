@@ -32,9 +32,20 @@ public class AdvisorKpiService {
 
   /**
    * 변형 1개의 요약. verdictLabel(M8)은 판정 불가 종류(H60·H180)일 때만 {@link #UNJUDGEABLE_LABEL}, 그 밖은 null — 컴포넌트는 맨 뒤에 추가했다.
+   * <p>
+   * 매수 전용(2026-09-27): poolMeanExcess 는 LONG 픽이 있는 판단의 후보군만 — 픽과 같은 날끼리 비교해야 부가가치(valueAdd)가 선택의 가치다.
+   * 관망 판단(LONG 픽 0개)은 abstainDays(채점된 관망 판단 수)와 abstainPoolMeanExcess(그날들의 후보군 평균)로 따로 본다 — 음수면 관망이 맞았다.
+   * avoidMeanExcess·avoidPicks 는 v9 이전 AVOID 행용으로 남긴다. 컴포넌트는 맨 뒤에 추가했다.
    */
   public record VariantSummary(AdviceVariant variant, int advices, int picks, Double hitRate, Double meanExcess, Double seExcess, Double meanCostAdj,
-                               Double poolMeanExcess, Double valueAdd, Double avoidMeanExcess, int avoidPicks, String verdictLabel) {
+                               Double poolMeanExcess, Double valueAdd, Double avoidMeanExcess, int avoidPicks, String verdictLabel, int abstainDays,
+                               Double abstainPoolMeanExcess) {
+
+    /** 관망 지표 이전 모양 — 기존 호출·테스트 호환용 */
+    public VariantSummary(AdviceVariant variant, int advices, int picks, Double hitRate, Double meanExcess, Double seExcess, Double meanCostAdj,
+        Double poolMeanExcess, Double valueAdd, Double avoidMeanExcess, int avoidPicks, String verdictLabel) {
+      this(variant, advices, picks, hitRate, meanExcess, seExcess, meanCostAdj, poolMeanExcess, valueAdd, avoidMeanExcess, avoidPicks, verdictLabel, 0, null);
+    }
 
     /** M8 이전 모양(라벨 없음) — 기존 호출·테스트 호환용 */
     public VariantSummary(AdviceVariant variant, int advices, int picks, Double hitRate, Double meanExcess, Double seExcess, Double meanCostAdj,
@@ -84,7 +95,8 @@ public class AdvisorKpiService {
   }
 
   /**
-   * 변형별 픽 KPI: 승률(초과수익>0), 평균 초과수익 ± se, 비용 차감 평균, 후보군 평균, 부가가치(픽 − 후보군). kind·h 의 채점 행만 센다.
+   * 변형별 픽 KPI: 승률(초과수익>0), 평균 초과수익 ± se, 비용 차감 평균, 후보군 평균(LONG 픽이 있는 판단만), 부가가치(픽 − 후보군), 관망 판단 수·그날 후보군 평균.
+   * kind·h 의 채점 행만 센다.
    */
   public VariantSummary variantSummary(AdviceVariant variant, LocalDate from, LocalDate to, AdviceKind kind, int horizonDays) {
     Map<String, Object> p = params(from, to, kind, horizonDays);
@@ -107,10 +119,14 @@ public class AdvisorKpiService {
         WHERE a.advice_kind = :kind AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND pk.direction = 'AVOID' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         """, p);
+    // 후보군은 LONG 픽이 있는 판단(picked)과 관망 판단(abstain)으로 나눈다 — 관망일 후보군이 부가가치의 기준선에 섞이면 픽이 없던 날의 시장이 비교를 흔든다
     Map<String, Object> pool = jdbc.queryForMap("""
-        SELECT AVG(s.excess_ret) AS mean_excess
+        SELECT AVG(s.excess_ret) FILTER (WHERE x.picked) AS mean_excess,
+               COUNT(DISTINCT a.advice_id) FILTER (WHERE NOT x.picked) AS abstain_days,
+               AVG(s.excess_ret) FILTER (WHERE NOT x.picked) AS abstain_mean_excess
         FROM tb_advisor_candidate_score s
                  JOIN tb_advisor_advice a ON a.advice_id = s.advice_id
+                 CROSS JOIN LATERAL (SELECT EXISTS (SELECT 1 FROM tb_advisor_pick pk WHERE pk.advice_id = a.advice_id AND pk.direction = 'LONG') AS picked) x
         WHERE a.advice_kind = :kind AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND s.horizon_days = :h AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         """, p);
@@ -121,7 +137,7 @@ public class AdvisorKpiService {
     Double poolMean = d(pool.get("mean_excess"));
     return new VariantSummary(variant, ((Number) pick.get("advices")).intValue(), n, d(pick.get("hit_rate")), mean, se, d(pick.get("mean_cost_adj")),
         poolMean, mean == null || poolMean == null ? null : mean - poolMean, d(avoid.get("mean_excess")), ((Number) avoid.get("n")).intValue(),
-        verdictLabel(kind));
+        verdictLabel(kind), ((Number) pool.get("abstain_days")).intValue(), d(pool.get("abstain_mean_excess")));
   }
 
   /**
@@ -223,7 +239,10 @@ public class AdvisorKpiService {
    * 날짜들의 평균·se(표본 표준편차/√n)·t 를 낸다. 두 판단이 같은 창·같은 후보군이라 후보군 평균이 소거되어 차이가 곧 밤사이 정보의 가치다.
    * <p>
    * 짝의 단위가 픽이 아니라 날짜인 이유: 같은 날 픽들은 같은 시장 충격을 공유해 독립이 아니다 — 픽 단위 se 는 과소추정된다.
-   * 어느 한쪽에 채점된 LONG 픽이 없는 날(아침이 LONG 을 전부 뺐거나 미채점)은 짝이 성립하지 않아 빠진다. data_quality=OK 인 저녁만 센다.
+   * <p>
+   * 매수 전용(2026-09-27): 한쪽만 관망(LONG 픽 0개 — 아침이 전부 DROP 했거나 저녁이 관망하고 아침이 ADD)이면 관망 쪽 초과수익을 0(현금)으로 두고 짝을 세운다 —
+   * "빼거나 더한 결정" 의 가치가 곧 그 차이다. 양쪽 다 관망인 날, LONG 픽이 있는데 아직 채점되지 않은 쪽이 있는 날은 빠진다. data_quality=OK 인 저녁만 센다.
+   * 현금 0 은 시장 대비 초과가 아니라 "포지션 없음" 의 근사다(엄밀히는 −시장 수익률) — 사전 등록 판정도 이 정의로 읽는다.
    */
   public MorningVsDaily morningVsDaily(LocalDate from, LocalDate to) {
     List<MorningPair> pairs = jdbc.query("""
@@ -235,15 +254,26 @@ public class AdvisorKpiService {
             WHERE a.advice_kind IN ('DAILY', 'MORNING') AND a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to
               AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
             GROUP BY pk.advice_id
+        ),
+        side AS (
+            SELECT a.advice_id, EXISTS (SELECT 1 FROM tb_advisor_pick pk WHERE pk.advice_id = a.advice_id AND pk.direction = 'LONG') AS has_long
+            FROM tb_advisor_advice a
+            WHERE a.advice_kind IN ('DAILY', 'MORNING') AND a.variant = 'LIVE' AND a.base_date BETWEEN :from AND :to
         )
-        SELECT m.base_date, pd.mean_excess AS daily_mean, pm.mean_excess AS morning_mean, pd.n AS daily_n, pm.n AS morning_n,
+        SELECT m.base_date, COALESCE(pd.mean_excess, 0) AS daily_mean, COALESCE(pm.mean_excess, 0) AS morning_mean,
+               COALESCE(pd.n, 0) AS daily_n, COALESCE(pm.n, 0) AS morning_n,
                COALESCE((m.diff_json -> 'triggers' ->> 'any')::boolean, FALSE) AS triggered
         FROM tb_advisor_advice m
                  JOIN tb_advisor_advice d ON d.advice_id = m.parent_advice_id
-                 JOIN pick pm ON pm.advice_id = m.advice_id
-                 JOIN pick pd ON pd.advice_id = d.advice_id
+                 JOIN side sm ON sm.advice_id = m.advice_id
+                 JOIN side sd ON sd.advice_id = d.advice_id
+                 LEFT JOIN pick pm ON pm.advice_id = m.advice_id
+                 LEFT JOIN pick pd ON pd.advice_id = d.advice_id
         WHERE m.advice_kind = 'MORNING' AND m.variant = 'LIVE' AND d.advice_kind = 'DAILY' AND d.variant = 'LIVE'
           AND m.base_date BETWEEN :from AND :to AND d.data_quality = 'OK'
+          AND (sm.has_long OR sd.has_long)
+          AND (pm.advice_id IS NOT NULL OR NOT sm.has_long)
+          AND (pd.advice_id IS NOT NULL OR NOT sd.has_long)
         ORDER BY m.base_date
         """, params(from, to), (rs, i) -> new MorningPair(rs.getObject("base_date", LocalDate.class), rs.getDouble("daily_mean"), rs.getDouble("morning_mean"),
         rs.getInt("daily_n"), rs.getInt("morning_n"), rs.getBoolean("triggered")));

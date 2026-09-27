@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
 /**
- * 가드 규칙을 고정한다: 후보 밖·중복·근거 위조 제거, 확신 이산화, AVOID 상한, 픽 상한·하한, 인젝션 문자 제거, 추세 전망 폴백·모순 강등,
+ * 가드 규칙을 고정한다: 후보 밖·중복·근거 위조 제거, 확신 이산화, 매수 전용(AVOID 제거·0픽 관망 허용), 픽 상한, 인젝션 문자 제거, 추세 전망 폴백·모순 강등,
  * advice-v6 섹터 맥락(주도 섹터 consistent 전달·secCons=0/overheated LONG 확신 클램프).
  */
 class AdviceGuardTest {
@@ -72,7 +72,8 @@ class AdviceGuardTest {
     assertThat(result.regime()).isEqualTo(MarketRegimeCode.RISK_ON);
     assertThat(result.kospiDir()).isEqualTo(DirectionCall.UP);
     assertThat(result.pUp()).isEqualTo(0.70);
-    assertThat(result.tooFew(properties.getPickMin())).isTrue();
+    assertThat(result.abstained()).isFalse();
+    assertThat(result.stats()).doesNotContainKeys("tooFewPicks", "abstain");
     assertThat(result.outlooks()).extracting(TrendOutlook::indexCode).containsExactly("0001", "1001");
     assertThat(result.outlooks().getFirst()).isEqualTo(new TrendOutlook("0001", TrendHorizon.BEYOND_20D, 0.70, InvalidationType.BELOW_MA20));
     assertThat(result.outlooks().get(1)).as("약세장의 상향 돌파 조건은 방향이 맞다")
@@ -80,60 +81,88 @@ class AdviceGuardTest {
   }
 
   @Test
-  @DisplayName("확신값은 허용 목록 밖이면 가장 가까운 값으로, 픽은 확신 내림차순 최대 10개, AVOID 는 2개까지")
+  @DisplayName("확신값은 허용 목록 밖이면 가장 가까운 값으로, 픽은 확신 내림차순 최대 10개 — 스키마에 direction 이 없어도(null) 전부 LONG 으로 저장")
   void clampsAndTruncates() {
     List<CandidateRow> candidates = new java.util.ArrayList<>();
     List<AdviceResponse.Pick> picks = new java.util.ArrayList<>();
     for (int i = 0; i < 14; i++) {
       String ticker = String.format("%06d", i);
       candidates.add(candidate(ticker, 0.01 * i));
-      String direction = i < 4 ? "AVOID" : "LONG";
-      picks.add(pick(ticker, direction, i == 0 ? "0.93" : String.format("%.2f", 0.55 + 0.02 * i), List.of()));
+      picks.add(pick(ticker, null, i == 0 ? "0.93" : String.format("%.2f", 0.55 + 0.02 * i), List.of()));
     }
     AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("neutral", "down", "up", "0.5", null), outlook, List.of(), picks, "요약");
 
     AdviceGuard.Result result = guard.validate(response, candidates, sectors, trends);
 
-    assertThat(result.picks()).hasSize(10);
-    assertThat(result.picks().stream().filter(p -> p.direction() == PickDirection.AVOID).count()).isLessThanOrEqualTo(2);
+    assertThat(result.picks()).hasSize(10).allMatch(p -> p.direction() == PickDirection.LONG);
     for (int i = 1; i < result.picks().size(); i++) {
       assertThat(result.picks().get(i).conviction()).isLessThanOrEqualTo(result.picks().get(i - 1).conviction());
       assertThat(result.picks().get(i).pickRank()).isEqualTo(i + 1);
     }
     assertThat(result.picks()).allMatch(p -> AdviceSchemaFactory.CONVICTIONS.contains(String.format("%.2f", p.conviction())));
-    assertThat(result.stats()).containsKey("truncated").containsEntry("truncatedAvoid", 2);
+    assertThat(result.stats()).containsEntry("truncated", 4).doesNotContainKey("truncatedAvoid");
     assertThat(result.regime()).isEqualTo(MarketRegimeCode.NEUTRAL);
     assertThat(result.kospiDir()).isEqualTo(DirectionCall.DOWN);
     assertThat(result.pUp()).as("0.5 → 가장 가까운 0.55").isEqualTo(0.55);
     assertThat(result.stats()).containsKey("clampedPUp");
-    assertThat(result.tooFew(properties.getPickMin())).isFalse();
+    assertThat(result.removed()).as("상한 절단은 제거율에 넣지 않는다").isZero();
+  }
+
+  @Test
+  @DisplayName("매수 전용: 0픽은 관망 — 실패가 아니라 정상 결과(abstain), 제거율 0")
+  void zeroPicksIsAbstain() {
+    AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("RISK_OFF", "DOWN", "DOWN", "0.65", "약세"), outlook, List.of(), List.of(),
+        "확신 있는 매수 근거가 없어 관망합니다.");
+
+    AdviceGuard.Result result = guard.validate(response, List.of(candidate("005930", 0.01)), sectors, trends);
+
+    assertThat(result.picks()).isEmpty();
+    assertThat(result.abstained()).isTrue();
+    assertThat(result.removed()).isZero();
+    assertThat(result.removalRatio()).isZero();
+    assertThat(result.stats()).containsEntry("abstain", true).containsEntry("originalPicks", 0).doesNotContainKey("tooFewPicks");
+    assertThat(result.summary()).isEqualTo("확신 있는 매수 근거가 없어 관망합니다.");
+  }
+
+  @Test
+  @DisplayName("매수 전용 방어: 스키마 밖 AVOID 는 제거·avoidRemoved 로 기록(LONG 으로 뒤집지 않음), 대소문자 무관 LONG 은 통과")
+  void removesAvoidPicks() {
+    List<CandidateRow> candidates = List.of(candidate("000001", 0.01), candidate("000002", 0.01), candidate("000003", 0.01));
+    AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("NEUTRAL", "UP", "UP", "0.60", ""), outlook, List.of(),
+        List.of(pick("000001", "AVOID", "0.80", List.of()), pick("000002", "long", "0.70", List.of()), pick("000003", null, "0.60", List.of())), "");
+
+    AdviceGuard.Result result = guard.validate(response, candidates, sectors, trends);
+
+    assertThat(result.picks()).extracting(PickRow::ticker).containsExactly("000002", "000003");
+    assertThat(result.picks()).allMatch(p -> p.direction() == PickDirection.LONG);
+    assertThat(result.stats()).containsEntry("avoidRemoved", 1).doesNotContainKey("badDirection");
+    assertThat(result.removed()).as("AVOID 는 모델 이탈 — 제거율(PARTIAL 경보)에 넣는다").isEqualTo(1);
   }
 
   @Test
   @DisplayName("advice-v6: secCons=0 후보·overheated 섹터의 LONG 픽은 확신이 0.70 으로 내려가고(제거 아님) capNonConsistent/capOverheated 에 남는다 — "
-      + "AVOID·상한 이하·secCons null 은 그대로, 주도 섹터 콜은 consistent 를 담는다")
+      + "상한 이하·secCons null 은 그대로, 주도 섹터 콜은 consistent 를 담는다")
   void capsNonConsistentAndOverheatedLongPicks() {
     List<CandidateRow> candidates = List.of(
         sectorCandidate("000001", "G2510", 0.05),   // secCons 1, 비과열 → 그대로
         sectorCandidate("000002", "G2510", -0.02),  // secCons 0 → 클램프
         sectorCandidate("000003", "G3020", 0.05),   // secCons 1 이지만 과열 섹터 → 클램프
-        sectorCandidate("000004", "G2510", -0.02),  // secCons 0 이지만 AVOID → 대상 아님
         sectorCandidate("000005", "G2510", -0.02),  // secCons 0 이지만 0.65 ≤ 상한 → 통계도 남지 않음
         sectorCandidate("000006", "G2510", null));  // secRs60 없음 → secCons null → 그대로
     AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("RISK_ON", "UP", "UP", "0.60", ""), outlook,
         List.of(new AdviceResponse.SectorView("G2510", "지속"), new AdviceResponse.SectorView("G3020", "3구간 초과 미충족")),
         List.of(pick("000001", "LONG", "0.85", List.of()), pick("000002", "LONG", "0.85", List.of()), pick("000003", "LONG", "0.80", List.of()),
-            pick("000004", "AVOID", "0.85", List.of()), pick("000005", "LONG", "0.65", List.of()), pick("000006", "LONG", "0.90", List.of())),
+            pick("000005", "LONG", "0.65", List.of()), pick("000006", "LONG", "0.90", List.of())),
         "");
 
     AdviceGuard.Result result = guard.validate(response, candidates, sectors, trends);
 
     assertThat(result.removed()).isZero();
-    assertThat(result.picks()).hasSize(6);
+    assertThat(result.picks()).hasSize(5);
     Map<String, Double> conviction = new HashMap<>();
     result.picks().forEach(p -> conviction.put(p.ticker(), p.conviction()));
     assertThat(conviction).containsEntry("000001", 0.85).containsEntry("000002", 0.70).containsEntry("000003", 0.70)
-        .containsEntry("000004", 0.85).containsEntry("000005", 0.65).containsEntry("000006", 0.90);
+        .containsEntry("000005", 0.65).containsEntry("000006", 0.90);
     assertThat(result.stats()).containsEntry("capNonConsistent", 1).containsEntry("capOverheated", 1).doesNotContainKey("clampedConviction");
     assertThat(result.picks().getFirst().ticker()).as("클램프 뒤 확신 내림차순으로 순위가 매겨진다").isEqualTo("000006");
     assertThat(result.sectors()).extracting(SectorCall::code, SectorCall::consistent)
@@ -219,44 +248,38 @@ class AdviceGuardTest {
   }
 
   @Test
-  @DisplayName("M6 BEAR·HIGH 정책(LONG≤8·확신≤0.65·AVOID≤4): 초과 확신은 클램프, AVOID 는 4개까지, 초과 LONG 은 확신 낮은 순 제거 — guard_json.policy 에 남고 제거율엔 안 들어간다")
+  @DisplayName("M6 BEAR·HIGH 정책 v2(LONG≤8·확신≤0.65): 초과 확신은 클램프, 초과 LONG 은 확신 낮은 순 제거 — guard_json.policy 에 남고 제거율엔 안 들어간다")
   void bearHighPolicyClampsAndTruncates() {
     MarketRegime.Policy policy = new RegimePolicy(properties).limits(MarketTrendCode.BEAR, VolRegimeCode.HIGH);
-    assertThat(policy).isEqualTo(new MarketRegime.Policy("regime-policy-v1", 8, 0.65, 4));
+    assertThat(policy).isEqualTo(new MarketRegime.Policy("regime-policy-v2", 8, 0.65));
     List<CandidateRow> candidates = new java.util.ArrayList<>();
     List<AdviceResponse.Pick> picks = new java.util.ArrayList<>();
     for (int i = 0; i < 14; i++) {
       String ticker = String.format("%06d", i);
       candidates.add(candidate(ticker, 0.01 * i));
-      // 0~4 AVOID 0.80, 5~7 LONG 0.60, 8~10 LONG 0.75, 11~13 LONG 0.90
-      String direction = i < 5 ? "AVOID" : "LONG";
+      // 0~4 0.80, 5~7 0.60, 8~10 0.75, 11~13 0.90 — 0.60 을 뺀 11개가 0.65 로 클램프된다
       String conviction = i < 5 ? "0.80" : i < 8 ? "0.60" : i < 11 ? "0.75" : "0.90";
-      picks.add(pick(ticker, direction, conviction, List.of()));
+      picks.add(pick(ticker, null, conviction, List.of()));
     }
     AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("RISK_OFF", "DOWN", "DOWN", "0.60", ""), outlook, List.of(), picks, "");
 
     AdviceGuard.Result result = guard.validate(response, candidates, sectors, trends, null, policy);
 
-    List<PickRow> longs = result.picks().stream().filter(p -> p.direction() == PickDirection.LONG).toList();
-    List<PickRow> avoids = result.picks().stream().filter(p -> p.direction() == PickDirection.AVOID).toList();
-    assertThat(avoids).as("AVOID 상한 4(기존 2)").hasSize(4);
-    assertThat(longs).as("AVOID 0.80 ×4 가 앞, LONG 0.65(클램프) ×6 이 pick-max 10 을 채운다").hasSize(6).allMatch(p -> p.conviction() == 0.65);
-    assertThat(result.picks()).hasSize(10);
-    assertThat(longs.size()).isLessThanOrEqualTo(policy.longMax());
-    assertThat(result.stats()).containsEntry("truncatedAvoid", 1).containsEntry("truncated", 2);
+    assertThat(result.picks()).as("정책 LONG 상한 8, 전부 클램프된 0.65").hasSize(8).allMatch(p -> p.conviction() == 0.65);
+    assertThat(result.stats()).doesNotContainKeys("truncated", "truncatedAvoid");
     @SuppressWarnings("unchecked")
     Map<String, Object> applied = (Map<String, Object>) result.stats().get("policy");
-    assertThat(applied).containsEntry("version", "regime-policy-v1").containsEntry("longMax", 8).containsEntry("convictionCap", 0.65)
-        .containsEntry("avoidMax", 4).containsEntry("cappedConviction", 6).containsEntry("truncatedLong", 1);
-    assertThat(result.removed()).as("정책 개입은 제거율(PARTIAL 경보)에 넣지 않는다 — AVOID 초과 1건만").isEqualTo(1);
+    assertThat(applied).containsEntry("version", "regime-policy-v2").containsEntry("longMax", 8).containsEntry("convictionCap", 0.65)
+        .containsEntry("cappedConviction", 11).containsEntry("truncatedLong", 6).doesNotContainKey("avoidMax");
+    assertThat(result.removed()).as("정책 개입은 제거율(PARTIAL 경보)에 넣지 않는다").isZero();
   }
 
   @Test
-  @DisplayName("M6 BEAR 정책의 LONG 상한은 pick-min 을 존중한다: pick-max 4·pick-min 3 이면 LONG ≤ 3 (4−2=2 가 아니라)")
-  void bearPolicyRespectsPickMin() {
+  @DisplayName("M6 BEAR 정책 v2 의 LONG 상한 바닥은 1: pick-max 4 면 LONG ≤ 2 (v1 은 pick-min 3 을 존중했다)")
+  void bearPolicyFloorIsOne() {
     properties.setPickMax(4);
     MarketRegime.Policy policy = new RegimePolicy(properties).limits(MarketTrendCode.BEAR, VolRegimeCode.NORMAL);
-    assertThat(policy.longMax()).isEqualTo(3);
+    assertThat(policy.longMax()).isEqualTo(2);
     List<CandidateRow> candidates = new java.util.ArrayList<>();
     List<AdviceResponse.Pick> picks = new java.util.ArrayList<>();
     for (int i = 0; i < 5; i++) {
@@ -268,21 +291,21 @@ class AdviceGuardTest {
 
     AdviceGuard.Result result = guard.validate(response, candidates, sectors, trends, null, policy);
 
-    assertThat(result.picks()).hasSize(3);
-    assertThat(result.tooFew(properties.getPickMin())).as("LONG 상한이 하한을 깨지 않는다").isFalse();
+    assertThat(result.picks()).hasSize(2);
   }
 
   @Test
-  @DisplayName("M6 회귀: BULL·NORMAL 정책은 기존 가드와 픽·확신·순위가 같다(상한 pick-max, 확신 상한 없음, AVOID 2) — stats 에 policy 만 더해진다")
+  @DisplayName("M6 회귀: BULL·NORMAL 정책은 기존 가드와 픽·확신·순위가 같다(상한 pick-max, 확신 상한 없음) — stats 에 policy 만 더해진다")
   void bullPolicyEqualsLegacy() {
     MarketRegime.Policy policy = new RegimePolicy(properties).limits(MarketTrendCode.BULL, VolRegimeCode.NORMAL);
-    assertThat(policy).isEqualTo(new MarketRegime.Policy("regime-policy-v1", properties.getPickMax(), null, 2));
+    assertThat(policy).isEqualTo(new MarketRegime.Policy("regime-policy-v2", properties.getPickMax(), null));
     List<CandidateRow> candidates = new java.util.ArrayList<>();
     List<AdviceResponse.Pick> picks = new java.util.ArrayList<>();
-    for (int i = 0; i < 14; i++) {
+    // pick-max(10) 이하 — 넘치면 정책은 truncatedLong, 기존 가드는 truncated 로 같은 픽을 자르되 stats 키가 달라 비교가 흐려진다
+    for (int i = 0; i < 10; i++) {
       String ticker = String.format("%06d", i);
       candidates.add(candidate(ticker, 0.01 * i));
-      picks.add(pick(ticker, i < 4 ? "AVOID" : "LONG", String.format("%.2f", 0.55 + 0.025 * i), List.of()));
+      picks.add(pick(ticker, null, String.format("%.2f", 0.55 + 0.035 * i), List.of()));
     }
     AdviceResponse response = new AdviceResponse(new AdviceResponse.Regime("RISK_ON", "UP", "UP", "0.60", ""), outlook, List.of(), picks, "");
 

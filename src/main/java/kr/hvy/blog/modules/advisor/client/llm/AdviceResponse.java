@@ -21,7 +21,10 @@ public record AdviceResponse(Regime regime, TrendOutlookView trendOutlook, List<
   public record SectorView(String code, String reason) {
   }
 
-  /** citedNews 는 advice-v4 — 프롬프트 news 블록의 헤드라인 id (없으면 null·빈 목록) */
+  /**
+   * citedNews 는 advice-v4 — 프롬프트 news 블록의 헤드라인 id (없으면 null·빈 목록). direction 은 advice-v9(매수 전용) 스키마에 없어 보통 null 이다 —
+   * 필드를 남긴 이유는 방어: 스키마 밖 응답이 AVOID 를 실어 오면 가드가 제거·기록해야 하므로 역직렬화에서 조용히 버리지 않는다.
+   */
   public record Pick(String ticker, String direction, String conviction, String thesis, String risk, List<Cited> citedFeatures, List<String> citedNews) {
   }
 

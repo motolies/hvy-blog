@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
 /**
- * 사전 등록 정책 표(regime-policy-v1)의 수치를 고정한다. 이 테스트가 깨지면 표가 바뀐 것이다 — 운영 문서 §1.7 과 advisor.regime.policy.version 을 함께 올린다.
+ * 사전 등록 정책 표(regime-policy-v2)의 수치를 고정한다. 이 테스트가 깨지면 표가 바뀐 것이다 — 운영 문서 §1.7 과 advisor.regime.policy.version 을 함께 올린다.
  */
 class RegimePolicyTest {
 
@@ -19,11 +19,18 @@ class RegimePolicyTest {
   private final RegimePolicy policy = new RegimePolicy(properties);
 
   @Test
-  @DisplayName("표 v1 (pick-min 3·pick-max 10): BULL 기존, SIDEWAYS 확신 0.80, BEAR LONG 8·확신 0.70·AVOID 4")
-  void tableV1() {
-    assertThat(policy.limits(MarketTrendCode.BULL, VolRegimeCode.NORMAL)).isEqualTo(new Policy("regime-policy-v1", 10, null, 2));
-    assertThat(policy.limits(MarketTrendCode.SIDEWAYS, VolRegimeCode.LOW)).isEqualTo(new Policy("regime-policy-v1", 10, 0.80, 2));
-    assertThat(policy.limits(MarketTrendCode.BEAR, VolRegimeCode.NORMAL)).isEqualTo(new Policy("regime-policy-v1", 8, 0.70, 4));
+  @DisplayName("표 v2 (pick-max 10, 매수 전용): BULL 기존, SIDEWAYS 확신 0.80, BEAR LONG 8·확신 0.70 — AVOID 열 없음")
+  void tableV2() {
+    assertThat(policy.limits(MarketTrendCode.BULL, VolRegimeCode.NORMAL)).isEqualTo(new Policy("regime-policy-v2", 10, null));
+    assertThat(policy.limits(MarketTrendCode.SIDEWAYS, VolRegimeCode.LOW)).isEqualTo(new Policy("regime-policy-v2", 10, 0.80));
+    assertThat(policy.limits(MarketTrendCode.BEAR, VolRegimeCode.NORMAL)).isEqualTo(new Policy("regime-policy-v2", 8, 0.70));
+  }
+
+  @Test
+  @DisplayName("H20 처럼 픽 상한을 지정하면 같은 표를 그 상한에 적용한다 (h20 pick-max 8 → BEAR 6)")
+  void customPickMax() {
+    assertThat(policy.limits(MarketTrendCode.BEAR, VolRegimeCode.NORMAL, 8)).isEqualTo(new Policy("regime-policy-v2", 6, 0.70));
+    assertThat(policy.limits(MarketTrendCode.BULL, VolRegimeCode.NORMAL, 8).longMax()).isEqualTo(8);
   }
 
   @Test
@@ -37,13 +44,13 @@ class RegimePolicyTest {
   }
 
   @Test
-  @DisplayName("LONG 상한은 pick-min 아래로 내려가지 않는다, 추세가 없으면 정책도 없다(null)")
-  void respectsPickMinAndMissingTrend() {
+  @DisplayName("LONG 상한 바닥은 pick-min 이 아니라 1이다(v2), 추세가 없으면 정책도 없다(null)")
+  void floorIsOneAndMissingTrend() {
     properties.setPickMax(4);
-    assertThat(policy.limits(MarketTrendCode.BEAR, VolRegimeCode.HIGH).longMax()).as("max(3, 4−2)").isEqualTo(3);
+    assertThat(policy.limits(MarketTrendCode.BEAR, VolRegimeCode.HIGH).longMax()).as("max(1, 4−2) — v1 은 max(pick-min 3, 2) = 3").isEqualTo(2);
     properties.setPickMax(10);
     properties.getRegime().getPolicy().getBear().setLongMaxReduction(20);
-    assertThat(policy.limits(MarketTrendCode.BEAR, VolRegimeCode.NORMAL).longMax()).isEqualTo(properties.getPickMin());
+    assertThat(policy.limits(MarketTrendCode.BEAR, VolRegimeCode.NORMAL).longMax()).isEqualTo(1);
     assertThat(policy.limits(null, VolRegimeCode.HIGH)).isNull();
   }
 
@@ -59,7 +66,7 @@ class RegimePolicyTest {
   @Test
   @DisplayName("정책 표 버전이 한도에 실린다 — 수치를 바꾸면 버전을 올려 판단마다 구분한다")
   void versionTravelsWithLimits() {
-    properties.getRegime().getPolicy().setVersion("regime-policy-v2");
-    assertThat(policy.limits(MarketTrendCode.BULL, VolRegimeCode.NORMAL).version()).isEqualTo("regime-policy-v2");
+    properties.getRegime().getPolicy().setVersion("regime-policy-v3");
+    assertThat(policy.limits(MarketTrendCode.BULL, VolRegimeCode.NORMAL).version()).isEqualTo("regime-policy-v3");
   }
 }

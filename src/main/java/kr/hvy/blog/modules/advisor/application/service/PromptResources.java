@@ -19,6 +19,9 @@ import org.springframework.stereotype.Component;
 public class PromptResources {
 
   /**
+   * advice-v9 (2026-09-27, 매수 전용): 출력 스키마에서 픽 direction 을 없앴다 — picks 는 매수 추천만 0~pick-max 개, 확신 있는 근거가 없으면 빈 배열(관망)과 summary 이유.
+   * AVOID·회피 규칙(규칙 2·13 의 AVOID 한도, BEAR 의 AVOID 근거)과 policy.avoidMax 입력을 뺐고 정책 표는 regime-policy-v2. v8 은 "picks 5~10개" 를 LONG+AVOID 합계로
+   * 요구해 살 게 없는 날 AVOID 로 개수를 채웠다(2026-09-27 샘플: 회피 4 + 매수 1). 나머지 입력·규칙은 v8 그대로.
    * advice-v8 (2026-09-25, M6): 입력 regime(합성 국면 = 규칙 추세 × KOSPI σ20 백분위 변동성 국면, 사전 등록 정책 표 regime-policy-v1 의 오늘 한도 — 가드가 강제)·
    * theme(KOSPI200 섹터 대분류 강약, PIT 구성) 블록, 후보 theme 열, 규칙 13(국면별 행동 지침·정책 한도)·14(테마 해석). 나머지는 v7 그대로.
    * advice-v7 (2026-09-25): 종목 후보를 KOSPI200 구성종목(PIT, advisor.pick-universe)으로 한정 — 입력 pickUniverse 키, candidates 설명(백분위는 KOSPI 전체 기준),
@@ -27,7 +30,7 @@ public class PromptResources {
    * (advisor.markets)·thesis 300자/risk 150자 + 근거→해석→기대 흐름 구조(Slack 이 전문을 싣는다). v4 는 news 블록 입력 + citedNews 출력. v3 는 market.global
    * r20/r60 + market.link(β·상관) 입력. v2 는 dataAsOf·window·dataQuality·market.trend 입력, trendOutlook 출력. 옛 파일은 비교용으로 남긴다.
    */
-  public static final String ADVICE_VERSION = "advice-v8";
+  public static final String ADVICE_VERSION = "advice-v9";
   /** lesson-v2 (2026-09-13): condition 에 trend 키 */
   public static final String LESSON_VERSION = "lesson-v2";
   /**
@@ -39,15 +42,18 @@ public class PromptResources {
   /** note-v1 (2026-09-21): 12:00 장중 점검의 픽별 회고(오답노트) 시스템 프롬프트 — assist 모델, 티커 없는 일반화 가설 */
   public static final String NOTE_VERSION = "note-v1";
   /**
+   * morning-v2 (2026-09-27, 매수 전용): ADD 에서 direction 을 없앴다(추가는 전부 매수), 최종 픽 하한(3)·AVOID 상한을 지워 전부 DROP(관망)을 허용하고,
+   * 저녁이 관망(0픽)이어도 재판정해 ADD 할 수 있다.
    * morning-v1 (2026-09-25, M4): 07:40 아침 재판정 — 저녁 입력 스냅샷·저녁 픽·밤사이(미국 r1·β 갭·환율·섹터 연동 심볼·07:30 점검) 를 보고 저녁 픽마다 KEEP/DROP,
    * 저녁 후보 안에서만 ADD. 판단 모델(judge)을 쓰고 advice-v7 과 버전을 따로 센다
    */
-  public static final String MORNING_VERSION = "morning-v1";
+  public static final String MORNING_VERSION = "morning-v2";
   /**
+   * advice-h20-v2 (2026-09-27, 매수 전용): advice-v9 와 같은 변경 — picks 는 20거래일 매수 추천만 0~h20.pick-max 개, 관망 허용, AVOID 규칙 제거, regime-policy-v2.
    * advice-h20-v1 (2026-09-25, M7): 금요일 주간 20거래일 판단 — advice-v8 과 같은 입력 모양·출력 스키마·정책 표에서 news·scoreboard·recentOutcomes·lessons 를 뺐고
    * thesis/risk·regime 을 20거래일 창으로 쓴다. 판단 모델(judge)을 쓰고 advice-v8 과 버전을 따로 센다
    */
-  public static final String H20_VERSION = "advice-h20-v1";
+  public static final String H20_VERSION = "advice-h20-v2";
   /**
    * longterm-v1 (2026-09-25, M8): H60·H180 규칙 픽(사전 고정 가중치 장기 팩터 점수 상위 N)에 종목별 thesis/risk 서술만 붙인다 — 스키마 ticker enum 이 규칙 픽 N 개이고
    * 선택·순위는 LongTermNarrativeGuard 가 규칙 쪽으로 강제한다. 판단 모델(judge)
@@ -71,7 +77,7 @@ public class PromptResources {
   private final String longTermSha256;
 
   public PromptResources() {
-    this.adviceSystem = load(BASE + "advice-system-v8.md");
+    this.adviceSystem = load(BASE + "advice-system-v9.md");
     this.adviceSha256 = sha256(adviceSystem);
     this.lessonSystem = load(BASE + "lesson-system-v2.md");
     this.lessonSha256 = sha256(lessonSystem);
@@ -79,9 +85,9 @@ public class PromptResources {
     this.chatSha256 = sha256(chatSystem);
     this.noteSystem = load(BASE + "intraday-note-system-v1.md");
     this.noteSha256 = sha256(noteSystem);
-    this.morningSystem = load(BASE + "advice-morning-v1.md");
+    this.morningSystem = load(BASE + "advice-morning-v2.md");
     this.morningSha256 = sha256(morningSystem);
-    this.h20System = load(BASE + "advice-h20-v1.md");
+    this.h20System = load(BASE + "advice-h20-v2.md");
     this.h20Sha256 = sha256(h20System);
     this.longTermSystem = load(BASE + "advice-longterm-v1.md");
     this.longTermSha256 = sha256(longTermSystem);

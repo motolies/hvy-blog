@@ -83,7 +83,10 @@ public class AdvisorProperties {
    */
   private PickUniverse pickUniverse = PickUniverse.KOSPI200;
 
-  /** 가드 통과 후 픽이 이 수 미만이면 run FAILED (발행 안 함) */
+  /**
+   * 스크리닝 후보가 이 수 미만이면 run FAILED(판단할 모집단이 없다). 입력 길이 절단의 후보 하한에도 쓴다. 매수 전용 판단(advice-v9, 2026-09-27)부터
+   * 가드 뒤 픽 수의 하한은 아니다 — 0픽(관망)도 정상 발행한다.
+   */
   private int pickMin = 3;
 
   /** 픽 상한 — 초과분은 확신 내림차순으로 자른다. Slack 은 픽마다 section 1개라 36 을 넘기면 메시지 블록 50 상한에 걸린다 */
@@ -244,9 +247,6 @@ public class AdvisorProperties {
       }
       if (rule.getConvictionCap() != null && (rule.getConvictionCap() < 0.55 || rule.getConvictionCap() > 0.90)) {
         throw new IllegalStateException("advisor.regime.policy." + e.getKey() + ".conviction-cap 은 [0.55, 0.90] 이어야 합니다: " + rule.getConvictionCap());
-      }
-      if (rule.getAvoidMax() != null && rule.getAvoidMax() < 0) {
-        throw new IllegalStateException("advisor.regime.policy." + e.getKey() + ".avoid-max 는 음수일 수 없습니다");
       }
     }
   }
@@ -694,30 +694,31 @@ public class AdvisorProperties {
   }
 
   /**
-   * 사전 등록 정책 표(regime-policy-v1). **수치를 바꾸면 version 을 올린다(새 버전)** — 판단마다 regime_json.policy.version 이 남아 사후에 표 버전별로 분리한다.
-   * 근거는 M0 측정 전이라 보수 규칙만 둔다: 약세장에서 LONG 을 줄이고 확신을 낮추며 AVOID 여지를 넓힌다. 국면별 가중치(계획 M6 (b))는 M0 검정 뒤로 미룬다.
+   * 사전 등록 정책 표(regime-policy-v2). **수치를 바꾸면 version 을 올린다(새 버전)** — 판단마다 regime_json.policy.version 이 남아 사후에 표 버전별로 분리한다.
+   * 근거는 M0 측정 전이라 보수 규칙만 둔다: 약세장에서 LONG 을 줄이고 확신을 낮춘다. 국면별 가중치(계획 M6 (b))는 M0 검정 뒤로 미룬다.
+   * v2(2026-09-27): 매수 전용 판단으로 AVOID 최대를 없앴고, 픽 하한이 사라져 LONG 상한 = max(1, pick-max − 감산) 이다(v1 은 max(pick-min, …)).
    */
   @Data
   public static class RegimePolicyTable {
 
     /** 정책 표 버전 (regime_json·guard_json 에 기록) */
-    private String version = "regime-policy-v1";
+    private String version = "regime-policy-v2";
 
     /** 강세: 기존 상한 그대로 */
-    private RegimeRule bull = new RegimeRule(0, null, null);
+    private RegimeRule bull = new RegimeRule(0, null);
 
     /** 보합: LONG 확신 0.80 상한 */
-    private RegimeRule sideways = new RegimeRule(0, 0.80, null);
+    private RegimeRule sideways = new RegimeRule(0, 0.80);
 
-    /** 약세: LONG 상한 −2(pick-min 존중), 확신 0.70 상한, AVOID 최대 4 */
-    private RegimeRule bear = new RegimeRule(2, 0.70, 4);
+    /** 약세: LONG 상한 −2(최소 1), 확신 0.70 상한 */
+    private RegimeRule bear = new RegimeRule(2, 0.70);
 
     /** 변동성 HIGH 면 확신 상한을 이만큼 더 낮춘다(상한이 없던 국면은 허용 최댓값에서 뺀다) */
     private double volHighConvictionPenalty = 0.05;
   }
 
   /**
-   * 추세 라벨 1개의 정책 행. longMaxReduction 은 pick-max 에서 빼는 수(결과는 pick-min 이상), convictionCap 이 null 이면 상한 없음, avoidMax 가 null 이면 기존 AVOID 상한(2).
+   * 추세 라벨 1개의 정책 행. longMaxReduction 은 pick-max 에서 빼는 수(결과는 1 이상), convictionCap 이 null 이면 상한 없음.
    */
   @Data
   @NoArgsConstructor
@@ -727,8 +728,6 @@ public class AdvisorProperties {
     private int longMaxReduction;
 
     private Double convictionCap;
-
-    private Integer avoidMax;
   }
 
   /**
@@ -757,7 +756,7 @@ public class AdvisorProperties {
   @Data
   public static class H20 {
 
-    /** 가드 통과 픽이 이보다 적으면 FAILED(미발행) */
+    /** 스크리닝 후보가 이보다 적으면 FAILED(판단할 모집단 없음). 가드 뒤 픽 하한은 아니다 — 0픽(관망)도 발행한다(advice-h20-v2) */
     private int pickMin = 3;
 
     /** 픽 상한 — 초과분은 확신 내림차순으로 자른다. 주 1회 20일 보유라 DAILY(10) 보다 좁게 둔다 */

@@ -6,14 +6,16 @@ import kr.hvy.blog.modules.advisor.domain.code.VolRegimeCode;
 import kr.hvy.blog.modules.advisor.domain.model.MarketRegime;
 
 /**
- * 사전 등록 정책 표(M6, regime-policy-v1): 합성 국면(추세 × 변동성) → 판단 가드 한도. 결정론·순수 함수이며 수치는 전부 advisor.regime.policy 에서 온다.
+ * 사전 등록 정책 표(M6, regime-policy-v2): 합성 국면(추세 × 변동성) → 판단 가드 한도. 결정론·순수 함수이며 수치는 전부 advisor.regime.policy 에서 온다.
  * <pre>
- * | 추세     | LONG 상한                    | 확신 상한 | AVOID 최대 |
- * | BULL     | pick-max (기존)              | —         | 2 (기존)   |
- * | SIDEWAYS | pick-max (기존)              | 0.80      | 2 (기존)   |
- * | BEAR     | max(pick-min, pick-max − 2)  | 0.70      | 4          |
+ * | 추세     | LONG 상한                 | 확신 상한 |
+ * | BULL     | pick-max (기존)           | —         |
+ * | SIDEWAYS | pick-max (기존)           | 0.80      |
+ * | BEAR     | max(1, pick-max − 2)      | 0.70      |
  * 변동성 HIGH: 확신 상한 −0.05 (상한이 없던 국면은 허용 최댓값 0.90 에서 뺀다)
  * </pre>
+ * v2(2026-09-27): 매수 전용 판단(advice-v9)으로 AVOID 최대 열을 없앴고, 픽 하한(pick-min)이 없어져 LONG 상한의 바닥이 1 이다. v1 은 AVOID 최대(기본 2·약세 4)와
+ * max(pick-min, …) 바닥을 가졌다.
  * 표 수치를 바꾸면 advisor.regime.policy.version 을 올린다(새 버전) — 판단마다 버전이 regime_json 에 남아 사후에 버전별로 분리된다.
  * 확신 상한은 허용 이산값(AdviceSchemaFactory.CONVICTIONS) 중 상한 이하 최댓값으로 내린다 — 가드가 스냅한 값과 같은 격자여야 채점·보정 표가 깨지지 않는다.
  */
@@ -21,6 +23,8 @@ public final class RegimePolicy {
 
   /** 부동소수 비교 허용오차 (0.70 − 0.05 가 0.6499999… 가 되는 경우) */
   static final double EPS = 1e-9;
+  /** LONG 상한의 바닥 — 감산이 pick-max 를 넘어도 매수 1개 여지는 남긴다(0 이면 약세장에서 규칙이 곧 관망 강제가 된다) */
+  static final int MIN_LONG_MAX = 1;
 
   private final AdvisorProperties properties;
 
@@ -29,16 +33,16 @@ public final class RegimePolicy {
   }
 
   /**
-   * 추세·변동성 국면의 한도. 추세가 없으면(지수 지표 없음) null — 호출자는 기존 가드만 적용한다.
+   * 추세·변동성 국면의 한도(DAILY 픽 상한 advisor.pick-max). 추세가 없으면(지수 지표 없음) null — 호출자는 기존 가드만 적용한다.
    */
   public MarketRegime.Policy limits(MarketTrendCode trend, VolRegimeCode vol) {
-    return limits(trend, vol, properties.getPickMin(), properties.getPickMax());
+    return limits(trend, vol, properties.getPickMax());
   }
 
   /**
-   * 픽 범위를 지정한 한도(M7: H20 은 advisor.h20 의 pick-min·pick-max). LONG 상한 = max(pickMin, pickMax − 감산) 이라 같은 표가 종류별 범위에 비례해 적용된다.
+   * 픽 상한을 지정한 한도(M7: H20 은 advisor.h20.pick-max). LONG 상한 = max(1, pickMax − 감산) 이라 같은 표가 종류별 상한에 비례해 적용된다.
    */
-  public MarketRegime.Policy limits(MarketTrendCode trend, VolRegimeCode vol, int pickMin, int pickMax) {
+  public MarketRegime.Policy limits(MarketTrendCode trend, VolRegimeCode vol, int pickMax) {
     if (trend == null) {
       return null;
     }
@@ -48,13 +52,12 @@ public final class RegimePolicy {
       case SIDEWAYS -> table.getSideways();
       case BEAR -> table.getBear();
     };
-    int longMax = Math.max(pickMin, pickMax - rule.getLongMaxReduction());
+    int longMax = Math.max(MIN_LONG_MAX, pickMax - rule.getLongMaxReduction());
     Double cap = rule.getConvictionCap();
     if (vol == VolRegimeCode.HIGH && table.getVolHighConvictionPenalty() > 0) {
       cap = (cap == null ? maxConviction() : cap) - table.getVolHighConvictionPenalty();
     }
-    int avoidMax = rule.getAvoidMax() == null ? AdviceGuard.MAX_AVOID : rule.getAvoidMax();
-    return new MarketRegime.Policy(table.getVersion(), longMax, cap == null ? null : snapDown(cap), avoidMax);
+    return new MarketRegime.Policy(table.getVersion(), longMax, cap == null ? null : snapDown(cap));
   }
 
   /**

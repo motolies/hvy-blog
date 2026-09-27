@@ -1,7 +1,6 @@
 package kr.hvy.blog.modules.advisor.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -75,15 +74,15 @@ class AdviseJobTest {
   private final RecentOutcomesService recentOutcomes = mock(RecentOutcomesService.class);
   private final LocalDate base = LocalDate.of(2026, 9, 11);
   private final AtomicInteger llmCalls = new AtomicInteger();
-  /** 후보 T00~T02 를 고르고 T00 은 입력 특징(r20=0.012345)을 허용오차 안에서 인용 */
+  /** 후보 T00~T02 를 고르고 T00 은 입력 특징(r20=0.012345)을 허용오차 안에서 인용. 매수 전용(advice-v9) 스키마라 direction 이 없다 */
   static final String REPLY = """
       {"regime":{"code":"RISK_ON","kospiDir":"UP","kosdaqDir":"NEUTRAL","pUp":"0.70","rationale":"근거"},
        "trendOutlook":{"kospi":{"persist":"BEYOND_20D","confidence":"0.70","invalidation":"BELOW_MA20"},
                        "kosdaq":{"persist":"WITHIN_5D","confidence":"0.60","invalidation":"NONE"}},
        "sectors":[{"code":"G2510","reason":"반도체"}],
-       "picks":[{"ticker":"T00","direction":"LONG","conviction":"0.80","thesis":"t","risk":"r","citedFeatures":[{"name":"r20","value":0.0123}]},
-                {"ticker":"T01","direction":"LONG","conviction":"0.65","thesis":"t","risk":"r","citedFeatures":[]},
-                {"ticker":"T02","direction":"AVOID","conviction":"0.60","thesis":"t","risk":"r","citedFeatures":[]}],
+       "picks":[{"ticker":"T00","conviction":"0.80","thesis":"t","risk":"r","citedFeatures":[{"name":"r20","value":0.0123}]},
+                {"ticker":"T01","conviction":"0.65","thesis":"t","risk":"r","citedFeatures":[]},
+                {"ticker":"T02","conviction":"0.60","thesis":"t","risk":"r","citedFeatures":[]}],
        "summary":"요약"}
       """;
   private String llmReply = REPLY;
@@ -154,7 +153,7 @@ class AdviseJobTest {
     assertThat(live.weightSetId()).isEqualTo(1L);
     assertThat(live.leadingSectors()).hasSize(1);
     assertThat(live.leadingSectors().getFirst().consistent()).as("advice-v6: 섹터 맥락(SectorContext)의 consistent 가 주도 섹터 콜에 실린다").isTrue();
-    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION).isEqualTo("advice-v8");
+    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION).isEqualTo("advice-v9");
     assertThat(live.guard()).as("T00 은 secCons=1·비과열이라 클램프 없음").doesNotContainKeys("capNonConsistent", "capOverheated");
     assertThat(live.trendKospi()).as("규칙 추세는 시장 특징에서").isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
     assertThat(live.trendKosdaq()).as("KOSDAQ 추세 없음(픽스처)").isNull();
@@ -207,7 +206,7 @@ class AdviseJobTest {
     assertThat(live.guard()).containsKey("policy");
     @SuppressWarnings("unchecked")
     Map<String, Object> applied = (Map<String, Object>) live.guard().get("policy");
-    assertThat(applied).containsEntry("version", "regime-policy-v1").containsEntry("longMax", 8).containsEntry("convictionCap", 0.65);
+    assertThat(applied).containsEntry("version", "regime-policy-v2").containsEntry("longMax", 8).containsEntry("convictionCap", 0.65);
     assertThat(execution.metadata("regime")).isEqualTo("BEAR·HIGH");
   }
 
@@ -390,14 +389,37 @@ class AdviseJobTest {
   }
 
   @Test
-  @DisplayName("가드 통과 픽이 최소 미만이면 예외로 FAILED — 발행하지 않고 입력 스냅샷만 남긴다")
-  void tooFewPicksFails() {
+  @DisplayName("매수 전용: 모델이 빈 picks(관망)를 내면 FAILED 가 아니라 픽 0행 헤더로 저장·발행하고 SUCCESS — 메타 abstain=true")
+  void abstainIsSavedAndPublished() {
+    llmReply = REPLY.replaceAll("(?s)\"picks\":\\[.*?\\],\\s*\"summary\"", "\"picks\":[], \"summary\"");
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.SUCCESS);
+    assertThat(execution.metadata("abstain")).isEqualTo(true);
+    assertThat(execution.metadata("picks")).isEqualTo(0);
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<PickRow>> picks = ArgumentCaptor.forClass(List.class);
+    verify(adviceWriter).insertPicks(eq(843L), picks.capture());
+    assertThat(picks.getValue()).isEmpty();
+    verify(promptInputs).upsert(any());
+    ArgumentCaptor<SlackMessage> published = ArgumentCaptor.forClass(SlackMessage.class);
+    verify(notifier).publish(published.capture());
+    assertThat(published.getValue().getFallbackText()).contains(kr.hvy.blog.modules.advisor.application.slack.DailyAdviceMessage.ABSTAIN_TEXT);
+    verify(adviceWriter).markPublished(eq(843L), any());
+  }
+
+  @Test
+  @DisplayName("가드가 픽을 전부 지워 0픽이 되어도 관망으로 저장·발행한다 — 제거율 100% 라 PARTIAL(모델·프롬프트 점검 신호)")
+  void allRemovedIsPartialButPublished() {
     llmReply = REPLY.replace("\"T0", "\"ZZ"); // 후보 밖 티커 → 전부 제거
     AdvisorExecution execution = execution();
-    assertThatThrownBy(() -> job.execute(execution)).isInstanceOf(IllegalStateException.class).hasMessageContaining("최소");
-    verify(notifier, never()).publish(any());
-    verify(promptInputs).upsert(any());
-    verify(adviceWriter, never()).insertPicks(eq(843L), any());
+    job.execute(execution);
+
+    assertThat(execution.decideStatus()).isEqualTo(AdvisorStatus.PARTIAL);
+    assertThat(execution.metadata("abstain")).isEqualTo(true);
+    verify(adviceWriter).insertPicks(eq(843L), eq(List.of()));
+    verify(notifier).publish(any(SlackMessage.class));
   }
 
   @Test
@@ -475,7 +497,7 @@ class AdviseJobTest {
   }
 
   @Test
-  @DisplayName("M7: H20 은 horizon_days=20·kind=H20 으로 LIVE 와 QUANT_TOPN 섀도를 저장하고, 뉴스·recentOutcomes·교훈·실적 블록 없이 advice-h20-v1 로 1회 판단해 '20일 관점 추천' 으로 발행한다")
+  @DisplayName("M7: H20 은 horizon_days=20·kind=H20 으로 LIVE 와 QUANT_TOPN 섀도를 저장하고, 뉴스·recentOutcomes·교훈·실적 블록 없이 advice-h20-v2 로 1회 판단해 '20일 관점 추천' 으로 발행한다")
   void h20SavesTwentyDayAdviceWithoutNewsOrMemory() {
     properties.getNews().setEnabled(true);   // 뉴스가 켜져 있어도 H20 입력에는 싣지 않는다
     when(adviceWriter.countLivePicks(AdviceKind.DAILY)).thenReturn(10_000);   // 300 게이트를 넘겨도 메모리를 싣지 않는다
@@ -498,7 +520,7 @@ class AdviseJobTest {
       assertThat(h.exitDate()).as("20거래일 창").isEqualTo(LocalDate.of(2026, 10, 13));
     });
     AdviceHeader live = headers.getAllValues().get(1);
-    assertThat(live.promptVersion()).isEqualTo(PromptResources.H20_VERSION).isEqualTo("advice-h20-v1");
+    assertThat(live.promptVersion()).isEqualTo(PromptResources.H20_VERSION).isEqualTo("advice-h20-v2");
     assertThat(live.memoryJson()).isNull();
     assertThat(live.activeLessonIds()).isEmpty();
     verify(adviceWriter).find(base, AdviceKind.H20, AdviceVariant.LIVE);
@@ -513,7 +535,7 @@ class AdviseJobTest {
     verify(icService, never()).computeIncremental(any());
     ArgumentCaptor<kr.hvy.blog.modules.advisor.domain.model.PromptInputRow> inputs = ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.domain.model.PromptInputRow.class);
     verify(promptInputs).upsert(inputs.capture());
-    assertThat(inputs.getValue().promptVersion()).isEqualTo("advice-h20-v1");
+    assertThat(inputs.getValue().promptVersion()).isEqualTo("advice-h20-v2");
     assertThat(inputs.getValue().userPayload()).contains("\"horizonDays\":20").contains("20번째 영업일 종가")
         .doesNotContain("\"news\"").doesNotContain("recentOutcomes").doesNotContain("\"scoreboard\"").doesNotContain("\"lessons\"");
     assertThat(execution.metadata("skip.NEWS")).isEqualTo(AdviseJob.H20_SKIP);

@@ -192,7 +192,6 @@ public class MarketToolkit {
       p.put("version", r.policy().version());
       p.put("longMax", r.policy().longMax());
       ToolJson.put(p, "convictionCap", r.policy().convictionCap());
-      p.put("avoidMax", r.policy().avoidMax());
       m.put("policy", p);
     }
     if (r.themes() != null && !r.themes().isEmpty()) {

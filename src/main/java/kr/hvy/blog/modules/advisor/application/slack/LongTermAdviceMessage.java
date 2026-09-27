@@ -27,10 +27,10 @@ import lombok.Builder;
 /**
  * 장기(H60·H180) 규칙 추천 Block Kit 메시지 (#hvy-advisor, 멘션 없음, M8).
  * <pre>
- * 헤더("📊 날짜 60일 관점 규칙 추천") → 판정 라벨("판정 불가: 표본 부족, 2년 이상 필요") → 국면·테마(맥락) → 적용 구간 → 팩터 가중치 → 종목 표(순위 코드 종목명 점수)
- * → 픽마다 서술(없으면 "서술 없음") → 총평 → run 메타 → 면책
+ * 헤더("📊 날짜 60일 관점 규칙 추천") → 판정 라벨("판정 불가: 표본 부족, 2년 이상 필요") → 국면·테마(맥락) → 적용 구간 → 팩터 가중치 → 종목 헤딩 + 종목 표
+ * (table 블록: 순위 종목명 코드 장기 점수) → 픽마다 서술(없으면 "서술 없음") → 총평 → run 메타 → 면책
  * </pre>
- * 일일 판단과 달리 LLM 국면 콜·확신이 없다(규칙 선택). 블록 수는 고정 ≤ 12 + 픽 수(≤ advisor.long-term.pick-count, 기본 10) 로 상한 50 안이다.
+ * 일일 판단과 달리 LLM 국면 콜·확신이 없다(규칙 선택). 블록 수는 고정 ≤ 13 + 픽 수(≤ advisor.long-term.pick-count, 기본 10) 로 상한 50 안이다.
  */
 @Builder
 public class LongTermAdviceMessage implements SlackMessage {
@@ -90,7 +90,10 @@ public class LongTermAdviceMessage implements SlackMessage {
     blocks.add(section(s -> s.text(markdownText("*팩터 가중치*  " + weightText()))));
     blocks.add(divider());
     String universe = universeLabel == null || universeLabel.isBlank() ? "" : " · 유니버스: " + universeLabel.strip();
-    blocks.add(section(s -> s.text(markdownText(String.format("*종목 (%d)%s*%n```%s```", picks.size(), universe, pickTable())))));
+    blocks.add(section(s -> s.text(markdownText(String.format("*종목 (%d)%s*", picks.size(), universe)))));
+    if (!picks.isEmpty()) {
+      blocks.add(pickTable());
+    }
     if (narrativeFailed) {
       blocks.add(context(List.of(markdownText("⚠️ 서술 생성 실패 — 규칙 픽만 발행합니다(서술 없음)."))));
     }
@@ -141,23 +144,22 @@ public class LongTermAdviceMessage implements SlackMessage {
     return weights.entrySet().stream().map(e -> String.format("%s %.2f", e.getKey(), e.getValue())).collect(Collectors.joining(" · "));
   }
 
+  /** 종목 표 열: 순위 · 종목명 · 코드 · 장기 점수 */
+  static final List<SlackTableBlock.Column> PICK_COLUMNS = List.of(
+      SlackTableBlock.Column.right("순위"), SlackTableBlock.Column.wrapped("종목명"), SlackTableBlock.Column.left("코드"), SlackTableBlock.Column.right("장기 점수"));
+
   /**
-   * 고정폭 표: 순위(4) 코드(6) 종목명(13) 점수(5). 확신 열이 없다(규칙 선택).
+   * 종목 표(table 블록): 순위·종목명·코드·장기 점수(부호 포함). 확신 열이 없다(규칙 선택).
    */
-  String pickTable() {
-    StringBuilder sb = new StringBuilder();
-    sb.append(SlackWidth.padRight("순위", 4)).append(' ').append(SlackWidth.padRight("코드", 6)).append(' ')
-        .append(SlackWidth.padRight("종목명", DailyAdviceMessage.NAME_CELLS)).append(' ').append("점수").append('\n');
+  SlackTableBlock pickTable() {
+    List<List<String>> rows = new ArrayList<>();
     for (PickRow p : picks) {
       CandidateRow c = candidates == null ? null : candidates.get(p.ticker());
       String name = c == null || c.stockName() == null ? p.ticker() : c.stockName();
       String score = c == null ? "-" : String.format("%+.2f", c.quantScore());
-      sb.append(SlackWidth.padRight(String.format("%2d", p.pickRank()), 4)).append(' ')
-          .append(SlackWidth.padRight(p.ticker(), 6)).append(' ')
-          .append(SlackWidth.padRight(name, DailyAdviceMessage.NAME_CELLS)).append(' ')
-          .append(score).append('\n');
+      rows.add(List.of(String.valueOf(p.pickRank()), name, p.ticker(), score));
     }
-    return sb.toString().stripTrailing();
+    return SlackTableBlock.of(PICK_COLUMNS, rows);
   }
 
   /**

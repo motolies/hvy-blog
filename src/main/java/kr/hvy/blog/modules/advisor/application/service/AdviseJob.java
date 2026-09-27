@@ -49,6 +49,7 @@ import org.springframework.stereotype.Component;
  * (메모리가 하나라도 실렸고 nomem-weeks 창 안이면) LLM_NOMEM 섀도 → (뉴스가 실렸고 nonews-weeks 창 안이면) LLM_NONEWS 섀도
  * </pre>
  * 스크리닝·판단·저장은 실패하면 잡 전체가 FAILED(부분 추천 금지). 채점·노트·섀도·발행 실패는 격리되어 PARTIAL 로 남는다.
+ * 매수 전용(advice-v9·advice-h20-v2, 2026-09-27): 가드 뒤 0픽은 관망이며 픽 0행 헤더로 저장·발행한다(FAILED 아님, 메타 abstain=true).
  * <p>
  * 2계층 메모리(note-v1, 2026-09-21): 빠른 층 = recentOutcomes(12:00 노트의 T+5 확정 빈도표, 300 게이트 전에도 주입), 느린 층 = scoreboard·lessons(300 게이트 뒤).
  * LLM_NOMEM 은 세 가지 전부 없는 판단이라 300 전에는 정확히 "노트만 뺀" 1요인 섀도가 된다. 헤더 memory_json 이 어떤 메모리가 실렸는지 남기고 NOMEM 창의 시작점이 된다.
@@ -143,7 +144,7 @@ public class AdviseJob implements AdvisorJob {
    * 판단 종류별 파이프라인 구성(M7). advise 본문에 종류 분기를 흩지 않고 여기서 한 번에 정한다 — 새 종류는 {@link #plan} 에 행 하나를 더한다.
    *
    * @param horizonDays  결정 호라이즌(거래일) — 적용 구간·프롬프트 horizonDays·헤더 horizon_days
-   * @param bounds       픽 개수 범위 — 가드 절단·tooFew·정책 표 LONG 상한
+   * @param bounds       픽 개수 범위 — min 은 스크리닝 후보 수 최소, max 는 가드 절단·정책 표 LONG 상한(0픽 관망은 정상)
    * @param learningLoop 채점·IC·QUANT_TOPN_BROAD·LLM 섀도·교훈 적용 카운트(학습·평가 루프). DAILY 만
    * @param quantShadow  규칙형 QUANT_TOPN 섀도(비용 0, LLM 부가가치의 대조군). DAILY·H20
    * @param memory       느린 층(실적 블록·교훈)·빠른 층(recentOutcomes) 메모리. DAILY·ADHOC
@@ -171,8 +172,8 @@ public class AdviseJob implements AdvisorJob {
    * 판단 파이프라인 본문. 종류별 차이는 {@link KindPlan} 이 정한다.
    * <ul>
    *   <li>ADHOC(채팅 수시 판단, {@link AdhocAdviseJob}): 같은 입력·프롬프트·가드로 LIVE 1건만 — 학습·평가 루프를 건드리는 단계는 전부 건너뛴다(KPI·300 게이트·IC 밖)</li>
-   *   <li>H20(주간 20거래일, {@link H20AdviseJob}): H20 활성 가중치 세트가 없으면 SKIP(DAILY 세트 폴백 금지), 뉴스·메모리 없이 advice-h20-v1 로 판단하고
-   *       정책 표를 H20 픽 범위로 다시 계산해 강제한다. 섀도는 규칙형 QUANT_TOPN 1개(LLM 섀도 없음)</li>
+   *   <li>H20(주간 20거래일, {@link H20AdviseJob}): H20 활성 가중치 세트가 없으면 SKIP(DAILY 세트 폴백 금지), 뉴스·메모리 없이 advice-h20-v2 로 판단하고
+   *       정책 표를 H20 픽 상한으로 다시 계산해 강제한다. 섀도는 규칙형 QUANT_TOPN 1개(LLM 섀도 없음)</li>
    * </ul>
    */
   void advise(AdvisorExecution execution, AdviceKind kind) {
@@ -325,10 +326,9 @@ public class AdviseJob implements AdvisorJob {
     if (market.regime() != null) {
       execution.putMetadata("regime", market.regime().labelText());
     }
-    if (guarded.tooFew(plan.bounds().min())) {
-      promptInputs.upsert(new PromptInputRow(execution.runId(), AdviceVariant.LIVE, promptVersion, promptSha256(kind),
-          payload.json(), AdvisorJson.write(jr.options()), jr.rawText()));
-      throw new IllegalStateException("가드 통과 픽이 " + guarded.picks().size() + "개로 최소 " + plan.bounds().min() + " 미만 — 발행하지 않습니다");
+    // 매수 전용(advice-v9): 가드 뒤 0픽은 관망 — 실패가 아니라 픽 0행 헤더로 저장·발행한다(KPI 는 관망일을 부가가치에서 빼고 따로 센다)
+    if (guarded.abstained()) {
+      execution.putMetadata("abstain", true);
     }
     if (guarded.removalRatio() > AdviceGuard.REMOVAL_ALERT_RATIO) {
       execution.markPartial(String.format("가드 제거율 %.0f%% (%d/%d) — 모델·프롬프트 점검 필요", guarded.removalRatio() * 100, guarded.removed(),
@@ -404,18 +404,19 @@ public class AdviseJob implements AdvisorJob {
   }
 
   /**
-   * 종류의 픽 범위가 DAILY 와 다르면 정책 표를 그 범위로 다시 계산한 국면을 실은 특징 사본(M7 H20). 같으면(DAILY·ADHOC) 그대로 — MarketRegimeService 가 이미 DAILY 범위로 계산했다.
+   * 종류의 픽 상한이 DAILY 와 다르면 정책 표를 그 상한으로 다시 계산한 국면을 실은 특징 사본(M7 H20). 같으면(DAILY·ADHOC) 그대로 — MarketRegimeService 가 이미 DAILY 상한으로 계산했다.
+   * regime-policy-v2 부터 표는 pick-max 만 본다(하한 없음).
    */
   MarketFeatures withPlanPolicy(MarketFeatures market, KindPlan plan) {
     MarketRegime regime = market.regime();
-    if (regime == null || plan.bounds().equals(AdviceGuard.PickBounds.of(properties))) {
+    if (regime == null || plan.bounds().max() == properties.getPickMax()) {
       return market;
     }
-    MarketRegime.Policy policy = regimePolicy.limits(regime.trend(), regime.vol(), plan.bounds().min(), plan.bounds().max());
+    MarketRegime.Policy policy = regimePolicy.limits(regime.trend(), regime.vol(), plan.bounds().max());
     return market.withRegime(regime.toBuilder().policy(policy).build());
   }
 
-  /** 종류의 시스템 프롬프트 (H20 = advice-h20-v1, 그 밖 = advice-v8) */
+  /** 종류의 시스템 프롬프트 (H20 = advice-h20-v2, 그 밖 = advice-v9) */
   private String systemPrompt(AdviceKind kind) {
     return kind == AdviceKind.H20 ? prompts.h20System() : prompts.adviceSystem();
   }

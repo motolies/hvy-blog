@@ -164,7 +164,7 @@ class AdvicePromptBuilderTest {
   void regimeAndThemeBlocks() {
     MarketFeatures base = market();
     MarketRegime regime = new MarketRegime("0001", LocalDate.of(2026, 9, 11), MarketTrendCode.BEAR, -3, VolRegimeCode.HIGH, 0.8712, 0.01834, 1180,
-        new MarketRegime.Policy("regime-policy-v1", 8, 0.65, 4),
+        new MarketRegime.Policy("regime-policy-v2", 8, 0.65),
         List.of(new MarketRegime.Theme("5", 31, 0.012, 0.0311, 0.02, 0.645, ThemeStrength.STRONG, List.of("삼성전자", "SK하이닉스")),
             new MarketRegime.Theme("6", 18, -0.01, -0.024, -0.03, 0.31, ThemeStrength.WEAK, List.of("KB금융"))));
     MarketFeatures withRegime = new MarketFeatures(base.asOf(), base.indices(), base.flows(), base.global(), base.topSectors(), base.bottomSectors(),
@@ -180,7 +180,7 @@ class AdvicePromptBuilderTest {
 
     assertThat(json).contains("\"dataQuality\":\"OK\",\"regime\":{\"index\":\"0001\",\"label\":\"BEAR·HIGH\",\"trend\":\"BEAR\",\"trendScore\":-3,"
         + "\"vol\":\"HIGH\",\"volPct\":0.871,\"sigma20\":0.0183,\"volHistoryDays\":1180,"
-        + "\"policy\":{\"version\":\"regime-policy-v1\",\"longMax\":8,\"convictionCap\":0.65,\"avoidMax\":4,\"enforced\":true}},\"sectors\":");
+        + "\"policy\":{\"version\":\"regime-policy-v2\",\"longMax\":8,\"convictionCap\":0.65,\"enforced\":true}},\"sectors\":");
     assertThat(json).contains("]},\"theme\":{\"columns\":[\"code\",\"members\",\"rs5\",\"rs20\",\"rs60\",\"breadth\",\"strength\",\"leaders\"],"
         + "\"rows\":[[\"5\",31,0.012,0.0311,0.02,0.645,\"STRONG\",[\"삼성전자\",\"SK하이닉스\"]],[\"6\",18,-0.01,-0.024,-0.03,0.31,\"WEAK\",[\"KB금융\"]]]},"
         + "\"candidates\":");

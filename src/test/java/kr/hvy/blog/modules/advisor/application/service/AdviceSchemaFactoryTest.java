@@ -8,7 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * strict 스키마 규약: 모든 객체 additionalProperties=false·전 속성 required, 후보 티커·섹터가 enum 으로 박힌다.
+ * strict 스키마 규약: 모든 객체 additionalProperties=false·전 속성 required, 후보 티커·섹터가 enum 으로 박힌다. 매수 전용이라 픽 direction 이 없다.
  */
 class AdviceSchemaFactoryTest {
 
@@ -31,6 +31,9 @@ class AdviceSchemaFactoryTest {
     Map<String, Object> pickProps = (Map<String, Object>) pick.get("properties");
     assertThat((List<String>) ((Map<String, Object>) pickProps.get("ticker")).get("enum")).containsExactly("005930", "000660");
     assertThat((List<String>) ((Map<String, Object>) pickProps.get("conviction")).get("enum")).isEqualTo(AdviceSchemaFactory.CONVICTIONS);
+    assertThat(pickProps).as("매수 전용(advice-v9): 픽에 direction 이 없다 — 모든 픽은 LONG").doesNotContainKey("direction")
+        .containsOnlyKeys("ticker", "conviction", "thesis", "risk", "citedFeatures", "citedNews");
+    assertThat((Map<String, Object>) props.get("picks")).as("빈 배열(관망)이 스키마상 정상 — minItems 없음").doesNotContainKey("minItems");
     Map<String, Object> sector = (Map<String, Object>) ((Map<String, Object>) props.get("sectors")).get("items");
     assertThat((List<String>) ((Map<String, Object>) ((Map<String, Object>) sector.get("properties")).get("code")).get("enum")).containsExactly("G2510");
 

@@ -209,7 +209,7 @@ COMMENT ON COLUMN tb_advisor_advice.published_at       IS 'Slack 발행 시각 (
 COMMENT ON COLUMN tb_advisor_advice.created_at         IS '생성일시';
 COMMENT ON COLUMN tb_advisor_advice.parent_advice_id   IS '아침 재판정(MORNING)이 다시 본 원 저녁 판단(DAILY LIVE) advice_id. 그 밖의 종류는 NULL (M4, 2026-09-25)';
 COMMENT ON COLUMN tb_advisor_advice.diff_json          IS '아침 재판정의 저녁 대비 조치 {parentAdviceId, keep:[{ticker,reason}], add:[…], drop:[{ticker,reason,direction,conviction}], triggers:{gap,sector,caution,any,…}, usDate}. 트리거는 호출 여부가 아니라 사후 분석(트리거일/비트리거일)용';
-COMMENT ON COLUMN tb_advisor_advice.regime_json        IS '합성 국면 스냅샷 (M6, regime-policy-v1, 2026-09-25): {indexCode, tradeDate, trend, trendScore, vol LOW|NORMAL|HIGH|UNKNOWN, volPct(σ20 의 기준일 이전 최대 5년 분포 백분위), sigma20, volHistoryDays, policy{version,longMax,convictionCap,avoidMax}, themes[{code,members,rs5,rs20,rs60,breadth,strength,leaders}]}. DAILY·ADHOC·H20 LIVE 와 LLM 섀도에 저장(H20 의 policy 는 advisor.h20 픽 범위로 재계산), H60·H180 은 맥락 스냅샷(규칙 선택이라 policy NULL, M8), MORNING·QUANT 섀도·M6 이전 행은 NULL';
+COMMENT ON COLUMN tb_advisor_advice.regime_json        IS '합성 국면 스냅샷 (M6, 2026-09-25): {indexCode, tradeDate, trend, trendScore, vol LOW|NORMAL|HIGH|UNKNOWN, volPct(σ20 의 기준일 이전 최대 5년 분포 백분위), sigma20, volHistoryDays, policy{version,longMax,convictionCap}, themes[{code,members,rs5,rs20,rs60,breadth,strength,leaders}]}. policy.version 이 regime-policy-v1 인 행(2026-09-27 이전)은 policy.avoidMax 도 있다 — v2 는 매수 전용이라 없다. DAILY·ADHOC·H20 LIVE 와 LLM 섀도에 저장(H20 의 policy 는 advisor.h20 픽 상한으로 재계산), H60·H180 은 맥락 스냅샷(규칙 선택이라 policy NULL, M8), MORNING·QUANT 섀도·M6 이전 행은 NULL';
 
 CREATE INDEX IF NOT EXISTS idx_advisor_advice_run ON tb_advisor_advice (run_id);
 
@@ -272,7 +272,7 @@ COMMENT ON TABLE  tb_advisor_pick            IS 'LLM(또는 섀도 규칙)이 �
 COMMENT ON COLUMN tb_advisor_pick.advice_id  IS '판단 식별자';
 COMMENT ON COLUMN tb_advisor_pick.ticker     IS '단축 종목코드';
 COMMENT ON COLUMN tb_advisor_pick.pick_rank  IS '확신 내림차순 순위';
-COMMENT ON COLUMN tb_advisor_pick.direction  IS 'LONG | AVOID';
+COMMENT ON COLUMN tb_advisor_pick.direction  IS 'LONG | AVOID. advice-v9·advice-h20-v2·morning-v2(2026-09-27, 매수 전용)부터 LLM 픽은 LONG 만 저장한다 — AVOID 는 그 전 행(과거 판단·전환기 아침 KEEP)에만 있다. 관망(0픽) 판단은 픽 행이 없다';
 COMMENT ON COLUMN tb_advisor_pick.conviction IS '확신도 (이산 0.55~0.9)';
 COMMENT ON COLUMN tb_advisor_pick.thesis     IS '근거 (200자 목표)';
 COMMENT ON COLUMN tb_advisor_pick.risk_note  IS '리스크';

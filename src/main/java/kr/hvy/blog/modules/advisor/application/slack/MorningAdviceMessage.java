@@ -26,16 +26,19 @@ import lombok.Builder;
 /**
  * 아침 재판정 메시지 (#hvy-advisor, 멘션 없음). "어제 저녁 대비" diff.
  * <pre>
- * 헤더 → 밤사이 요약 → 조치 표(고정폭: 조치 코드 종목명 방향 확신) → 조치마다 사유 section(유지 → 제외 → 추가) → 총평 → run 메타 → 면책
+ * 헤더 → 밤사이 요약 → 조치 헤딩 + 조치 표(table 블록: 조치 종목명 코드 확신) → 조치마다 사유 section(유지 → 제외 → 추가) → 총평 → run 메타 → 면책
  * </pre>
- * 사유는 가드가 300자로 자르므로 조치마다 section 1개(3,000자 상한 안)에 싣는다. 블록 수는 고정 7 + 조치 수(유지+제외 ≤ pick-max 10, 추가 ≤ 10) 로 50 안이다.
+ * 사유는 가드가 300자로 자르므로 조치마다 section 1개(3,000자 상한 안)에 싣는다. 블록 수는 고정 8 + 조치 수(유지+제외 ≤ pick-max 10, 추가 ≤ 10) 로 50 안이다.
+ * 매수 전용(morning-v2, 2026-09-27): 방향 열이 없다 — 전환기 저녁의 AVOID 픽을 KEEP·DROP 한 행만 조치 칸에 "(회피)" 를 붙인다. 최종 픽(유지+추가)이 0이면
+ * 헤딩에 "{@value DailyAdviceMessage#ABSTAIN_TEXT}" 를 싣고, 조치가 하나도 없으면 표를 만들지 않는다.
  * 막대 색: 트리거일(|갭| ≥ σ·섹터 2σ·CAUTION) 빨강, 조치 변화(제외·추가)가 있으면 초록, 전부 유지면 파랑 — 트리거는 호출 여부가 아니라 표시용이다.
  */
 @Builder
 public class MorningAdviceMessage implements SlackMessage {
 
-  /** 표 종목명 열 폭(칸) — 전체 39칸 안(DailyAdviceMessage 와 같은 모바일 기준) */
-  static final int NAME_CELLS = 13;
+  /** 조치 표 열: 조치 · 종목명 · 코드 · 확신 */
+  static final List<SlackTableBlock.Column> ACTION_COLUMNS = List.of(
+      SlackTableBlock.Column.left("조치"), SlackTableBlock.Column.wrapped("종목명"), SlackTableBlock.Column.left("코드"), SlackTableBlock.Column.right("확신"));
 
   private final LocalDate baseDate;
   private final LocalDate entryDate;
@@ -64,7 +67,8 @@ public class MorningAdviceMessage implements SlackMessage {
 
   @Override
   public String getFallbackText() {
-    return String.format("%s 판단 아침 재판정: 유지 %d · 제외 %d · 추가 %d", baseDate, size(kept), size(drops), size(added));
+    return String.format("%s 판단 아침 재판정: 유지 %d · 제외 %d · 추가 %d%s", baseDate, size(kept), size(drops), size(added),
+        abstained() ? " — " + DailyAdviceMessage.ABSTAIN_TEXT : "");
   }
 
   @Override
@@ -75,7 +79,12 @@ public class MorningAdviceMessage implements SlackMessage {
         DailyAdviceMessage.dateWithDow(entryDate), DailyAdviceMessage.dateWithDow(exitDate));
     blocks.add(section(s -> s.text(markdownText(window + String.join("\n", overnightLines == null ? List.of() : overnightLines)))));
     blocks.add(divider());
-    blocks.add(section(s -> s.text(markdownText(String.format("*유지 %d · 제외 %d · 추가 %d*%n```%s```", size(kept), size(drops), size(added), table())))));
+    String heading = String.format("*유지 %d · 제외 %d · 추가 %d*", size(kept), size(drops), size(added))
+        + (abstained() ? String.format("%n*%s*", DailyAdviceMessage.ABSTAIN_TEXT) : "");
+    blocks.add(section(s -> s.text(markdownText(heading))));
+    if (size(kept) + size(drops) + size(added) > 0) {
+      blocks.add(table());
+    }
     for (PickRow p : safe(kept)) {
       blocks.add(section(s -> s.text(markdownText(reasonLine("유지", p.ticker(), p.actionReason())))));
     }
@@ -104,23 +113,32 @@ public class MorningAdviceMessage implements SlackMessage {
     return Collections.singletonList(Attachment.builder().color(color).fallback(getFallbackText()).build());
   }
 
+  /** 최종 픽(유지 + 추가)이 없다 — 관망 */
+  boolean abstained() {
+    return size(kept) + size(added) == 0;
+  }
+
   /**
-   * 고정폭 조치 표: 조치(2) 코드(6) 종목명(13) 방향(2) 확신(4). 순서는 유지(최종 순위) → 제외(저녁 순위) → 추가(최종 순위).
+   * 조치 표(table 블록): 조치·종목명·코드·확신. 순서는 유지(최종 순위) → 제외(저녁 순위) → 추가(최종 순위).
    */
-  String table() {
-    List<String> rows = new ArrayList<>();
-    rows.add(row("조치", "코드", "종목명", "방향", "확신"));
+  SlackTableBlock table() {
+    List<List<String>> rows = new ArrayList<>();
     for (PickRow p : safe(kept)) {
-      rows.add(row(label(PickAction.KEEP), p.ticker(), names(p.ticker()), direction(p.direction()), String.format("%.2f", p.conviction())));
+      rows.add(row(PickAction.KEEP, p));
     }
     for (MorningAdviceGuard.Drop d : safe(drops)) {
-      PickRow e = d.evening();
-      rows.add(row(label(PickAction.DROP), e.ticker(), names(e.ticker()), direction(e.direction()), String.format("%.2f", e.conviction())));
+      rows.add(row(PickAction.DROP, d.evening()));
     }
     for (PickRow p : safe(added)) {
-      rows.add(row(label(PickAction.ADD), p.ticker(), names(p.ticker()), direction(p.direction()), String.format("%.2f", p.conviction())));
+      rows.add(row(PickAction.ADD, p));
     }
-    return String.join("\n", rows);
+    return SlackTableBlock.of(ACTION_COLUMNS, rows);
+  }
+
+  /** 표 1행. 전환기 저녁의 AVOID 픽만 조치 칸에 "(회피)" 를 붙인다 — 매수 전용 이후 픽은 전부 매수라 방향 열을 두지 않는다 */
+  private List<String> row(PickAction action, PickRow p) {
+    String label = action.getDesc() + (p.direction() == PickDirection.AVOID ? "(회피)" : "");
+    return List.of(label, names(p.ticker()), p.ticker(), String.format("%.2f", p.conviction()));
   }
 
   private String reasonLine(String label, String ticker, String reason) {
@@ -130,19 +148,6 @@ public class MorningAdviceMessage implements SlackMessage {
   private String names(String ticker) {
     String name = names == null ? null : names.get(ticker);
     return name == null ? ticker : name;
-  }
-
-  private static String row(String action, String ticker, String name, String direction, String conviction) {
-    return SlackWidth.padRight(action, 5) + SlackWidth.padRight(ticker, 7) + SlackWidth.padRight(name, NAME_CELLS) + " "
-        + SlackWidth.padRight(direction, 5) + conviction;
-  }
-
-  private static String label(PickAction action) {
-    return action.getDesc();
-  }
-
-  private static String direction(PickDirection direction) {
-    return direction == null ? "-" : direction == PickDirection.LONG ? "매수" : "회피";
   }
 
   private static <T> List<T> safe(List<T> list) {

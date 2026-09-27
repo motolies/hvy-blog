@@ -234,6 +234,51 @@ class MorningAdviseJobTest {
     verify(adviceWriter, never()).markPublished(anyLong(), any());
   }
 
+  @Test
+  @DisplayName("morning-v2: 저녁이 관망(0픽)이어도 후보가 있으면 재판정한다 — 결정 enum 은 저녁 후보로 대신하고, ADD 만 저장·발행된다")
+  void eveningAbstainStillRejudges() {
+    when(adviceWriter.picks(900L)).thenReturn(List.of());
+    when(judge.call(anyString(), anyString(), anyString(), eq(MorningAdviceResponse.class))).thenReturn(callResult(new MorningAdviceResponse(
+        List.of(), List.of(new MorningAdviceResponse.Addition("000004", null, "0.60", "근거", "리스크", "SOX 강세")), "밤사이 반도체 강세로 1종목 추가")));
+    AdvisorExecution execution = execution();
+    job(at0740).execute(execution);
+
+    assertThat(execution.isSkipped()).isFalse();
+    assertThat(execution.metadata("eveningPicks")).isEqualTo(0);
+    ArgumentCaptor<String> schema = ArgumentCaptor.forClass(String.class);
+    verify(judge).call(anyString(), anyString(), schema.capture(), eq(MorningAdviceResponse.class));
+    assertThat(schema.getValue()).as("strict enum 은 빈 목록을 거부 — 결정 ticker 는 저녁 후보로 대신한다").doesNotContain("\"enum\":[]")
+        .doesNotContain("\"direction\"");
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<PickRow>> picks = ArgumentCaptor.forClass(List.class);
+    verify(adviceWriter).insertPicks(eq(901L), picks.capture());
+    assertThat(picks.getValue()).extracting(PickRow::ticker, PickRow::action, PickRow::direction)
+        .containsExactly(org.assertj.core.groups.Tuple.tuple("000004", PickAction.ADD, PickDirection.LONG));
+    verify(adviceWriter).markPublished(eq(901L), any());
+  }
+
+  @Test
+  @DisplayName("morning-v2: 전부 DROP 한 0픽 아침도 저장·발행한다 — 픽 0행, DROP 은 diff_json 에, 발행 문구는 관망")
+  void allDropIsSavedAndPublished() {
+    when(judge.call(anyString(), anyString(), anyString(), eq(MorningAdviceResponse.class))).thenReturn(callResult(new MorningAdviceResponse(
+        List.of(new MorningAdviceResponse.Decision("000001", "DROP", "a"), new MorningAdviceResponse.Decision("000002", "DROP", "b"),
+            new MorningAdviceResponse.Decision("000003", "DROP", "c")), List.of(), "밤사이 급락으로 전부 제외")));
+    AdvisorExecution execution = execution();
+    job(at0740).execute(execution);
+
+    assertThat(execution.isSkipped()).isFalse();
+    verify(adviceWriter).insertPicks(eq(901L), eq(List.of()));
+    ArgumentCaptor<AdviceHeader> header = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter).insertHeader(header.capture());
+    assertThat((List<?>) header.getValue().diffJson().get("drop")).hasSize(3);
+    assertThat(header.getValue().guard()).doesNotContainKey("dropReverted");
+    ArgumentCaptor<kr.hvy.common.infrastructure.notification.slack.message.SlackMessage> message =
+        ArgumentCaptor.forClass(kr.hvy.common.infrastructure.notification.slack.message.SlackMessage.class);
+    verify(notifier).publish(message.capture());
+    assertThat(message.getValue().getFallbackText()).endsWith(kr.hvy.blog.modules.advisor.application.slack.DailyAdviceMessage.ABSTAIN_TEXT);
+    verify(adviceWriter).markPublished(eq(901L), any());
+  }
+
   private MorningAdviseJob job(Instant now) {
     return new MorningAdviseJob(properties, calendar, adviceWriter, promptInputs, morningChecks, links, new PromptResources(), judge, notifier,
         clockProvider(now));

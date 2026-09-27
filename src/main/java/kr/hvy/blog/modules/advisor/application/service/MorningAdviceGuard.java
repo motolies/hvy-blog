@@ -21,20 +21,21 @@ import kr.hvy.blog.modules.advisor.domain.model.PickRow;
  *   <li>DROP·KEEP 은 저녁 픽에만 — 저녁 픽 밖 결정은 무시(unknownDecision), 중복 결정은 첫 번째만(duplicateDecision)</li>
  *   <li>결정이 없는 저녁 픽은 KEEP 으로 보충(missingDecision) — 모델 누락을 "조용한 제외" 로 바꾸지 않는다</li>
  *   <li>ADD 는 저녁 후보 안이어야 하고(addOutsideCandidates) 저녁 픽에 이미 있으면 안 된다(addAlreadyPicked), 중복은 제거(duplicateAdd)</li>
- *   <li>최종 픽(KEEP + ADD)은 저녁과 같은 규칙: AVOID ≤ 2(초과는 확신 낮은 ADD 부터 제거), 상한 pick-max(초과는 확신 낮은 ADD 부터 제거),
- *       하한 pick-min(미달이면 DROP 을 저녁 순위대로 되돌려 KEEP — dropReverted)</li>
+ *   <li>매수 전용(morning-v2, 2026-09-27): ADD 는 전부 LONG 이다. 스키마 밖 AVOID·모르는 방향의 ADD 는 제거(avoidRemoved·badDirection).
+ *       최종 픽(KEEP + ADD)은 상한 pick-max(초과는 확신 낮은 ADD 부터 제거)만 있고 하한은 없다 — 전부 DROP(관망)도 정상이고, 저녁이 관망이어도 ADD 할 수 있다.
+ *       v1 의 "하한 미달이면 DROP 되돌리기(dropReverted)" 와 AVOID 상한은 없앴다</li>
  *   <li>텍스트는 AdviceGuard 와 같은 정화·길이 절단, ADD 확신은 허용 이산값으로 스냅</li>
- *   <li>M6: 저녁 판단의 정책 표 한도(regime_json.policy)가 있으면 같은 표를 적용한다 — ADD LONG 확신 클램프(policyCappedConviction), AVOID 상한은 정책 값,
- *       LONG 개수 상한 초과는 확신 낮은 ADD LONG 부터 제거(policyTruncatedLong). KEEP 은 저녁 가드가 이미 같은 표로 통과시켰다. 아침은 국면을 다시 판단하지 않으므로
+ *   <li>M6: 저녁 판단의 정책 표 한도(regime_json.policy)가 있으면 같은 표를 적용한다 — ADD 확신 클램프(policyCappedConviction),
+ *       LONG 개수 상한 초과는 확신 낮은 ADD 부터 제거(policyTruncatedLong). KEEP 은 저녁 가드가 이미 같은 표로 통과시켰다. 아침은 국면을 다시 판단하지 않으므로
  *       저녁이 확정한 한도를 그대로 쓴다(M4 결정과 일관)</li>
  * </ul>
+ * KEEP 은 과거 저녁 픽의 방향을 그대로 잇는다 — v9 전환 전 저녁(advice-v8)의 AVOID 픽은 KEEP 되면 AVOID 로 남는다(과거 행 보존).
  * 위반 항목은 제거하고 stats(카운터)·violations(티커·규칙 목록)에 남긴다. KEEP 은 저녁 픽의 방향·확신·근거를 그대로 잇는다 — 아침은 "뺄지·더할지" 만 정한다.
  */
 public final class MorningAdviceGuard {
 
   static final int REASON_LIMIT = 300;
   static final String MISSING_DECISION_REASON = "모델 결정 누락 — 저녁 판단 유지";
-  static final String REVERTED_REASON = "픽 하한 보충 — 제외 취소, 저녁 판단 유지";
 
   /** 제외된 저녁 픽 1개 (헤더 diff_json.drop 에만 남는다) */
   public record Drop(PickRow evening, String reason) {
@@ -70,7 +71,7 @@ public final class MorningAdviceGuard {
   }
 
   /**
-   * @param policy 저녁 판단의 정책 표 한도(regime_json.policy, M6). null 이면 기존 규칙(AVOID ≤ 2, LONG 상한 없음)
+   * @param policy 저녁 판단의 정책 표 한도(regime_json.policy, M6). null 이면 LONG 정책 상한·확신 상한 없음(전체 상한 pick-max 만)
    */
   public Result validate(MorningAdviceResponse response, List<PickRow> eveningPicks, List<CandidateRow> candidates, MarketRegime.Policy policy) {
     Map<String, Object> stats = new LinkedHashMap<>();
@@ -132,17 +133,17 @@ public final class MorningAdviceGuard {
           violate(stats, violations, ticker, "duplicateAdd");
           continue;
         }
-        PickDirection direction = direction(a.direction());
-        if (direction == null) {
-          violate(stats, violations, ticker, "badDirection");
+        Map<String, Object> directionStats = new LinkedHashMap<>();
+        if (!AdviceGuard.longOnly(a.direction(), directionStats)) {
+          directionStats.keySet().forEach(rule -> violate(stats, violations, ticker, rule));
           continue;
         }
         double conviction = AdviceGuard.conviction(a.conviction(), stats, "clampedConviction");
-        if (direction == PickDirection.LONG && policy != null && policy.convictionCap() != null && conviction > policy.convictionCap() + RegimePolicy.EPS) {
+        if (policy != null && policy.convictionCap() != null && conviction > policy.convictionCap() + RegimePolicy.EPS) {
           increment(stats, "policyCappedConviction");
           conviction = policy.convictionCap();
         }
-        added.add(PickRow.builder().ticker(ticker).direction(direction)
+        added.add(PickRow.builder().ticker(ticker).direction(PickDirection.LONG)
             .conviction(conviction)
             .thesis(AdviceGuard.sanitize(a.thesis(), AdviceGuard.THESIS_LIMIT, stats))
             .riskNote(AdviceGuard.sanitize(a.risk(), AdviceGuard.RISK_LIMIT, stats))
@@ -151,13 +152,7 @@ public final class MorningAdviceGuard {
       }
     }
 
-    // ----- 하한: DROP 을 저녁 순위대로 되돌린다 (ADD 로 채워지면 되돌리지 않는다) -----
-    while (kept.size() + added.size() < properties.getPickMin() && !drops.isEmpty()) {
-      Drop reverted = drops.removeFirst();
-      violate(stats, violations, reverted.evening().ticker(), "dropReverted");
-      kept.add(keep(reverted.evening(), REVERTED_REASON));
-    }
-    // ----- AVOID 상한·픽 상한: 저녁이 이미 통과한 KEEP 이 아니라 확신 낮은 ADD 부터 뺀다 -----
+    // ----- 정책 LONG 상한·픽 상한: 저녁이 이미 통과한 KEEP 이 아니라 확신 낮은 ADD 부터 뺀다. 하한은 없다(전부 DROP = 관망) -----
     trimAdds(added, kept, stats, violations, policy);
 
     List<PickRow> all = new ArrayList<>(kept);
@@ -179,29 +174,16 @@ public final class MorningAdviceGuard {
   }
 
   /**
-   * AVOID 는 KEEP·ADD 합쳐 최대 AdviceGuard.MAX_AVOID(정책이 있으면 그 값), LONG 은 정책 상한, 전체는 pick-max. 넘치면 확신 낮은 ADD 부터 제거한다
-   * (KEEP 은 저녁 가드를 이미 통과했다).
+   * LONG 은 정책 상한, 전체는 pick-max. 넘치면 확신 낮은 ADD 부터 제거한다(KEEP 은 저녁 가드를 이미 통과했다). ADD 는 전부 LONG 이다.
    */
   private void trimAdds(List<PickRow> added, List<PickRow> kept, Map<String, Object> stats, List<Map<String, String>> violations,
       MarketRegime.Policy policy) {
     added.sort((x, y) -> Double.compare(y.conviction(), x.conviction()));
-    int avoidMax = policy == null ? AdviceGuard.MAX_AVOID : policy.avoidMax();
-    long keptAvoids = kept.stream().filter(p -> p.direction() == PickDirection.AVOID).count();
-    long avoids = keptAvoids + added.stream().filter(p -> p.direction() == PickDirection.AVOID).count();
-    for (int i = added.size() - 1; i >= 0 && avoids > avoidMax; i--) {
-      if (added.get(i).direction() == PickDirection.AVOID) {
-        violate(stats, violations, added.remove(i).ticker(), "truncatedAvoid");
-        avoids--;
-      }
-    }
     if (policy != null) {
-      long longs = kept.stream().filter(p -> p.direction() == PickDirection.LONG).count()
-          + added.stream().filter(p -> p.direction() == PickDirection.LONG).count();
-      for (int i = added.size() - 1; i >= 0 && longs > policy.longMax(); i--) {
-        if (added.get(i).direction() == PickDirection.LONG) {
-          violate(stats, violations, added.remove(i).ticker(), "policyTruncatedLong");
-          longs--;
-        }
+      long longs = kept.stream().filter(p -> p.direction() == PickDirection.LONG).count() + added.size();
+      while (!added.isEmpty() && longs > policy.longMax()) {
+        violate(stats, violations, added.removeLast().ticker(), "policyTruncatedLong");
+        longs--;
       }
     }
     while (!added.isEmpty() && kept.size() + added.size() > properties.getPickMax()) {
@@ -211,14 +193,6 @@ public final class MorningAdviceGuard {
 
   private static PickRow keep(PickRow evening, String reason) {
     return evening.toBuilder().action(PickAction.KEEP).actionReason(reason).build();
-  }
-
-  private static PickDirection direction(String value) {
-    try {
-      return value == null ? null : PickDirection.valueOf(value.trim().toUpperCase());
-    } catch (IllegalArgumentException e) {
-      return null;
-    }
   }
 
   private static String trim(String value) {

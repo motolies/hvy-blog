@@ -1,0 +1,8 @@
+# Merge this environment block into the existing application's service.
+# Replace hvy-blog with the actual service name before using this as an override.
+services:
+  hvy-blog:
+    environment:
+      MCP_ENABLED: ${MCP_ENABLED:-false}
+      MCP_API_KEY: ${MCP_API_KEY:-}
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://hvy.kr,https://api.hvy.kr}

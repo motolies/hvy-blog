@@ -46,7 +46,7 @@ class AdviceToolkitRequestTest {
     ToolSupport support = new ToolSupport(tx, mock(JdbcTemplate.class), new AdvisorChatProperties(new MockEnvironment(), advisor),
         mock(StockLookupReader.class));
     toolkit = new AdviceToolkit(support, mock(AdviceWriter.class), mock(ScoreWriter.class), mock(MorningCheckWriter.class), mock(IntradayCheckWriter.class),
-        mock(CandidateScreeningService.class), mock(WeightSetRepository.class), mock(AdvisorKpiService.class), advisor, requester);
+        mock(CandidateScreeningService.class), mock(WeightSetRepository.class), mock(AdvisorKpiService.class), advisor, new org.springframework.beans.factory.support.StaticListableBeanFactory(java.util.Map.of("requester", requester)).getBeanProvider(AdhocAdviceRequester.class));
     scope = new ChatRequestScope(Instant.now().plusSeconds(60), "U1");
   }
 

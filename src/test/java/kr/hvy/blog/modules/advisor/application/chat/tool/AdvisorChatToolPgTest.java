@@ -120,7 +120,7 @@ class AdvisorChatToolPgTest {
     stock = new StockToolkit(support, reader, new DerivedViewRefresher(jdbc), new StockNewsWriter(new BatchUpsertSupport(jdbc), jdbc));
     advice = new AdviceToolkit(support, adviceWriter, new ScoreWriter(new BatchUpsertSupport(jdbc), jdbc), new MorningCheckWriter(jdbc),
         new IntradayCheckWriter(jdbc), new CandidateScreeningService(named, weightSets, properties), weightSets, new AdvisorKpiService(named, properties), properties,
-        mock(AdhocAdviceRequester.class));
+        new org.springframework.beans.factory.support.StaticListableBeanFactory(java.util.Map.of("requester", mock(AdhocAdviceRequester.class))).getBeanProvider(AdhocAdviceRequester.class));
     calendar = new CalendarToolkit(support, reader, features, adviceWriter, tradingCalendar);
     scope = new ChatRequestScope(Instant.now().plusSeconds(60));
     context = new ToolContext(scope.toToolContext());

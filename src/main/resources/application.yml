@@ -50,8 +50,29 @@ spring:
   # Spring AI 자동구성은 없다(OpenAI 스타터 미포함, 2026-09-19) — 이 키는 AdvisorProperties 가 Environment 로 직접 읽고, AdvisorAiConfig 가
   # advisor.enabled 일 때만 Responses API 모델을 직접 조립한다. 키가 비어도 기동은 되고 잡 실행 시 거부된다
   ai:
+    mcp:
+      server:
+        enabled: ${MCP_ENABLED:false}
+        protocol: STATELESS
+        type: SYNC
+        name: hvy-stock-advice
+        version: 1.0.0
+        instructions: "먼저 dataFreshness로 신선도를 확인하고 resolveStock으로 종목코드를 확인하세요. stock://guide, advice://guide, stock://catalog를 읽어 단위와 시점 한계를 확인하세요. 저장된 분석 조회 전용이며 투자 자문이 아닙니다."
+        tool-callback-converter: false
+        annotation-scanner:
+          enabled: false
+        request-timeout: 10s
+        stateless:
+          mcp-endpoint: /mcp
+        capabilities:
+          prompt: false
+          completion: false
     openai:
       api-key: ${OPENAI_API_KEY:}
+
+mcp:
+  enabled: ${MCP_ENABLED:false}
+  allowed-origins: ${MCP_ALLOWED_ORIGINS:https://hvy.kr,https://api.hvy.kr}
 
 hvy:
   master-code:

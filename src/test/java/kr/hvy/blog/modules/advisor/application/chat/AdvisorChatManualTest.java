@@ -118,7 +118,7 @@ class AdvisorChatManualTest {
     StockToolkit stock = new StockToolkit(support, reader, new DerivedViewRefresher(jdbc), new StockNewsWriter(new BatchUpsertSupport(jdbc), jdbc));
     AdviceToolkit advice = new AdviceToolkit(support, adviceWriter, new ScoreWriter(new BatchUpsertSupport(jdbc), jdbc), new MorningCheckWriter(jdbc),
         new IntradayCheckWriter(jdbc), new CandidateScreeningService(named, weightSets, properties), weightSets, new AdvisorKpiService(named, properties), properties,
-        mock(AdhocAdviceRequester.class));
+        new org.springframework.beans.factory.support.StaticListableBeanFactory(java.util.Map.of("requester", mock(AdhocAdviceRequester.class))).getBeanProvider(AdhocAdviceRequester.class));
     CalendarToolkit calendar = new CalendarToolkit(support, reader, features, adviceWriter, tradingCalendar);
 
     // 운영 AdvisorAiConfig.chatResponsesChatModel + chatChatClient 와 같은 조립 — RestClient 만 api_log 인터셉터 없이 인증 인터셉터만 단다(옵션은 모델에만)

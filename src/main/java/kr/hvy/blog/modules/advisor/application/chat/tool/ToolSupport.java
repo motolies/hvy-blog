@@ -10,7 +10,7 @@ import kr.hvy.blog.modules.advisor.repository.jdbc.StockLookupReader;
 import kr.hvy.blog.modules.stock.domain.model.MarketClock;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,7 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "advisor.enabled", havingValue = "true")
+@ConditionalOnExpression("${advisor.enabled:false} || ${mcp.enabled:false}")
 public class ToolSupport {
 
   static final String DEADLINE_MESSAGE = "처리 시간이 초과되어 더 이상 조회하지 않습니다. 지금까지 얻은 값으로 답하세요";
@@ -51,6 +51,8 @@ public class ToolSupport {
    * 도구 본문 실행. 결과 맵을 그대로 돌려주고, 어떤 예외도 오류 맵으로 바꾼다.
    */
   public Map<String, Object> run(String tool, ToolContext context, Supplier<Map<String, Object>> body) {
+    // MCP owns the outer transaction and error contract; do not swallow SQL errors in a nested transaction.
+    if (context != null && Boolean.TRUE.equals(context.getContext().get("mcp"))) return body.get();
     return execute(tool, context, () -> readOnly.execute(status -> {
       jdbc.execute("SET LOCAL statement_timeout = " + Math.max(1, properties.getToolTimeoutSeconds()) * 1_000);
       return body.get();
@@ -92,7 +94,7 @@ public class ToolSupport {
       return ToolJson.error(ToolJson.ERROR_INTERNAL, "조회 중 오류가 났습니다", null);
     } catch (Exception e) {
       log.warn("advisor chat 도구 오류: tool={}, cause={}", tool, e.toString());
-      return ToolJson.error(ToolJson.ERROR_INTERNAL, abbreviate(e.getMessage()), null);
+      return ToolJson.error(ToolJson.ERROR_INTERNAL, "조회 중 오류가 났습니다", null);
     }
   }
 

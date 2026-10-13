@@ -17,14 +17,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 
 /**
  * 달력·신선도 도구 2종. "오늘·최근·지금" 이 들어간 질문의 첫 호출은 dataFreshness 다 — 오늘 날짜와 데이터 마지막 거래일이 다를 수 있다.
  */
 @Component
-@ConditionalOnProperty(name = "advisor.enabled", havingValue = "true")
+@ConditionalOnExpression("${advisor.enabled:false} || ${mcp.enabled:false}")
 @RequiredArgsConstructor
 public class CalendarToolkit {
 

@@ -18,7 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
  * GlobalLinkService) 재사용.
  */
 @Component
-@ConditionalOnProperty(name = "advisor.enabled", havingValue = "true")
+@ConditionalOnExpression("${advisor.enabled:false} || ${mcp.enabled:false}")
 @RequiredArgsConstructor
 public class MarketToolkit {
 

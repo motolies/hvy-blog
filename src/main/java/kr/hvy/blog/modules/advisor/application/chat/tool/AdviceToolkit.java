@@ -39,7 +39,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 
 /**
@@ -47,7 +47,7 @@ import org.springframework.stereotype.Component;
  * 그리고 유일한 쓰기 도구 수시 판단 요청(requestAdvice, chat-v2). 전부 advisor 저장소·서비스 재사용.
  */
 @Component
-@ConditionalOnProperty(name = "advisor.enabled", havingValue = "true")
+@ConditionalOnExpression("${advisor.enabled:false} || ${mcp.enabled:false}")
 @RequiredArgsConstructor
 public class AdviceToolkit {
 
@@ -64,7 +64,7 @@ public class AdviceToolkit {
   private final WeightSetRepository weightSets;
   private final AdvisorKpiService kpi;
   private final AdvisorProperties advisor;
-  private final AdhocAdviceRequester adhocRequester;
+  private final org.springframework.beans.factory.ObjectProvider<AdhocAdviceRequester> adhocRequester;
 
   /** kind 파라미터 허용값 (오류 안내용) */
   static final String KIND_CODES = Arrays.stream(AdviceKind.values()).map(AdviceKind::getCode).collect(Collectors.joining("|"));
@@ -125,7 +125,11 @@ public class AdviceToolkit {
   public Map<String, Object> requestAdvice(ToolContext context) {
     return support.runWithoutTransaction("requestAdvice", context, () -> {
       String userId = ChatRequestScope.from(context).flatMap(ChatRequestScope::userId).orElse(null);
-      return requested(adhocRequester.request(userId));
+      AdhocAdviceRequester requester = adhocRequester.getIfAvailable();
+      if (requester == null) {
+        return ToolJson.error(ToolJson.ERROR_FORBIDDEN, "판단 생성이 비활성화되어 있습니다", null);
+      }
+      return requested(requester.request(userId));
     });
   }
 

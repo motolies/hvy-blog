@@ -55,7 +55,7 @@ class AdvisorChatToolSchemaTest {
     StockToolkit stock = new StockToolkit(support, mock(StockLookupReader.class), mock(DerivedViewRefresher.class), mock(StockNewsWriter.class));
     AdviceToolkit advice = new AdviceToolkit(support, mock(AdviceWriter.class), mock(ScoreWriter.class), mock(MorningCheckWriter.class),
         mock(IntradayCheckWriter.class), mock(CandidateScreeningService.class), mock(WeightSetRepository.class), mock(AdvisorKpiService.class), properties,
-        mock(AdhocAdviceRequester.class));
+        new org.springframework.beans.factory.support.StaticListableBeanFactory(java.util.Map.of("requester", mock(AdhocAdviceRequester.class))).getBeanProvider(AdhocAdviceRequester.class));
     CalendarToolkit calendar = new CalendarToolkit(support, mock(StockLookupReader.class), mock(MarketFeatureService.class), mock(AdviceWriter.class),
         mock(TradingCalendar.class));
 

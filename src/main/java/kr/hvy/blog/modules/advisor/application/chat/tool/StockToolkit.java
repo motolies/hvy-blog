@@ -21,14 +21,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 
 /**
  * 종목 도구 5종 — 해석·스냅샷·가격 시계열·지표 상위 N·뉴스 제목. 가격 정본은 수정 종가(vw_stock_daily_price_adj / tb_stock_daily_metric.adj_close)뿐이다.
  */
 @Component
-@ConditionalOnProperty(name = "advisor.enabled", havingValue = "true")
+@ConditionalOnExpression("${advisor.enabled:false} || ${mcp.enabled:false}")
 @RequiredArgsConstructor
 public class StockToolkit {
 

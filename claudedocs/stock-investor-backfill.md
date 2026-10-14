@@ -2,6 +2,51 @@
 
 백업 후 `tb_stock_investor_daily`만 비우고 KIS에서 전체 재수집한다. 이 문서는 실행 가이드이며 코드 변경 과정에서는 운영 백필을 실행하지 않는다. 복구하지 못한 과거 행은 백업에만 남기고 서비스 DB에 복원하지 않는다. 기존 advisor 판단·픽·성과와 별도 시장별 수급은 보존한다.
 
+## 일일 수급 확인 (읽기 전용)
+
+운영 기본 설정은 평일 18:30 KST에 `DAILY`를 실행한다(`application.yml`의 prod `scheduler.stock-daily`). 실제 환경의 설정 변경 여부는 별도 확인한다. 일일 수급은 `DAILY.metadata_json.steps[]`의 `step=INVESTOR`에 기록된다. `INVESTOR_BACKFILL`은 과거 재수집 이력이므로 그 타입의 마지막 실행일만으로 일일 수집 중단을 판단하지 않는다.
+
+`StockDailyPipelineJob`은 거래일에 `TargetResolver.activeTickers()`로 대상을 정하고 `StockInvestorCollectService.collectRecent()`를 호출한다. 휴장일에는 단계를 생략한다(force 실행 제외). `PipelineSteps`가 단계별 처리·실패 수를 기록한다. 단계 상태가 OK여도 종목 실패가 있을 수 있으므로 `failures`도 함께 확인한다. 실행 중이거나 휴장일인 run은 INVESTOR 기록이 아직 없거나 생략될 수 있다.
+
+최근 DAILY 실행과 수급 단계:
+
+```sql
+SELECT r.run_id, r.target_date, r.status AS run_status,
+       r.started_at AT TIME ZONE 'Asia/Seoul' AS started_kst,
+       r.finished_at AT TIME ZONE 'Asia/Seoul' AS finished_kst,
+       r.metadata_json->>'skipped' AS skip_reason,
+       s.step->>'status' AS investor_status,
+       (s.step->>'processed')::integer AS investor_processed,
+       (s.step->>'failures')::integer AS investor_failures,
+       r.error_message
+FROM (
+    SELECT * FROM tb_stock_collect_run
+    WHERE job_type = 'DAILY'
+    ORDER BY started_at DESC LIMIT 20
+) r
+LEFT JOIN LATERAL (
+    SELECT step FROM jsonb_array_elements(r.metadata_json->'steps') AS step
+    WHERE step->>'step' = 'INVESTOR'
+) s ON true
+ORDER BY r.started_at DESC;
+```
+
+실제 저장된 최신 거래일과 활성 종목별 지연도 함께 대조한다. 아래 ST는 기본 수집 그룹이며 실제 `kis.backfill.security-groups`와 맞춘다. 전체 MAX만으로 모든 종목의 수집 성공을 판정하지 않는다.
+
+```sql
+SELECT max(trade_date) AS latest_trade_date, count(*) AS rows
+FROM tb_stock_investor_daily;
+
+SELECT m.ticker, max(i.trade_date) AS latest_trade_date
+FROM tb_stock_master m
+LEFT JOIN tb_stock_investor_daily i ON i.ticker = m.ticker
+WHERE m.is_active = true AND m.security_group IN ('ST')
+GROUP BY m.ticker
+ORDER BY latest_trade_date ASC NULLS FIRST, m.ticker;
+```
+
+거래 캘린더상 최근 완료 거래일과 비교한다. 운영 DB 조회 결과는 아직 확보되지 않았으므로 실제 일일 수집 성공 여부는 미확정이다. 별도 일일 수급 스케줄러를 추가할 필요는 없다.
+
 ## 1. 중지
 
 수집·파생·advisor 정기 작업을 각 실제 `scheduler.stock-*`, `scheduler.advisor-*`의 `enabled=false`로 중지한다(와일드카드 설정은 지원하지 않음). MCP와 별도 MCP 인스턴스, Slack 조회(`ADVISOR_CHAT_ENABLED=false`)도 중지한다. 관리자 API는 유지한다. 실행 중 run은 `POST /api/stock/admin/collect/runs/{runId}/cancel`로 취소하고 실제 종료를 확인한다. 재시작한다면 이전 프로세스가 종료됐는지도 확인한다.
@@ -68,6 +113,8 @@ cat src/main/resources/db/stock-derived-rebuild.sql \
 버전을 참조하는 기존 업종 MV를 먼저 제거해야 `DROP COLUMN IF EXISTS normalization_version`이 성공한다. 재구축 → 마이그레이션 → 새 파생 정의 순서를 지킨다. 마이그레이션은 금액의 NOT NULL·기본값과 버전 컬럼만 제거하며 기존 금액을 환산하지 않는다. 수정 앱을 정기 작업과 소비자가 중지된 설정으로 배포한다. `schema-postgres.sql`은 DROP을 포함한 초기화용이므로 운영 마이그레이션에 사용하지 않는다.
 
 ## 4. 표본 검증
+
+실제 호출에서 `OPSQ2001 TIME LIMIT 00:00 ~ 15:40` 응답이 확인된 사례가 있다. **16시 이후(KST)에 아래 표본 요청의 성공과 저장값을 확인한 뒤 전체 실행**으로 진행한다. 이는 관측 사례에 따른 절차이며 공식 이용 시간 보장이 아니다. 같은 오류가 반복되면 전체 요청을 시작하지 않고 응답·호출 시각을 기록해 재확인한다.
 
 기존 관리자 인증을 적용한다. `B`는 서버 URL을 포함한 `/api/stock/admin/collect`다.
 

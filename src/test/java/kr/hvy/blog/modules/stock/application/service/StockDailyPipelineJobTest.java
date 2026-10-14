@@ -64,10 +64,13 @@ class StockDailyPipelineJobTest {
     job.execute(exec);
     assertThat(exec.metadataSnapshot()).containsKey("skipped");
     verify(price, never()).collectRecent(any(), anyList());
+    verify(investor, never()).collectRecent(any(), anyList());
+    verify(resolver, never()).activeTickers();
 
     CollectExecution forced = execution(new BackfillRequest(null, null, null, null, null, null, null, true));
     job.execute(forced);
     verify(price).collectRecent(eq(forced), anyList());
+    verify(investor).collectRecent(forced, List.of("005930", "000660"));
   }
 
   @Test
@@ -107,6 +110,7 @@ class StockDailyPipelineJobTest {
 
     job.execute(exec);
 
+    verify(investor).collectRecent(exec, List.of("005930", "000660"));
     verify(derived).refreshAll(exec);
     verify(corpAction).recordChartHints(anyList());
     verify(stats).collectRecent(eq(exec), anyList());

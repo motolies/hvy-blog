@@ -65,6 +65,66 @@ class StockDerivedMetricPgTest {
   }
 
   @Test
+  void investorMigration_IsRepeatableAndWriterPreservesNullAndZero() throws Exception {
+    // 격리된 스키마에서 버전 컬럼과 이를 참조하는 기존 MV를 재현한다.
+    jdbc.execute("CREATE SCHEMA legacy_investor");
+    jdbc = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl()
+        + "&currentSchema=legacy_investor", POSTGRES.getUsername(), POSTGRES.getPassword()));
+    jdbc.execute("CREATE TABLE tb_stock_investor_daily (LIKE public.tb_stock_investor_daily INCLUDING ALL)");
+    support = new BatchUpsertSupport(jdbc);
+    jdbc.execute("ALTER TABLE tb_stock_investor_daily ADD COLUMN normalization_version SMALLINT NOT NULL DEFAULT 0");
+    for (String column : List.of("foreign_net_amt", "institution_net_amt", "individual_net_amt", "pension_net_amt", "other_net_amt")) {
+      jdbc.execute("ALTER TABLE tb_stock_investor_daily ALTER COLUMN " + column + " SET NOT NULL, ALTER COLUMN " + column + " SET DEFAULT 0");
+    }
+    jdbc.update("INSERT INTO tb_stock_investor_daily(ticker,trade_date) VALUES ('005930', ?)", START);
+    jdbc.execute("CREATE MATERIALIZED VIEW mv_stock_sector_daily AS SELECT normalization_version FROM tb_stock_investor_daily");
+    try (var connection = jdbc.getDataSource().getConnection()) {
+      org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+          new org.springframework.core.io.ClassPathResource("db/stock-derived-rebuild.sql"));
+      var migration = new org.springframework.core.io.ClassPathResource("db/migrate/20261014_01_investor_normalization.sql");
+      org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection, migration);
+      org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection, migration);
+    }
+    assertThat(jdbc.queryForMap("SELECT * FROM tb_stock_investor_daily")).doesNotContainKey("normalization_version");
+    var writer = new StockInvestorWriter(support);
+    var zero = new InvestorDailyRow("005930", START, 0L, 0L, 0L, 0L, 0L, null, null, null);
+    assertThat(writer.upsert(List.of(zero))).isZero();
+    var missing = new InvestorDailyRow("005930", START, null, 0L, null, null, null, null, null, null);
+    assertThat(writer.upsert(List.of(missing))).isEqualTo(1);
+    assertThat(writer.upsert(List.of(missing))).isZero();
+    assertThat(jdbc.queryForMap("SELECT * FROM tb_stock_investor_daily").get("foreign_net_amt")).isNull();
+    jdbc.update("INSERT INTO tb_stock_investor_daily(ticker,trade_date) VALUES ('000660', ?)", START);
+    assertThat(jdbc.queryForMap("SELECT foreign_net_amt, institution_net_amt, individual_net_amt, pension_net_amt, other_net_amt "
+        + "FROM tb_stock_investor_daily WHERE ticker='000660'").values()).containsOnlyNulls();
+  }
+
+  @Test
+  void fullRefreshAfterReloadRepairsMetricsAndSector() {
+    for (int i = 0; i < 6; i++) {
+      jdbc.update("INSERT INTO tb_stock_daily_price(ticker,trade_date,open_price,high_price,low_price,close_price,volume,trading_value) "
+          + "VALUES ('005930',?,100,100,100,100,10,1000)", START.plusDays(i));
+      jdbc.update("INSERT INTO tb_stock_investor_daily(ticker,trade_date,foreign_net_amt,institution_net_amt) VALUES ('005930',?,999,999)", START.plusDays(i));
+    }
+    new StockSectorMapWriter(jdbc, support).sync(List.of(new SectorMapRow("005930", "0021", START, "전기전자", "KRX")), START, "KRX");
+    DerivedViewRefresher refresher = new DerivedViewRefresher(jdbc);
+    refresher.recomputeDailyMetric(null, null, null, null);
+    assertThat(jdbc.queryForObject("SELECT foreign_net_5d FROM tb_stock_daily_metric WHERE trade_date = ?", Double.class, START.plusDays(5))).isEqualTo(4995d);
+    refresher.refresh("mv_stock_sector_daily", false);
+    assertThat(jdbc.queryForList("SELECT foreign_net_sum FROM mv_stock_sector_daily", BigDecimal.class)).allSatisfy(value -> assertThat(value).isEqualByComparingTo("999"));
+    jdbc.execute("TRUNCATE tb_stock_investor_daily");
+    new StockInvestorWriter(support).upsert(List.of(new InvestorDailyRow("005930", START.plusDays(5),
+        -1_387_781_000_000L, 239_692_000_000L, null, null, -68_410_000_000L, null, null, null)));
+    refresher.recomputeDailyMetric(null, null, null, null);
+    assertThat(jdbc.queryForObject("SELECT foreign_net_5d FROM tb_stock_daily_metric WHERE trade_date = ?", Double.class, START.plusDays(5)))
+        .isEqualTo(-1_387_781_000_000d);
+    refresher.refresh("mv_stock_sector_daily", false);
+    assertThat(jdbc.queryForObject("SELECT foreign_net_sum FROM mv_stock_sector_daily WHERE trade_date = ?", BigDecimal.class, START.plusDays(5)))
+        .isEqualByComparingTo("-1387781000000");
+    assertThat(jdbc.queryForList("SELECT foreign_net_5d FROM tb_stock_daily_metric WHERE trade_date < ?", Double.class, START.plusDays(5))).containsOnlyNulls();
+    assertThat(jdbc.queryForList("SELECT foreign_net_sum FROM mv_stock_sector_daily WHERE trade_date < ?", BigDecimal.class, START.plusDays(5))).containsOnlyNulls();
+  }
+
+  @Test
   @DisplayName("종목 지표 테이블: 수익률·이동평균·52주 고점·거래대금 비율·외인 5일 누적이 프레임대로 계산되고, 증분 재계산은 하한 이후 행만 바꾼다")
   void dailyMetric() {
     List<LocalDate> days = tradingDays();

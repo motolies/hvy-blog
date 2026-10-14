@@ -101,7 +101,7 @@ public final class StockRowMapper {
   }
 
   /**
-   * 투자자매매동향(일별) → 행. 기타 = 기타법인 + 기타단체 + 기타. 같은 날짜가 여러 페이지에 겹치면 뒤 것을 버린다.
+   * 투자자매매동향(일별) → 행. 백만원을 원으로 환산하고 기타 합계를 우선한다. 같은 날짜가 여러 페이지에 겹치면 뒤 것을 버린다.
    */
   public static List<InvestorDailyRow> toInvestorRows(String ticker, List<KisInvestorDailyResponse.Row> rows) {
     List<InvestorDailyRow> result = new ArrayList<>(rows.size());
@@ -111,11 +111,15 @@ public final class StockRowMapper {
       if (date == null || !seen.add(date)) {
         continue;
       }
-      long other = KisValues.longValue(r.etcNetAmt(), 0L) + KisValues.longValue(r.etcCorpNetAmt(), 0L)
-          + KisValues.longValue(r.etcOrgNetAmt(), 0L);
+      BigDecimal other = KisValues.decimal(r.etcNetAmt());
+      if (other == null) {
+        BigDecimal corp = KisValues.decimal(r.etcCorpNetAmt());
+        BigDecimal org = KisValues.decimal(r.etcOrgNetAmt());
+        other = corp != null && org != null ? corp.add(org) : null;
+      }
       result.add(new InvestorDailyRow(ticker, date,
-          KisValues.longValue(r.foreignNetAmt(), 0L), KisValues.longValue(r.institutionNetAmt(), 0L),
-          KisValues.longValue(r.individualNetAmt(), 0L), KisValues.longValue(r.pensionNetAmt(), 0L), other,
+          millionToWon(KisValues.decimal(r.foreignNetAmt())), millionToWon(KisValues.decimal(r.institutionNetAmt())),
+          millionToWon(KisValues.decimal(r.individualNetAmt())), millionToWon(KisValues.decimal(r.pensionNetAmt())), millionToWon(other),
           KisValues.longValue(r.foreignNetQty()), KisValues.longValue(r.institutionNetQty()),
           KisValues.longValue(r.individualNetQty())));
     }
@@ -196,6 +200,11 @@ public final class StockRowMapper {
     boolean mod = "Y".equalsIgnoreCase(row.modYn());
     boolean split = row.splitRate() != null && row.splitRate().signum() != 0;
     return flng || mod || split;
+  }
+
+  /** 백만원 → 원. 소수 절삭이나 오버플로 없이 변환하며 실패는 수집 실패로 전파한다. */
+  private static Long millionToWon(BigDecimal amount) {
+    return amount == null ? null : amount.multiply(BigDecimal.valueOf(1_000_000L)).longValueExact();
   }
 
   private static String blankToNull(String value) {

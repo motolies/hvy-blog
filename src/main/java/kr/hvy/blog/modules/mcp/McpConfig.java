@@ -171,6 +171,8 @@ public class McpConfig {
       METRIC 가격·수익률은 수정주가 기반. ret_*·dist_*는 비율(0.01=1%), tv_*·net_* 금액은 원.
       VALUATION 시총 원, EPS/BPS 원, PER/PBR 배, foreign_hold_rate %. ETF_NAV close_price 원가격(원), nav 원, disparity_rate %.
       INDEX·INDEX_METRIC 지수 포인트, ret_* 비율. BREADTH *_ratio는 비율. MASTER_HISTORY는 valid_from 기준 변경 이력, ADJUST_EVENT의 *_factor는 배수. INDEX 지수 포인트. GLOBAL 가격은 원천 통화/포인트이며 symbol·market_div로 구분. change_rate 필드는 %(1=1%).
+      INVESTOR 금액은 원, null은 결측, 0은 실제 0입니다.
+      종목 5일·업종 수급 합계는 복구된 비결측 값만 집계하므로 부분 복구 기간은 전체 합계로 해석하지 마세요.
       MARKET_INVESTOR 금액·수량은 KIS 원천 단위 그대로이며 확인되지 않은 단위를 원으로 가정하지 마세요.
       stockFinancials는 available_from와 first_seen_at KST 날짜 모두 기준일 이하인 행만 제공. 재무 금액은 백만원, 비율은 %.
       재무·거시 정정 이력이 완전한 당시 버전을 보장하지는 않습니다. MACRO는 available_from<=to 및 obs_date<to로 게시 지연 제한.

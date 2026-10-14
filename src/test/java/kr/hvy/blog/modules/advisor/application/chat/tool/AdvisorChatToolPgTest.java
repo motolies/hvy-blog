@@ -127,6 +127,15 @@ class AdvisorChatToolPgTest {
   }
 
   @Test
+  void investorWonAmounts_DisplayWithExistingEokPrecision() {
+    // 계획에 주어진 누적값의 표시 회귀. 원본 5일 fixture 검증을 대체하지 않는다.
+    assertThat(StockToolkit.eok(-2_879_831_000_000d)).isEqualTo(-28_798.3);
+    assertThat(StockToolkit.eok(-1_546_966_000_000d)).isEqualTo(-15_469.7);
+    assertThat(StockToolkit.eok(null)).isNull();
+    assertThat(StockToolkit.eok(0d)).isZero();
+  }
+
+  @Test
   @DisplayName("시장 개요·추세·연동 — 미래 기준일을 넣어도 마지막 거래일로 클램프되고 asOf 가 실린다")
   void marketToolsClampFuture() {
     Map<String, Object> overview = market.marketOverview(FUTURE.toString(), context);

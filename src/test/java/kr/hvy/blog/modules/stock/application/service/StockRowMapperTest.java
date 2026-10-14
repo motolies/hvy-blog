@@ -23,6 +23,53 @@ import org.junit.jupiter.api.Test;
 class StockRowMapperTest {
 
   @Test
+  void investorAmounts_NormalizeExactlyAndPreferTotal() {
+    var raw = investor("-1387781", "239692", "0", "", "-68410", "-60000", "-8410");
+    var row = StockRowMapper.toInvestorRows("005930", List.of(raw, raw)).getFirst();
+    assertThat(row.foreignNetAmt()).isEqualTo(-1_387_781_000_000L);
+    assertThat(row.institutionNetAmt()).isEqualTo(239_692_000_000L);
+    assertThat(row.individualNetAmt()).isZero();
+    assertThat(row.pensionNetAmt()).isNull();
+    assertThat(row.otherNetAmt()).isEqualTo(-68_410_000_000L);
+    assertThat(row.foreignNetQty()).isEqualTo(-123L);
+    assertThat(StockRowMapper.toInvestorRows("005930", List.of(raw, raw))).hasSize(1);
+  }
+
+  @Test
+  void investorAmounts_MissingAndFallbackRemainDistinctFromZero() {
+    var row = StockRowMapper.toInvestorRows("005930", List.of(
+        investor(null, " ", "0", "1.25", null, "-2", "3"))).getFirst();
+    assertThat(row.foreignNetAmt()).isNull();
+    assertThat(row.institutionNetAmt()).isNull();
+    assertThat(row.individualNetAmt()).isZero();
+    assertThat(row.pensionNetAmt()).isEqualTo(1_250_000L);
+    assertThat(row.otherNetAmt()).isEqualTo(1_000_000L);
+    assertThat(StockRowMapper.toInvestorRows("005930", List.of(
+        investor(null, null, null, null, "", "1", null))).getFirst().otherNetAmt()).isNull();
+    assertThat(StockRowMapper.toInvestorRows("005930", List.of(
+        investor(null, null, null, null, "0", "1", "2"))).getFirst().otherNetAmt()).isZero();
+  }
+
+  @Test
+  void investorAmounts_OverflowOrFractionalWonFailsCollection() {
+    for (String value : List.of("9223372036854.775808", "-9223372036854.775809", "0.0000001")) {
+      org.assertj.core.api.Assertions.assertThatThrownBy(() -> StockRowMapper.toInvestorRows("005930",
+          List.of(investor(value, null, null, null, null, null, null))))
+          .isInstanceOf(ArithmeticException.class);
+    }
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> StockRowMapper.toInvestorRows("005930",
+        List.of(investor(null, null, null, null, null, "9223372036854", "1"))))
+        .isInstanceOf(ArithmeticException.class);
+  }
+
+  // 계획에 제시된 10/13 금액 기반 표본. 원본 5거래일 응답은 별도 확보해야 한다.
+  private static kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse.Row investor(
+      String foreign, String institution, String individual, String pension, String total, String corp, String org) {
+    return new kr.hvy.blog.modules.stock.client.dto.KisInvestorDailyResponse.Row(
+        "20261013", "0", "-123", "0", "45", "0", foreign, individual, institution, pension, total, corp, org);
+  }
+
+  @Test
   @DisplayName("일봉 캔들은 등락률을 전일대비/전일종가로 계산하고 필수값 누락 행은 버린다")
   void dailyPriceRows() {
     List<KisDailyChartResponse.Candle> candles = List.of(

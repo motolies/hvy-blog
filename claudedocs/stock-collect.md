@@ -266,3 +266,11 @@ Slack·psql·curl 로만 하던 운영을 화면으로 옮긴다. 화면은 **�
 - `GET /api/advisor/admin/gate?baseDate=` — ADVISE 게이트 판정(stock-advisor.md §13).
 
 검증: `StockCollectAdminRunsFilterIntegrationTest`(H2, KST 경계·404)·`SchedulerCatalogManualTriggerTest`. 배포 후 prod health 응답에 `manualTrigger` 가 실리는지, 기존 `/admin` 대시보드 스케줄러 표가 그대로 렌더되는지, `#hvy-error` 에 새 400/404 알림이 늘지 않는지 24시간 관찰.
+
+## 13. 종목 수급 금액 복구 (2026-10-14)
+
+`StockRowMapper.toInvestorRows`는 FHPTJ04160001 금액(백만원)을 정확히 1,000,000배 하여 원으로 저장한다. 정수 범위 초과·원 미만 소수는 수집 실패다. 수량은 주 단위를 유지한다. 기타는 `etc_ntby_tr_pbmn` 우선이며, 없으면 기타법인·기타단체가 모두 있을 때만 합산한다. 금액 `NULL`은 결측, `0`은 실제 0이다.
+
+`StockInvestorWriter`는 버전 컬럼 없이 `Long`·nullable 금액을 저장한다. MCP INVESTOR 조회·최신일과 종목·업종 파생 집계에는 버전 필터가 없다. 파생 합계는 비결측 값의 부분 합계이며 전부 결측이면 NULL이다. 시장별 수급 API와 기존 advisor 판단·픽·성과는 보존한다.
+
+전체 복구는 [종목 수급 전체 백필](stock-investor-backfill.md)의 **중지 → 백업 → 수급만 초기화 → 배포 → 표본 → 전체 재수집 → 파생 갱신 → 조회 재개** 절차를 따른다. 백필 중 조회를 재개하지 않으며 복구하지 못한 과거 행은 백업에만 남긴다. 이번 코드 변경에서는 운영 백필을 실행하지 않는다.

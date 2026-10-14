@@ -39,10 +39,23 @@ class McpReadPgTest {
     jdbc = new JdbcTemplate(ds);
     reader = new McpReadService(new NamedParameterJdbcTemplate(ds), JsonMapper.builder().build());
     tx = McpConfig.readTransaction(new DataSourceTransactionManager(ds));
-    jdbc.execute("TRUNCATE tb_stock_daily_price, tb_stock_adjust_event, tb_stock_financial, tb_stock_macro_daily, tb_stock_event_timeline, tb_advisor_advice CASCADE");
+    jdbc.execute("TRUNCATE tb_stock_investor_daily, tb_stock_daily_price, tb_stock_adjust_event, tb_stock_financial, tb_stock_macro_daily, tb_stock_event_timeline, tb_advisor_advice CASCADE");
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_adjust_factor");
   }
   @SuppressWarnings("unchecked") List<Map<String, Object>> items(Map<String, Object> result) { return (List<Map<String, Object>>) result.get("items"); }
+
+  @Test void investorPublishesAmountsAndFreshnessWithoutVersion() {
+    jdbc.execute("INSERT INTO tb_stock_investor_daily(ticker,trade_date,foreign_net_amt) VALUES "
+        + "('005930','2026-01-01',-1387781000000),('005930','2026-01-02',0)");
+    var result = reader.series(true,"INVESTOR","005930","2026-01-01","2026-01-02",null,50,null);
+    assertThat(items(result)).hasSize(2);
+    assertThat(items(result).getFirst().get("foreign_net_amt")).isEqualTo(-1_387_781_000_000L);
+    assertThat(items(result).getFirst().get("institution_net_amt")).isNull();
+    assertThat(items(result).getLast().get("foreign_net_amt")).isEqualTo(0);
+    assertThat(items(result).getFirst()).doesNotContainKey("normalization_version");
+    assertThat(result.get("dataAsOf")).isEqualTo("2026-01-02");
+    assertThat(((Map<?, ?>) reader.freshness().get("dataAsOf")).get("INVESTOR")).isEqualTo("2026-01-02");
+  }
 
   @Test void adjustedPriceAndContinuousPages() {
     for (int day = 1; day <= 4; day++) jdbc.update("INSERT INTO tb_stock_daily_price(ticker,trade_date,open_price,high_price,low_price,close_price,volume,trading_value) VALUES ('005930',?::date,100,100,100,100,10,1000)", "2026-01-0" + day);

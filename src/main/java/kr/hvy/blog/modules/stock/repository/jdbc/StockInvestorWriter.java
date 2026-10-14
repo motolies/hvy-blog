@@ -52,11 +52,11 @@ public class StockInvestorWriter {
   private static void bind(PreparedStatement ps, InvestorDailyRow row) throws SQLException {
     ps.setString(1, row.ticker());
     ps.setObject(2, row.tradeDate());
-    ps.setLong(3, row.foreignNetAmt());
-    ps.setLong(4, row.institutionNetAmt());
-    ps.setLong(5, row.individualNetAmt());
-    ps.setLong(6, row.pensionNetAmt());
-    ps.setLong(7, row.otherNetAmt());
+    ps.setObject(3, row.foreignNetAmt());
+    ps.setObject(4, row.institutionNetAmt());
+    ps.setObject(5, row.individualNetAmt());
+    ps.setObject(6, row.pensionNetAmt());
+    ps.setObject(7, row.otherNetAmt());
     ps.setObject(8, row.foreignNetQty());
     ps.setObject(9, row.institutionNetQty());
     ps.setObject(10, row.individualNetQty());

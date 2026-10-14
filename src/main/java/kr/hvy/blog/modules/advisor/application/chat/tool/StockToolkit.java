@@ -75,7 +75,7 @@ public class StockToolkit {
   }
 
   @Tool(name = "stockSnapshot", description = "종목 하나의 기준일 스냅샷: 수정 종가, 1/5/20/60/120일 수익률, MA 5/20/60/120, MA20·MA60 이격, 52주 고가와 이격, 거래대금 5일 평균과 "
-      + "5일/60일 비율(거래 급증), 외국인·기관 5일 순매수(억원), 시가총액(억원)·PER·PBR·외인지분율, 섹터. '삼성전자 요즘 어때?' 류 질문에 쓴다. 종목코드는 resolveStock 으로 먼저 확인한다.")
+      + "5일/60일 비율(거래 급증), 외국인·기관 5일 순매수(억원, 복구된 비결측 금액의 합계이며 미복구 기간은 불완전할 수 있음), 시가총액(억원)·PER·PBR·외인지분율, 섹터. '삼성전자 요즘 어때?' 류 질문에 쓴다. 종목코드는 resolveStock 으로 먼저 확인한다.")
   public Map<String, Object> stockSnapshot(
       @ToolParam(description = "6자리 종목코드") String ticker,
       @ToolParam(required = false, description = MarketToolkit.AS_OF_DESC) String asOf, ToolContext context) {

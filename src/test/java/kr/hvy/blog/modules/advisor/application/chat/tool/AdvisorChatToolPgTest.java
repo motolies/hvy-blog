@@ -41,8 +41,11 @@ import kr.hvy.blog.modules.advisor.repository.jdbc.ScoreWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.StockLookupReader;
 import kr.hvy.blog.modules.advisor.repository.jdbc.WeightSetRepository;
 import kr.hvy.blog.modules.stock.application.service.MarketCalendarService;
+import kr.hvy.blog.modules.stock.domain.code.MarketType;
+import kr.hvy.blog.modules.stock.domain.model.MarketInvestorRow;
 import kr.hvy.blog.modules.stock.repository.jdbc.BatchUpsertSupport;
 import kr.hvy.blog.modules.stock.repository.jdbc.DerivedViewRefresher;
+import kr.hvy.blog.modules.stock.repository.jdbc.StockMarketInvestorWriter;
 import kr.hvy.blog.modules.stock.repository.jdbc.StockNewsWriter;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -133,6 +136,25 @@ class AdvisorChatToolPgTest {
     assertThat(StockToolkit.eok(-1_546_966_000_000d)).isEqualTo(-15_469.7);
     assertThat(StockToolkit.eok(null)).isNull();
     assertThat(StockToolkit.eok(0d)).isZero();
+  }
+
+  @Test
+  @DisplayName("시장 수급 원 금액은 억원 정수로 표시된다 — KOSPI 2026-10-13 외국인 -4조5789억 → frgn1 -45789 (0 이던 회귀)")
+  void marketOverviewFlowsInEok() {
+    // MarketInvestorRow 인자 순서: (amt, qty) × 15 — 외국인·개인·기관 대금만 넣고 나머지는 결측
+    new StockMarketInvestorWriter(new BatchUpsertSupport(jdbc)).upsert(List.of(new MarketInvestorRow(MarketType.KOSPI, BASE,
+        -4_578_915_000_000L, -4_383L, null, null, null, null, 2_316_934_000_000L, null, 1_668_512_000_000L, null,
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
+    try {
+      Map<String, Object> overview = market.marketOverview(BASE.toString(), context);
+      assertThat(overview).containsEntry("flowUnit", "억원");
+      @SuppressWarnings("unchecked")
+      List<Map<String, Object>> flows = (List<Map<String, Object>>) overview.get("flows");
+      assertThat(flows).anySatisfy(f -> assertThat(f).containsEntry("market", "KOSPI")
+          .containsEntry("frgn1", -45789L).containsEntry("indi1", 23169L).containsEntry("inst1", 16685L).containsEntry("frgn5", -45789L));
+    } finally {
+      jdbc.update("DELETE FROM tb_stock_market_investor_daily WHERE market_type = 'KOSPI' AND trade_date = ?", BASE);
+    }
   }
 
   @Test

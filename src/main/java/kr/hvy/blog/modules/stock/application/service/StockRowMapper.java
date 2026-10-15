@@ -163,7 +163,8 @@ public final class StockRowMapper {
   }
 
   /**
-   * 시장별 투자자매매동향 → 행. 날짜 없는 행은 버리고 같은 날짜는 앞 것을 남긴다.
+   * 시장별 투자자매매동향 → 행. FHPTJ04040000 대금(백만원)은 ×1,000,000 원으로 환산하고 수량(천주)은 원천 그대로 둔다.
+   * 날짜 없는 행은 버리고 같은 날짜는 앞 것을 남긴다.
    */
   public static List<MarketInvestorRow> toMarketInvestorRows(MarketType market, List<KisMarketInvestorResponse.Row> rows) {
     Map<LocalDate, MarketInvestorRow> byDate = new LinkedHashMap<>();
@@ -173,7 +174,21 @@ public final class StockRowMapper {
         continue;
       }
       byDate.putIfAbsent(date, new MarketInvestorRow(market, date,
-          KisValues.longValue(r.foreignNetAmt()), KisValues.longValue(r.foreignNetQty()), KisValues.longValue(r.foreignRegNetAmt()), KisValues.longValue(r.foreignRegNetQty()), KisValues.longValue(r.foreignNregNetAmt()), KisValues.longValue(r.foreignNregNetQty()), KisValues.longValue(r.individualNetAmt()), KisValues.longValue(r.individualNetQty()), KisValues.longValue(r.institutionNetAmt()), KisValues.longValue(r.institutionNetQty()), KisValues.longValue(r.securitiesNetAmt()), KisValues.longValue(r.securitiesNetQty()), KisValues.longValue(r.investTrustNetAmt()), KisValues.longValue(r.investTrustNetQty()), KisValues.longValue(r.privateFundNetAmt()), KisValues.longValue(r.privateFundNetQty()), KisValues.longValue(r.bankNetAmt()), KisValues.longValue(r.bankNetQty()), KisValues.longValue(r.insuranceNetAmt()), KisValues.longValue(r.insuranceNetQty()), KisValues.longValue(r.merchantBankNetAmt()), KisValues.longValue(r.merchantBankNetQty()), KisValues.longValue(r.pensionNetAmt()), KisValues.longValue(r.pensionNetQty()), KisValues.longValue(r.otherNetAmt()), KisValues.longValue(r.otherNetQty()), KisValues.longValue(r.otherOrgNetAmt()), KisValues.longValue(r.otherOrgNetQty()), KisValues.longValue(r.otherCorpNetAmt()), KisValues.longValue(r.otherCorpNetQty())));
+          marketAmt(r.foreignNetAmt()), KisValues.longValue(r.foreignNetQty()),
+          marketAmt(r.foreignRegNetAmt()), KisValues.longValue(r.foreignRegNetQty()),
+          marketAmt(r.foreignNregNetAmt()), KisValues.longValue(r.foreignNregNetQty()),
+          marketAmt(r.individualNetAmt()), KisValues.longValue(r.individualNetQty()),
+          marketAmt(r.institutionNetAmt()), KisValues.longValue(r.institutionNetQty()),
+          marketAmt(r.securitiesNetAmt()), KisValues.longValue(r.securitiesNetQty()),
+          marketAmt(r.investTrustNetAmt()), KisValues.longValue(r.investTrustNetQty()),
+          marketAmt(r.privateFundNetAmt()), KisValues.longValue(r.privateFundNetQty()),
+          marketAmt(r.bankNetAmt()), KisValues.longValue(r.bankNetQty()),
+          marketAmt(r.insuranceNetAmt()), KisValues.longValue(r.insuranceNetQty()),
+          marketAmt(r.merchantBankNetAmt()), KisValues.longValue(r.merchantBankNetQty()),
+          marketAmt(r.pensionNetAmt()), KisValues.longValue(r.pensionNetQty()),
+          marketAmt(r.otherNetAmt()), KisValues.longValue(r.otherNetQty()),
+          marketAmt(r.otherOrgNetAmt()), KisValues.longValue(r.otherOrgNetQty()),
+          marketAmt(r.otherCorpNetAmt()), KisValues.longValue(r.otherCorpNetQty())));
     }
     return new ArrayList<>(byDate.values());
   }
@@ -205,6 +220,11 @@ public final class StockRowMapper {
   /** 백만원 → 원. 소수 절삭이나 오버플로 없이 변환하며 실패는 수집 실패로 전파한다. */
   private static Long millionToWon(BigDecimal amount) {
     return amount == null ? null : amount.multiply(BigDecimal.valueOf(1_000_000L)).longValueExact();
+  }
+
+  /** 시장별 대금 백만원 → 원. 결측(빈 문자열·"-")은 null, 원 미만 소수·오버플로는 수집 실패로 전파한다. */
+  private static Long marketAmt(String raw) {
+    return millionToWon(KisValues.decimal(raw));
   }
 
   private static String blankToNull(String value) {

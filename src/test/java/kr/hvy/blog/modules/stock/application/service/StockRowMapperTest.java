@@ -140,7 +140,7 @@ class StockRowMapperTest {
   }
 
   @Test
-  @DisplayName("시장별 투자자: 31개 키 JSON 이 전부 역직렬화되고(접미사 예외 5개 포함) 15주체 대금·수량이 행으로 들어간다")
+  @DisplayName("시장별 투자자: 31개 키 JSON 이 전부 역직렬화되고(접미사 예외 5개 포함) 15주체 대금은 원으로 환산되고 수량은 천주 그대로 행에 들어간다")
   void marketInvestorRows() throws Exception {
     String json;
     try (var in = getClass().getClassLoader().getResourceAsStream("kis/market-investor-daily.json")) {
@@ -161,10 +161,54 @@ class StockRowMapperTest {
     MarketInvestorRow row = rows.get(0);
     assertThat(row.marketType()).isEqualTo(MarketType.KOSDAQ);
     assertThat(row.tradeDate()).isEqualTo(LocalDate.of(2026, 9, 4));
-    assertThat(row.foreignNetQty()).isEqualTo(1L);
-    assertThat(row.foreignNetAmt()).isEqualTo(2L);
+    assertThat(row.foreignNetQty()).isEqualTo(1L);                 // 수량은 천주 그대로
+    assertThat(row.foreignNetAmt()).isEqualTo(2_000_000L);         // 대금은 백만원 → 원
     assertThat(row.pensionNetQty()).isEqualTo(23L);
-    assertThat(row.pensionNetAmt()).isEqualTo(24L);
-    assertThat(row.otherCorpNetAmt()).isEqualTo(30L);
+    assertThat(row.pensionNetAmt()).isEqualTo(24_000_000L);
+    assertThat(row.otherCorpNetAmt()).isEqualTo(30_000_000L);
+  }
+
+  @Test
+  @DisplayName("시장별 투자자: 대금(백만원)은 정확히 1,000,000배 원으로, 수량(천주)은 원천 그대로 — KOSPI 2026-10-13 실측값")
+  void marketInvestorAmounts_NormalizeExactlyAndKeepQty() {
+    var raw = marketRow("-4383", "-4578915");
+    List<MarketInvestorRow> rows = StockRowMapper.toMarketInvestorRows(MarketType.KOSPI, List.of(raw, raw));
+    assertThat(rows).hasSize(1);
+    MarketInvestorRow row = rows.getFirst();
+    assertThat(row.tradeDate()).isEqualTo(LocalDate.of(2026, 10, 13));
+    assertThat(row.foreignNetAmt()).isEqualTo(-4_578_915_000_000L);
+    assertThat(row.foreignNetQty()).isEqualTo(-4_383L);
+    assertThat(StockRowMapper.toMarketInvestorRows(MarketType.KOSPI, List.of(marketRow("7", "1.5"))).getFirst().foreignNetAmt())
+        .isEqualTo(1_500_000L);
+    assertThat(StockRowMapper.toMarketInvestorRows(MarketType.KOSPI, List.of(marketRow("0", "0"))).getFirst().foreignNetAmt()).isZero();
+  }
+
+  @Test
+  @DisplayName("시장별 투자자: 결측(빈 문자열·공백·'-'·null)은 0 이 아니라 null 로 남는다")
+  void marketInvestorAmounts_MissingStaysNull() {
+    MarketInvestorRow blank = StockRowMapper.toMarketInvestorRows(MarketType.KOSDAQ, List.of(marketRow("", " "))).getFirst();
+    assertThat(blank.foreignNetQty()).isNull();
+    assertThat(blank.foreignNetAmt()).isNull();
+    assertThat(blank.pensionNetAmt()).isNull();
+    assertThat(blank.otherCorpNetQty()).isNull();
+    MarketInvestorRow dash = StockRowMapper.toMarketInvestorRows(MarketType.KOSDAQ, List.of(marketRow("-", null))).getFirst();
+    assertThat(dash.foreignNetQty()).isNull();
+    assertThat(dash.foreignNetAmt()).isNull();
+  }
+
+  @Test
+  @DisplayName("시장별 투자자: 원 미만 소수·long 범위 초과 대금은 절삭하지 않고 수집 실패로 전파한다")
+  void marketInvestorAmounts_OverflowOrFractionalWonFailsCollection() {
+    for (String value : List.of("9223372036854.775808", "-9223372036854.775809", "0.0000001")) {
+      org.assertj.core.api.Assertions.assertThatThrownBy(() -> StockRowMapper.toMarketInvestorRows(MarketType.KOSPI,
+          List.of(marketRow("1", value))))
+          .isInstanceOf(ArithmeticException.class);
+    }
+  }
+
+  /** 날짜 2026-10-13, 외국인 수량·대금만 지정하고 나머지 28개 필드는 빈 문자열(결측). */
+  private static KisMarketInvestorResponse.Row marketRow(String foreignQty, String foreignAmt) {
+    return new KisMarketInvestorResponse.Row("20261013", foreignQty, foreignAmt,
+        "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "");
   }
 }

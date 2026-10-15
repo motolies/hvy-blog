@@ -66,7 +66,7 @@ curl -X POST $B/ADJUST_FACTOR                            # 계수 산출 → MV 
 curl -X POST $B/INVESTOR_BACKFILL                        # 소급 깊이 실측 (EXHAUSTED 분포 확인)
 curl -X POST $B/VALUATION                                # 오늘 스냅샷(시총·PER·PBR). 당일만 제공되므로 DAILY 로 누적 (BACKFILL_ALL 은 날짜 필터를 떼고 넘김)
 curl -X POST $B/MARKET_STAT                              # 공매도·신용·프로그램 최근 window-days
-curl -X POST $B/MARKET_INVESTOR_BACKFILL                 # 시장별(KOSPI·KOSDAQ) 투자자 15주체 2015~ (202, 영업일 역순 ≈5,800호출 ≈ 6분). KisMarketInvestorManualTest 실측 선행
+curl -X POST $B/MARKET_INVESTOR_BACKFILL                 # 시장별(KOSPI·KOSDAQ) 투자자 15주체 2015~ (202, 영업일 역순. 호출당 ≈300일 응답이라 시장당 ≈10호출). 단위 정규화(§14) 재수집은 -d '{"resetCheckpoint":true}'
 curl -X POST $B/ETF_NAV_BACKFILL                         # 활성 ETF(EF) NAV·괴리율 2015~ (202, ≈1,000종목 × 29윈도우 ≈ 30분)
 curl -X POST $B/FINANCIAL_BACKFILL                       # 종목당 12호출(6종 × 연/분기), 전 종목 ≈36분
 curl -X POST $B/OVERSEAS_BACKFILL                        # kis.overseas.symbols
@@ -200,7 +200,7 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 | 상폐 종목 조회 가능 여부 | **확인됨(2026-09-07)** — 동양생명 082640 에 `lstg_abol_dt=20260831` 이 옴. 단, 응답 `pdno` 는 12자 상품번호(`00000A082640`)라 ticker 로 쓰면 varchar(10) 초과 → 요청 종목코드를 키로 쓰도록 수정. `pdno` 가 요청 코드로 끝나지 않으면 run metadata `pdnoMismatch` 에 센다 | `POST /STOCK_INFO {"tickers":["<상폐코드>"]}` → `is_active=false` 행이 6자 ticker 로 생성되는지 |
 | 수정주가 모드 거래량 보정 | 미정 | `ADJUST_FACTOR` run metadata `verification` 의 volume 오차 |
 | 투자자 일별 소급 깊이·페이징 | 호출당 30건(일부 60건) 확인. 2026-09-08 실측은 API 한계가 아니라 `max-windows=40` 상한(2021-10-13/14·2016-11-22/23 두 클러스터)에서 멈춘 것 → 120 으로 올려 재실행 | 재실행 후 `EXHAUSTED` 의 `earliest_loaded` 분포 (PAUSED 가 남으면 재트리거) |
-| 투자자·재무 금액 단위 | 응답 그대로(원 / 억원 추정) | 삼성전자 1건을 HTS 값과 비교 |
+| 투자자·재무 금액 단위 | **확인됨(2026-10-14/15)** — 종목·시장별 투자자 대금 모두 KIS 백만원 → 저장 시 ×1e6 원(§13·§14). 시장별 수량은 천주 그대로. 재무는 백만원 그대로 | 종목: 삼성전자 10/13 외국인 -1,387,781 ↔ -1조3878억. 시장: KOSPI 10/13 외국인 -4,578,915 ↔ 뉴스 -4조5128억 |
 | 시가총액 `hts_avls` | 억원 → ×1e8 | `tb_stock_valuation_daily.market_cap` 대조 |
 | 마스터 `lstn_stcn` | 헤더 주석은 "(천)" 이나 원값 저장 | 현재가 API `lstn_stcn` 과 비교 후 필요 시 `StockMaster.applyFrom` 보정 |
 | 예탁원 배정율 단위 | 주당 주수(0.5 = 1주당 0.5주) | 무상증자 종목 계수 대조 결과 |
@@ -209,7 +209,7 @@ enum 규약: stock 모듈의 public enum 은 모두 `EnumCode<String>`(hvy-commo
 | 재무 API 파라미터 대소문자 | **확인됨(2026-09-08)** — 손익·대차·재무비율 3종 116K행·2,565종목·2004~ 적재 | — |
 | 재무 성장성·수익성·안정성 3종 필드명 | data.csv column_mapping 그대로(`bsop_prfi_inrt`, `cptl_ntin_rate`, `crnt_rate` 등) | `FINANCIAL_BACKFILL {"tickers":["005930"],"resetCheckpoint":true}` 후 `raw_json` 키·9컬럼 값 확인 |
 | ETF NAV (FHPST02440200) | output 단일 리스트, 100건/호출, 괴리율 부호·NAV 소수 4자리 가정. **2026-09-09 실측: 265690 에서 등락률/괴리율이 10^4 이상으로 와 NUMERIC(8,4) overflow → 12,4 로 확장(migrate 20260912_01). |값| ≥ 10000 은 NAV 없음으로 해석** | `KisEtfNavManualTest`(069500) → `ETF_NAV_BACKFILL` 체크포인트 EXHAUSTED 분포. 265690 의 튀는 컬럼 확인: `SELECT trade_date, nav, change_rate, nav_change_rate, disparity_rate FROM tb_stock_etf_nav_daily WHERE ticker='265690' AND (abs(disparity_rate)>=10000 OR abs(change_rate)>=10000 OR abs(nav_change_rate)>=10000)` |
-| 시장별 투자자 (FHPTJ04040000) | 경로 `inquire-investor-daily-by-market`(예제 디렉터리명 추정), `FID_INPUT_ISCD`=종합지수코드·`_1`=KSP/KSQ·`_2`=종합지수코드, 호출당 1일, 금액 원 | **백필 전 필수** `KisMarketInvestorManualTest`: KSP 와 KSQ 응답이 다른지, 0001 vs 1001, 응답 일수, HTS 0404 단위 대조 |
+| 시장별 투자자 (FHPTJ04040000) | 경로 `inquire-investor-daily-by-market`(예제 디렉터리명 추정), `FID_INPUT_ISCD`=종합지수코드·`_1`=KSP/KSQ·`_2`=종합지수코드, 호출당 1회(응답 ≈300일, DAILY 도 전량 upsert), **확인됨(2026-10-15)** 금액 백만원·수량 천주 (KOSPI 10/13 외국인 -4,578,915 ↔ 뉴스 -4조5128억, 종목 합계 비 0.99~1.00). 저장은 원·천주(§14) | **백필 전 필수** `KisMarketInvestorManualTest`: KSP 와 KSQ 응답이 다른지, 0001 vs 1001, 응답 일수, HTS 0404 단위 대조 |
 | theme_code.mst 레이아웃 | 앞 3자 테마코드 + 가변 테마명 + 줄 끝 10자 종목코드(6자 또는 A 접두) | `KisThemeFileManualTest`(@Disabled 해제, 키 불필요) 히스토그램 → `THEME_TICKER_WIDTH`·`ThemeCodeRecord.ticker()` 확정 |
 | EGW00133 등 토큰 오류 코드 | `KisErrorCode` 추정값 | `tb_stock_kis_api_failure.kis_msg_cd` |
 
@@ -274,3 +274,13 @@ Slack·psql·curl 로만 하던 운영을 화면으로 옮긴다. 화면은 **�
 `StockInvestorWriter`는 버전 컬럼 없이 `Long`·nullable 금액을 저장한다. MCP INVESTOR 조회·최신일과 종목·업종 파생 집계에는 버전 필터가 없다. 파생 합계는 비결측 값의 부분 합계이며 전부 결측이면 NULL이다. 시장별 수급 API와 기존 advisor 판단·픽·성과는 보존한다.
 
 전체 복구는 [종목 수급 전체 백필](stock-investor-backfill.md)의 **중지 → 백업 → 수급만 초기화 → 배포 → 표본 → 전체 재수집 → 파생 갱신 → 조회 재개** 절차를 따른다. 백필 중 조회를 재개하지 않으며 복구하지 못한 과거 행은 백업에만 남긴다. 이번 코드 변경에서는 운영 백필을 실행하지 않는다.
+
+## 14. 시장별 수급 금액 단위 정규화 (2026-10-15)
+
+`StockRowMapper.toMarketInvestorRows`는 FHPTJ04040000 대금(백만원)을 정확히 1,000,000배 하여 원으로 저장한다. 정수 범위 초과·원 미만 소수는 해당 시장의 수집 실패(`recordFailure`)다. 수량은 KIS 원천 단위인 천주를 그대로 둔다(소비자 없음). 금액 `NULL`은 결측, `0`은 실제 0이다.
+
+근거: KOSPI 2026-10-13 KIS 원본 `frgn_ntby_tr_pbmn=-4578915` ↔ 마감시황 외국인 -4조 5,128억(백만원), 종목 테이블(원) KOSPI 합계 ÷ (시장값 × 1e6) = 0.99~1.00, `frgn_ntby_qty=-4383` vs 삼성전자 한 종목 -5,943,474주(천주). 원본 조회는 `scripts/query-market-investor-daily.sh`.
+
+영향: 그동안 `MarketToolkit.eok()`(원 ÷ 1e8)이 백만원 값을 받아 marketOverview 시장 수급이 전부 0이었고, advice 프롬프트 `market.flow`("금액(원)")에는 백만원 값이 원으로 들어갔다. 소비자(`MarketFeatureService` 5일 합·`MarketToolkit` 억원 표시·프롬프트)는 변경 없이 데이터가 원이 되면서 정확해진다. `flowProvisional=true`는 고정 라벨이며 원인이 아니다.
+
+기존 행은 UPDATE 마이그레이션 없이 `MARKET_INVESTOR_BACKFILL {"resetCheckpoint":true}` 재수집으로 보정한다. DAILY `collectRecent`도 응답 ≈300일을 통째로 upsert 하므로 배포 후 첫 수집에서 최근 구간이 즉시 원이 되고, 5일 합산에 단위가 섞이지 않는다. 컬럼 COMMENT(원/천주)는 `migrate/20261015_01_market_investor_unit_comments.sql`로 운영 DB에 적용한다(`stock://catalog`가 라이브로 읽음). 절차는 [시장별 수급 단위 정규화](market-investor-normalization.md).

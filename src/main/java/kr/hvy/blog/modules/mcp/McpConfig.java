@@ -173,7 +173,7 @@ public class McpConfig {
       INDEX·INDEX_METRIC 지수 포인트, ret_* 비율. BREADTH *_ratio는 비율. MASTER_HISTORY는 valid_from 기준 변경 이력, ADJUST_EVENT의 *_factor는 배수. INDEX 지수 포인트. GLOBAL 가격은 원천 통화/포인트이며 symbol·market_div로 구분. change_rate 필드는 %(1=1%).
       INVESTOR 금액은 원, null은 결측, 0은 실제 0입니다.
       종목 5일·업종 수급 합계는 복구된 비결측 값만 집계하므로 부분 복구 기간은 전체 합계로 해석하지 마세요.
-      MARKET_INVESTOR 금액·수량은 KIS 원천 단위 그대로이며 확인되지 않은 단위를 원으로 가정하지 마세요.
+      MARKET_INVESTOR 금액은 원(KIS 백만원 ×1e6), 수량은 천주(KIS 원천 그대로), null은 결측, 0은 실제 0입니다.
       stockFinancials는 available_from와 first_seen_at KST 날짜 모두 기준일 이하인 행만 제공. 재무 금액은 백만원, 비율은 %.
       재무·거시 정정 이력이 완전한 당시 버전을 보장하지는 않습니다. MACRO는 available_from<=to 및 obs_date<to로 게시 지연 제한.
       VIX 포인트, UST10Y/UST2Y %. EVENT는 완결된 UTC 관측일, 기본 LIVE, BACKFILL은 재구성 값으로 구분.

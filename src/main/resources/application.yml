@@ -215,7 +215,7 @@ kis:
     enabled: true             # DAILY 에 P1 통계(공매도·신용·프로그램) 단계 포함 여부 (종목당 3호출 ≈ 8,400건 ≈ 9.5분 추가, DAILY ≈19분 < 40m 락)
   derived:
     work-mem: 512MB           # MV REFRESH 세션 정렬 메모리. 서버 기본 4MB 면 mv_stock_daily_metric 이 100분 초과(2026-09-08 실측). 서버 메모리에 맞춰 조정
-    concurrently: false       # 야간 DAILY·백필은 읽는 쪽이 없어 일반 REFRESH (CONCURRENTLY 는 전체 대조로 2배 이상 느림). 낮 수동 실행 중 조회를 막지 않으려면 true
+    concurrently: true        # 2026-10-16: MCP(dataFreshness·screeningTop·priceSeries)와 INTRADAY 가 낮에도 MV 를 읽으므로 CONCURRENTLY(ACCESS EXCLUSIVE 락 없음). 전체 대조라 MV 고정비 ≈5→10분, DAILY ≈25~30분(<40m 락). 4개 MV 모두 유니크 인덱스 보유. 30분을 넘으면 false 로 되돌림
     max-parallel-workers: 0   # REFRESH 세션 병렬 워커. Docker 기본 /dev/shm 64MB 에서 병렬 해시 조인이 'could not resize shared memory segment' 로 실패(2026-09-08). 컨테이너 shm_size 1GB+ 이후 2~4 로
   overseas:
     # "구분:거래소:심볼" — N 지수, X 환율(FHKST03030100), EQ 개별주·ETF(HHDFS76240000, NAS/NYS/AMS). 스펙 §4.4 매핑

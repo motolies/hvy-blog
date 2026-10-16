@@ -30,6 +30,8 @@ import kr.hvy.blog.modules.advisor.AdvisorSyntheticData;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
+import kr.hvy.blog.modules.advisor.domain.code.MetricColumn;
+import kr.hvy.blog.modules.advisor.domain.code.ScreenOp;
 import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
@@ -328,6 +330,24 @@ class AdvisorChatToolPgTest {
       jdbc.update("DELETE FROM tb_advisor_advice WHERE run_id = ?", runId);
       jdbc.update("DELETE FROM tb_advisor_run WHERE run_id = ?", runId);
     }
+  }
+
+  @Test
+  @DisplayName("StockLookupReader.screen(2026-10-16 screenStocks) — 유니버스 안 다중 조건 AND, 정렬·limit·matched, 시장 필터")
+  void screenMultiFilter() {
+    StockLookupReader reader = new StockLookupReader(jdbc);
+    // 합성 시드: ret_20d = i/40, tv_ratio_5_60 = 1 + ((i·7) mod 40)/40 → ret_20d ≥ 0.5 는 i ≥ 20 (20종목)
+    StockLookupReader.ScreenResult all = reader.screen(List.of(new StockLookupReader.ScreenFilter(MetricColumn.RET_20D, ScreenOp.GTE, 0.5)),
+        MetricColumn.RET_20D, true, null, 5, BASE);
+    assertThat(all.matched()).isEqualTo(20);
+    assertThat(all.rows()).hasSize(5);
+    assertThat(all.rows().getFirst().ticker()).isEqualTo("T39");
+    assertThat(all.rows().getFirst().values()).containsEntry("ret_20d", 39 / 40.0);
+    StockLookupReader.ScreenResult kospi = reader.screen(List.of(new StockLookupReader.ScreenFilter(MetricColumn.RET_20D, ScreenOp.GTE, 0.5),
+        new StockLookupReader.ScreenFilter(MetricColumn.TV_RATIO_5_60, ScreenOp.GT, 1.0)), MetricColumn.TV_RATIO_5_60, false, "KOSPI", 50, BASE);
+    assertThat(kospi.matched()).as("짝수 i(KOSPI) 10개 중 tv_ratio 가 1 초과인 것").isLessThanOrEqualTo(10).isPositive();
+    assertThat(kospi.rows()).allMatch(r -> "KOSPI".equals(r.market()) && r.values().get("tv_ratio_5_60") > 1.0 && r.values().get("ret_20d") >= 0.5);
+    assertThat(reader.screen(List.of(new StockLookupReader.ScreenFilter(MetricColumn.RET_20D, ScreenOp.LT, -1)), MetricColumn.RET_20D, true, null, 5, BASE).matched()).isZero();
   }
 
   @Test

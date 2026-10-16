@@ -119,6 +119,17 @@ class McpHttpTest {
         var screened = client.callTool(new McpSchema.CallToolRequest("screeningTop", Map.of("baseDate", "2026-01-02", "limit", 5)));
         assertThat(screened.isError()).isFalse();
         assertThat(screened.structuredContent().toString()).contains("STORED").contains("005930");
+        // screenStocks(2026-10-16, 도구 35종): 스키마에 filters 배열 항목 속성이 있고, 허용 밖 컬럼·연산자는 bad_argument, 정상 호출은 오류 없음(유니버스 비어 0건)
+        var screenTool = client.listTools().tools().stream().filter(t -> t.name().equals("screenStocks")).findFirst().orElseThrow();
+        assertThat(screenTool.inputSchema().toString()).contains("filters").contains("column").contains("op").contains("value").contains("sort");
+        var screen = client.callTool(new McpSchema.CallToolRequest("screenStocks", Map.of("filters", java.util.List.of(Map.of("column", "tv_ratio_5_60", "op", "GTE", "value", 3)),
+            "sort", "ret_20d", "asOf", "2026-01-02")));
+        assertThat(screen.isError()).as(screen.structuredContent().toString()).isFalse();
+        assertThat(screen.structuredContent().toString()).contains("matched=0").contains("tv_ratio_5_60");
+        assertThat(client.callTool(new McpSchema.CallToolRequest("screenStocks", Map.of("filters", java.util.List.of(Map.of("column", "secret_col", "op", "GTE", "value", 1)), "sort", "ret_20d")))
+            .structuredContent().toString()).contains("bad_argument");
+        assertThat(client.callTool(new McpSchema.CallToolRequest("screenStocks", Map.of("filters", java.util.List.of(Map.of("column", "ret_20d", "op", "LIKE", "value", 1)), "sort", "ret_20d")))
+            .structuredContent().toString()).contains("bad_argument");
         assertThat(client.listResources().resources()).hasSize(3);
         for (String uri : java.util.List.of("stock://guide","advice://guide","stock://catalog"))
           assertThat(client.readResource(new McpSchema.ReadResourceRequest(uri)).contents()).isNotEmpty();

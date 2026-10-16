@@ -1,8 +1,13 @@
 package kr.hvy.blog.modules.mcp;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.MetricColumn;
+import kr.hvy.blog.modules.advisor.domain.code.ScreenOp;
 import kr.hvy.blog.modules.advisor.application.service.SignalWeightMath;
 import kr.hvy.blog.modules.advisor.repository.jdbc.*;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +30,75 @@ public class McpDataToolkit {
   private final AdvisorProperties properties;
   private final kr.hvy.blog.modules.advisor.application.service.AdvisorKpiService kpi;
   private final WeightSetRepository weightSets;
+  private final StockLookupReader lookup;
+
+  /** screenStocks 필터 수 상한·종목 수 상한 */
+  static final int SCREEN_MAX_FILTERS = 5;
+  static final int SCREEN_MAX = 50;
+
+  /** screenStocks 필터 인자: column 은 metricTopN 과 같은 허용 컬럼, op 는 GTE|GT|LTE|LT(또는 >= > <= <), value 는 컬럼 단위 그대로 */
+  public record ScreenFilterArg(
+      @ToolParam(description = "지표 컬럼: ret_1d, ret_5d, ret_20d, ret_60d, ret_120d, dist_ma20, dist_ma60, dist_high_52w, tv_ratio_5_60, foreign_net_5d, institution_net_5d") String column,
+      @ToolParam(description = "비교 연산자: GTE(>=), GT(>), LTE(<=), LT(<)") String op,
+      @ToolParam(description = "기준값. 수익률·이격·비율은 소수(0.03 = 3%), 순매수는 원") double value) {
+  }
+
+  @Tool(name = "screenStocks", description = "다중 조건 스크리닝(metricTopN 과 같은 유니버스: 주권·활성·시총 1,000억·거래대금 10억 이상). filters 를 전부 만족하는 종목을 sort 컬럼 순으로 "
+      + "최대 limit(기본 20, 최대 50)개. '거래대금 5/60 비율 3배 이상이면서 20일 수익률 3% 미만' 같은 질문용 — filters=[{column:tv_ratio_5_60,op:GTE,value:3},{column:ret_20d,op:LT,value:0.03}]. "
+      + "값 단위는 컬럼 단위 그대로(수익률·이격·비율은 소수, 순매수는 원 — 억원 환산 없음). matched 는 조건 만족 총수, truncated 는 limit 에 잘렸는지. asOf 생략 시 마지막 지표일.")
+  public Map<String, Object> screenStocks(
+      @ToolParam(description = "필터 목록(1~5개, AND)") List<ScreenFilterArg> filters,
+      @ToolParam(description = "정렬 컬럼(허용 컬럼 중 하나, 예: ret_20d)") String sort,
+      @ToolParam(required = false, description = "desc(기본) 또는 asc") String order,
+      @ToolParam(required = false, description = "KOSPI 또는 KOSDAQ, 생략하면 양시장") String market,
+      @ToolParam(required = false, description = "종목 수 1~50 (기본 20)") Integer limit,
+      @ToolParam(required = false, description = "기준 거래일 yyyy-MM-dd, 생략·미래면 마지막 지표일") String asOf) {
+    if (filters == null || filters.isEmpty() || filters.size() > SCREEN_MAX_FILTERS) {
+      throw new IllegalArgumentException("filters 는 1~" + SCREEN_MAX_FILTERS + "개");
+    }
+    MetricColumn sortColumn = MetricColumn.parse(sort).orElseThrow(() -> new IllegalArgumentException("지원하지 않는 정렬 컬럼 '" + sort + "'. 허용: " + MetricColumn.allowedList()));
+    List<StockLookupReader.ScreenFilter> parsed = new ArrayList<>();
+    for (ScreenFilterArg f : filters) {
+      MetricColumn column = MetricColumn.parse(f.column()).orElseThrow(() -> new IllegalArgumentException("지원하지 않는 컬럼 '" + f.column() + "'. 허용: " + MetricColumn.allowedList()));
+      ScreenOp op = ScreenOp.parse(f.op()).orElseThrow(() -> new IllegalArgumentException("지원하지 않는 연산자 '" + f.op() + "'. 허용: " + ScreenOp.allowedList()));
+      if (!Double.isFinite(f.value())) throw new IllegalArgumentException("value 는 유한한 숫자");
+      parsed.add(new StockLookupReader.ScreenFilter(column, op, f.value()));
+    }
+    String mkt = market == null || market.isBlank() ? null : market.trim().toUpperCase();
+    if (mkt != null && !mkt.equals("KOSPI") && !mkt.equals("KOSDAQ")) throw new IllegalArgumentException("market 은 KOSPI 또는 KOSDAQ");
+    boolean descending = order == null || !order.trim().equalsIgnoreCase("asc");
+    int n = limit == null || limit <= 0 ? 20 : Math.min(limit, SCREEN_MAX);
+    var date = lookup.latestMetricDate(McpReadService.end(asOf));
+    if (date.isEmpty()) return Map.of("error", "no_data", "message", "지표가 없습니다");
+    StockLookupReader.ScreenResult result = lookup.screen(parsed, sortColumn, descending, mkt, n, date.get());
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("asOf", date.get().toString());
+    m.put("filters", parsed.stream().map(f -> Map.of("column", f.column().getColumn(), "op", f.op().name(), "value", f.value())).toList());
+    m.put("sort", sortColumn.getColumn());
+    m.put("order", descending ? "desc" : "asc");
+    if (mkt != null) m.put("market", mkt);
+    m.put("matched", result.matched());
+    m.put("n", result.rows().size());
+    m.put("truncated", result.matched() > result.rows().size());
+    Map<String, String> units = new LinkedHashMap<>();
+    units.put(sortColumn.getColumn(), unit(sortColumn));
+    parsed.forEach(f -> units.put(f.column().getColumn(), unit(f.column())));
+    m.put("units", units);
+    m.put("items", result.rows().stream().map(r -> {
+      Map<String, Object> x = new LinkedHashMap<>();
+      x.put("tk", r.ticker());
+      x.put("nm", r.name());
+      x.put("mkt", r.market());
+      x.put("v", r.values());
+      return x;
+    }).toList());
+    return m;
+  }
+
+  /** 지표 컬럼 단위 표기: 순매수 금액은 원, 나머지(수익률·이격·비율)는 소수 비율 */
+  private static String unit(MetricColumn column) {
+    return column == MetricColumn.FOREIGN_NET_5D || column == MetricColumn.INSTITUTION_NET_5D ? "원" : "비율";
+  }
 
   @Tool(description = "종목 마스터. 현재 상태이며 과거 상태를 보증하지 않는다. 먼저 resolveStock으로 확인한 ticker 사용.")
   public Map<String, Object> stockMaster(String ticker) { return reader.master(ticker); }

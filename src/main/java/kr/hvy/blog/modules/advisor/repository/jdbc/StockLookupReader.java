@@ -1,9 +1,12 @@
 package kr.hvy.blog.modules.advisor.repository.jdbc;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.domain.code.MetricColumn;
+import kr.hvy.blog.modules.advisor.domain.code.ScreenOp;
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,6 +37,18 @@ public class StockLookupReader {
 
   /** 지표 상위 N 1행 */
   public record MetricRank(String ticker, String name, String market, Double value) {
+  }
+
+  /** screenStocks 필터 1개 — 컬럼·연산자는 allowlist enum, 값은 바인딩 */
+  public record ScreenFilter(MetricColumn column, ScreenOp op, double value) {
+  }
+
+  /** screenStocks 결과 행: 필터·정렬에 쓰인 컬럼 값(컬럼명 → 값, 원 단위 그대로) */
+  public record ScreenRow(String ticker, String name, String market, Map<String, Double> values) {
+  }
+
+  /** screenStocks 결과: 상위 limit 행과 조건을 만족한 총 수 */
+  public record ScreenResult(List<ScreenRow> rows, int matched) {
   }
 
   private final JdbcTemplate jdbc;
@@ -98,6 +113,43 @@ public class StockLookupReader {
     }
     sql.append(" ORDER BY ").append(col).append(descending ? " DESC" : " ASC").append(", m.ticker LIMIT ?");
     return jdbc.query(sql.toString(), RANK_MAPPER, tradeDate, limit);
+  }
+
+  /**
+   * 기준 거래일의 다중 조건 스크리닝(MCP screenStocks, 2026-10-16): 유니버스 뷰(topN 과 같은 모집단) 안에서 필터를 전부 만족하는 종목을 정렬 컬럼 순으로 limit 개.
+   * matched 는 조건 만족 총수(COUNT(*) OVER()). SQL 에 보간되는 것은 enum 의 컬럼명·연산자뿐이고 값·날짜·시장·limit 은 바인딩한다.
+   */
+  public ScreenResult screen(List<ScreenFilter> filters, MetricColumn sort, boolean descending, String marketCode, int limit, LocalDate tradeDate) {
+    java.util.LinkedHashSet<MetricColumn> columns = new java.util.LinkedHashSet<>();
+    columns.add(sort);
+    filters.forEach(f -> columns.add(f.column()));
+    String select = columns.stream().map(c -> "m." + c.getColumn()).collect(java.util.stream.Collectors.joining(", "));
+    StringBuilder sql = new StringBuilder("SELECT m.ticker, ms.stock_name, ms.market_type, " + select + ", COUNT(*) OVER () AS matched "
+        + "FROM tb_stock_daily_metric m JOIN tb_stock_master ms ON ms.ticker = m.ticker "
+        + "JOIN vw_stock_universe_daily u ON u.ticker = m.ticker AND u.trade_date = m.trade_date "
+        + "WHERE m.trade_date = ? AND m." + sort.getColumn() + " IS NOT NULL");
+    List<Object> args = new ArrayList<>();
+    args.add(tradeDate);
+    if (marketCode != null && !marketCode.isBlank()) {
+      sql.append(" AND ms.market_type = ?");
+      args.add(marketCode);
+    }
+    for (ScreenFilter f : filters) {
+      sql.append(" AND m.").append(f.column().getColumn()).append(" ").append(f.op().getSql()).append(" ?");
+      args.add(f.value());
+    }
+    sql.append(" ORDER BY m.").append(sort.getColumn()).append(descending ? " DESC" : " ASC").append(" NULLS LAST, m.ticker LIMIT ?");
+    args.add(limit);
+    int[] matched = {0};
+    List<ScreenRow> rows = jdbc.query(sql.toString(), (rs, i) -> {
+      matched[0] = rs.getInt("matched");
+      Map<String, Double> values = new java.util.LinkedHashMap<>();
+      for (MetricColumn c : columns) {
+        values.put(c.getColumn(), AdvisorJdbc.nullableDouble(rs, c.getColumn()));
+      }
+      return new ScreenRow(rs.getString("ticker"), rs.getString("stock_name"), rs.getString("market_type"), values);
+    }, args.toArray());
+    return new ScreenResult(rows, matched[0]);
   }
 
   private static String escapeLike(String s) {

@@ -32,7 +32,7 @@ public class McpConfig {
       "latestAdvice", "horizonPicks", "compareAdvice", "adviceChecks", "screeningTop", "performanceSummary",
       "stockMaster", "stockSeries", "stockFinancials", "stockCorporateActions", "stockSectors", "marketSeries",
       "listAdvices", "adviceDetail", "adviceScores", "signalIc", "adviceWeights", "adviceLessons", "adviceNotes",
-      "advicePerformance", "morningPerformanceComparison", "activeAdviceWeights", "dataGuide");
+      "advicePerformance", "morningPerformanceComparison", "activeAdviceWeights", "dataGuide", "screenStocks");
   /** 도구별 statement_timeout(ms). 기본 5s. screeningTop 실시간 경로(그날 판단이 없거나 가중치가 바뀐 날)는 스크리닝 CTE 가 수 초라 15s (2026-10-16, P1-7) */
   static final Map<String, Integer> STATEMENT_TIMEOUT_MS = Map.of("screeningTop", 15_000);
   /** 도구별 트랜잭션 타임아웃(s). 기본 10s. statement_timeout 보다 길어야 DB 쪽 57014 가 먼저 나와 "timeout" 으로 분류된다 */

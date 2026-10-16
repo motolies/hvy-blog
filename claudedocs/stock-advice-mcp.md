@@ -66,7 +66,7 @@ tool_timeout_sec = 15
 
 | 영역        | 도구                                                                                                           |
 |-------------|----------------------------------------------------------------------------------------------------------------|
-| 종목 요약   | `resolveStock`, `stockSnapshot`, `priceSeries`, `metricTopN`, `newsHeadlines`, `stockMaster`                   |
+| 종목 요약   | `resolveStock`, `stockSnapshot`, `priceSeries`, `metricTopN`, `screenStocks`(다중 조건 AND 스크리닝, MCP 전용 — `filters=[{column,op,value}]`, `sort`, 최대 50), `newsHeadlines`, `stockMaster` |
 | 종목 이력   | `stockSeries`, `stockFinancials`, `stockCorporateActions`, `stockSectors`                                      |
 | 시장        | `marketOverview`, `marketTrend`, `marketRegime`, `globalLink`, `marketSeries`                                  |
 | 저장 판단   | `latestAdvice`, `horizonPicks`, `compareAdvice`, `adviceChecks`, `listAdvices`, `adviceDetail`, `adviceScores` |

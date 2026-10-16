@@ -171,6 +171,28 @@ class WeeklyReviewJobTest {
         .contains("OPEN 노트 10영업일 초과: 3건");
   }
 
+  @Test
+  @DisplayName("IC 표본 부족(2026-10-16): 보고에 n_eff·창·IC_BACKFILL 명령을 적고, 활성 세트가 아직 SEED 면 경고, h=20 활성 세트 없음도 경고한다")
+  void weightGateExplainsNEffAndBackfill() {
+    when(icService.proposeWeightSet(org.mockito.ArgumentMatchers.eq(5), any(), any(), any())).thenReturn(Optional.empty());
+    when(icService.learnableNEff(org.mockito.ArgumentMatchers.eq(5), any())).thenReturn(11.0);
+    when(icService.learnableNEff(org.mockito.ArgumentMatchers.eq(20), any())).thenReturn(2.75);
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    ArgumentCaptor<kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage> message =
+        ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage.class);
+    verify(notifier).publish(message.capture());
+    String text = message.getValue().toBlocks().toString();
+    assertThat(text).contains("갱신 없음 — n_eff 11.0 < " + properties.getIc().getMinNEff() + " (h=5, 창 " + properties.icWindowDays(5) + "일). 활성 세트 #1(SEED) 유지")
+        .contains("POST /api/advisor/admin/jobs/IC_BACKFILL")
+        .contains("[h=20] 갱신 없음 — n_eff 2.8 <").contains("IC_BACKFILL?horizon=20");
+    assertThat(execution.warnings()).anyMatch(w -> w.contains("SEED") && w.contains("IC_BACKFILL"))
+        .anyMatch(w -> w.startsWith("[h=20]") && w.contains("활성 가중치 세트 없음"));
+    verify(weightSets, never()).insert(any(), any(Boolean.class));
+  }
+
   private static kr.hvy.blog.modules.advisor.domain.model.PickRow pick(String ticker, double conviction) {
     return kr.hvy.blog.modules.advisor.domain.model.PickRow.builder().ticker(ticker).pickRank(1)
         .direction(kr.hvy.blog.modules.advisor.domain.code.PickDirection.LONG).conviction(conviction).build();

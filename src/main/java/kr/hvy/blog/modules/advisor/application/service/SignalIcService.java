@@ -144,6 +144,15 @@ public class SignalIcService {
   }
 
   /**
+   * 호라이즌 h 의 기준일 이하 IC 창에서 학습 가능한 최소 n_eff(창 안 IC 일수 / h, 학습 시그널 중 최솟값). 주간 보고가 "왜 미갱신인지" 를 수치로 적는 용도 — 창이 비면 0.
+   * {@link #proposeWeightSet(int, LocalDate, WeightSetSource, Long)} 의 게이트와 같은 계산이다.
+   */
+  public double learnableNEff(int horizonDays, LocalDate asOf) {
+    List<SignalIcRow> window = icWriter.window(horizonDays, asOf, properties.icWindowDays(horizonDays));
+    return SignalWeightMath.minLearnableNEff(SignalWeightMath.aggregate(window, horizonDays));
+  }
+
+  /**
    * 청크 1개를 "단계" 로 실행하는 계약. {@code AdvisorSteps::run} 이 그대로 맞으므로 잡 쪽 규칙(단계 기록·메타 flush·취소 감지)을 서비스가 몰라도 된다.
    * 반환값은 성공 여부(격리된 실패는 false).
    */

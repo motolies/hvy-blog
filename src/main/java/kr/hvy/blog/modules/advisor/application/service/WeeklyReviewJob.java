@@ -227,9 +227,21 @@ public class WeeklyReviewJob implements AdvisorJob {
     LocalDate asOf = icService.latestScorableDate(h).orElse(today);
     Optional<WeightSet> proposed = icService.proposeWeightSet(h, asOf, WeightSetSource.WEEKLY, execution.runId());
     if (proposed.isEmpty()) {
-      weightLines.add(prefix + (activeH.isPresent()
-          ? String.format("갱신 없음 — IC 표본 부족 (n_eff < %d). 활성 세트 #%d 유지", properties.getIc().getMinNEff(), before.weightSetId())
-          : String.format("갱신 없음 — IC 표본 부족 (n_eff < %d). 활성 세트 없음(발행 SKIP)", properties.getIc().getMinNEff())));
+      // 2026-10-16(P1-9): "표본 부족" 만으로는 백필이 안 된 건지 창이 짧은 건지 알 수 없었다 — n_eff·창·공백을 채우는 명령을 적고, SEED 가 계속 유지되면 경고한다
+      double nEff = icService.learnableNEff(h, asOf);
+      int window = properties.icWindowDays(h);
+      int minNEff = properties.getIc().getMinNEff();
+      String backfill = "POST /api/advisor/admin/jobs/IC_BACKFILL" + (decision ? "" : "?horizon=" + h);
+      if (activeH.isPresent()) {
+        weightLines.add(prefix + String.format("갱신 없음 — n_eff %.1f < %d (h=%d, 창 %d일). 활성 세트 #%d(%s) 유지 — IC 공백은 %s",
+            nEff, minNEff, h, window, before.weightSetId(), before.source(), backfill));
+        if (before.source() == WeightSetSource.SEED) {
+          warnings.add(prefix + "가중치가 아직 SEED(학습 0회) — " + backfill + " 로 IC 창(" + window + "일)을 채워야 학습이 시작된다");
+        }
+      } else {
+        weightLines.add(prefix + String.format("갱신 없음 — n_eff %.1f < %d (h=%d, 창 %d일). 활성 세트 없음(발행 SKIP) — %s", nEff, minNEff, h, window, backfill));
+        warnings.add(prefix + "활성 가중치 세트 없음 — 이 호라이즌 판단이 발행되지 않는다. " + backfill);
+      }
       return;
     }
     long id = weightSets.insert(proposed.get(), true);

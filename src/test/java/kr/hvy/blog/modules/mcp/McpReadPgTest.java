@@ -40,7 +40,7 @@ class McpReadPgTest {
     reader = new McpReadService(new NamedParameterJdbcTemplate(ds), JsonMapper.builder().build());
     tx = McpConfig.readTransaction(new DataSourceTransactionManager(ds));
     jdbc.execute("TRUNCATE tb_stock_investor_daily, tb_stock_daily_price, tb_stock_adjust_event, tb_stock_financial, tb_stock_macro_daily, tb_stock_event_timeline, "
-        + "tb_stock_news, tb_stock_global_market_daily, tb_stock_corporate_action, tb_advisor_advice CASCADE");
+        + "tb_stock_news, tb_stock_global_market_daily, tb_stock_corporate_action, tb_stock_index_master, tb_stock_index_daily, tb_advisor_advice CASCADE");
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_adjust_factor");
   }
   @SuppressWarnings("unchecked") List<Map<String, Object>> items(Map<String, Object> result) { return (List<Map<String, Object>>) result.get("items"); }
@@ -219,8 +219,16 @@ class McpReadPgTest {
   }
 
   @Test void catalogUsesOnlyDataTables() {
+    jdbc.execute("INSERT INTO tb_stock_index_master(index_code,index_name,is_active) VALUES ('0001','코스피',true)");
+    jdbc.execute("INSERT INTO tb_stock_index_daily(index_code,trade_date,open_price,high_price,low_price,close_price) VALUES ('0001','2026-01-02',100,100,100,100),('1032','2026-01-02',50,50,50,50)");
     var catalog = reader.catalog();
     assertThat(catalog).containsKeys("INDEX","SECTOR","EVENT","fields");
     assertThat(catalog.toString()).doesNotContain("access_token","tb_advisor_chat","raw_json");
+    // 2026-10-16: 지수 카탈로그에 업종명·활성, 마스터에 없는 코드(1032)는 code 만. 시계열 응답은 최상위 codeName
+    @SuppressWarnings("unchecked") var index = (List<Map<String, Object>>) catalog.get("INDEX");
+    assertThat(index).contains(Map.of("code", "0001", "name", "코스피", "active", true), Map.of("code", "1032"));
+    assertThat(reader.series(false, "INDEX", "0001", "2026-01-01", "2026-01-03", null, 50, null)).containsEntry("codeName", "코스피");
+    assertThat(reader.series(false, "INDEX", "1032", "2026-01-01", "2026-01-03", null, 50, null)).doesNotContainKey("codeName");
+    assertThat(reader.series(true, "RAW_PRICE", "005930", null, null, null, 50, null)).doesNotContainKey("codeName");
   }
 }

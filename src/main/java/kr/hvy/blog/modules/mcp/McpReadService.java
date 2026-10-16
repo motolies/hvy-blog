@@ -60,7 +60,22 @@ public class McpReadService {
       params.addValue("source", selected);
     }
     if ("MACRO".equals(type)) extra = " AND available_from <= :end AND obs_date < :end";
-    return page(table, table.code + " = :code" + extra, params, from, to, limit, cursor);
+    Map<String, Object> result = page(table, table.code + " = :code" + extra, params, from, to, limit, cursor);
+    // 2026-10-16(P2): 지수·업종 시계열은 코드만 있어 업종명을 알 수 없었다 — 코드 1개 호출이라 행마다가 아니라 최상위 codeName 으로
+    if (!stock && List.of("INDEX", "INDEX_METRIC", "SECTOR").contains(type)) {
+      String name = codeName(code.trim());
+      if (name != null) result.put("codeName", name);
+    }
+    return result;
+  }
+
+  /** 지수·업종 코드의 이름 — 업종 코드 마스터(idxcode) 우선, 없으면 KRX 섹터 매핑의 최신 이름. 없으면 null */
+  String codeName(String code) {
+    List<String> names = jdbc.query("SELECT name FROM (SELECT 1 AS pri, index_name AS name FROM tb_stock_index_master WHERE index_code = :code "
+            + "UNION ALL SELECT 2, sector_name FROM (SELECT sector_name FROM tb_stock_sector_map WHERE sector_code = :code AND source = 'KRX' "
+            + "ORDER BY valid_from DESC LIMIT 1) s) x ORDER BY pri LIMIT 1",
+        new MapSqlParameterSource("code", code), (rs, i) -> rs.getString("name"));
+    return names.isEmpty() ? null : names.get(0);
   }
 
   public Map<String, Object> master(String ticker) {
@@ -173,8 +188,15 @@ public class McpReadService {
     Map<String, Object> catalog = new LinkedHashMap<>();
     for (var entry : MARKET.entrySet()) {
       Source source = entry.getValue();
-      catalog.put(entry.getKey(), rows("SELECT jsonb_build_object('code', " + source.code + ") AS data FROM "
-          + source.table + " GROUP BY " + source.code + " ORDER BY " + source.code, new MapSqlParameterSource()));
+      if (List.of("index_code", "sector_code").contains(source.code)) {
+        // 2026-10-16(P2): 지수·업종 코드에 업종명·활성 여부(idxcode 마스터)를 붙인다. 마스터에 없는 코드는 code 만
+        catalog.put(entry.getKey(), rows("SELECT jsonb_strip_nulls(jsonb_build_object('code', d.c, 'name', im.index_name, 'active', im.is_active)) AS data "
+            + "FROM (SELECT DISTINCT " + source.code + " AS c FROM " + source.table + ") d LEFT JOIN tb_stock_index_master im ON im.index_code = d.c ORDER BY d.c",
+            new MapSqlParameterSource()));
+      } else {
+        catalog.put(entry.getKey(), rows("SELECT jsonb_build_object('code', " + source.code + ") AS data FROM "
+            + source.table + " GROUP BY " + source.code + " ORDER BY " + source.code, new MapSqlParameterSource()));
+      }
     }
     Map<String, Object> fields = new LinkedHashMap<>();
     for (String table : McpFields.COLUMNS.keySet()) {

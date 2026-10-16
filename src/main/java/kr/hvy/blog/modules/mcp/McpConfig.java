@@ -188,6 +188,7 @@ public class McpConfig {
       재무·거시 정정 이력이 완전한 당시 버전을 보장하지는 않습니다. MACRO는 available_from<=to 및 obs_date<to로 게시 지연 제한.
       VIX 포인트, UST10Y/UST2Y %. EVENT는 완결된 UTC 관측일, 기본 LIVE, BACKFILL은 재구성 값으로 구분.
       SECTOR 파생 시계열은 현재 구성으로 과거를 근사합니다. stockSectors는 저장된 유효기간 기준이며 과거 완전 복원을 보장하지 않습니다.
+      SECTOR 목록은 활성 종목이 속한 업종만 포함하며(업종 지수가 있어도 소속 종목이 없으면 빠짐), INDEX·INDEX_METRIC·SECTOR 응답의 codeName 과 카탈로그 name·active 로 업종명을 확인하세요.
       누락값은 null 또는 필드 없음이며 0으로 해석하지 마세요. 주가 수정계수는 현재 뷰 기준으로 과거 시점의 계수 버전을 보장하지 않습니다.
       원천: 국내 KIS/KRX, 글로벌 KIS, 거시 CBOE/TREASURY, 사건 GDELT. 상세 필드 의미·단위·코드는 stock://catalog 확인.
       """;

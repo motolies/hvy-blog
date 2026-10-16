@@ -180,18 +180,27 @@ public class McpReadService {
     catalog.put("stockCodes", "resolveStock으로 검색하세요");
     return catalog;
   }
+  /**
+   * 데이터별 최신 기준일. 소스 19개를 스칼라 서브쿼리로 묶은 **단일 문** 1회 + advice 집계 1회 — 2026-10-16 이전엔 소스마다 statement 를 순차 실행해
+   * (MV·global·financial 은 날짜 인덱스도 없어 전체 스캔) 합이 트랜잭션 10s 를 넘겨 항상 timeout 이었다(plan/mcp.md P1-7). 각 서브쿼리는
+   * ORDER BY date DESC LIMIT 1 로 날짜 인덱스(migrate 20261016_02)를 역방향 스캔한다. NEWS 는 식 인덱스가 없으므로 published_at 범위 비교로 바꿨다.
+   */
   public Map<String, Object> freshness() {
-    Map<String, Object> dates = new LinkedHashMap<>();
+    LocalDate today = MarketClock.today();
     var sources = new LinkedHashMap<String, Source>();
     sources.putAll(STOCK);
     sources.putAll(MARKET);
     sources.put("FINANCIAL", new Source("tb_stock_financial", null, "available_from", null));
-    sources.put("NEWS", new Source("tb_stock_news", null, "(published_at AT TIME ZONE 'Asia/Seoul')::date", null));
+    sources.put("NEWS", new Source("tb_stock_news", null, "published_at", null));
+    Map<String, Object> dates = new LinkedHashMap<>();
+    StringBuilder sql = new StringBuilder();
     for (var entry : sources.entrySet()) {
-      Source source = entry.getValue();
-      dates.put(entry.getKey(), jdbc.queryForObject("SELECT max(" + source.date + ")::text FROM " + source.table
-          + " WHERE " + source.date + " <= :today", new MapSqlParameterSource("today", MarketClock.today()), String.class));
+      dates.put(entry.getKey(), null);
+      if (!sql.isEmpty()) sql.append(" UNION ALL ");
+      sql.append("SELECT '").append(entry.getKey()).append("' AS k, ").append(latestDateSql(entry.getKey(), entry.getValue())).append(" AS d");
     }
+    jdbc.query(sql.toString(), new MapSqlParameterSource("today", today).addValue("tomorrow", today.plusDays(1)),
+        rs -> { dates.put(rs.getString("k"), rs.getString("d")); });
     var advice = rows("SELECT jsonb_build_object('kind', advice_kind, 'baseDate', max(base_date)) AS data "
         + "FROM tb_advisor_advice WHERE variant = 'LIVE' AND base_date <= :today GROUP BY advice_kind ORDER BY advice_kind",
         new MapSqlParameterSource("today", MarketClock.today()));
@@ -200,6 +209,15 @@ public class McpReadService {
     result.put("dataAsOf", dates);
     result.put("latestAdviceByKind", advice);
     return result;
+  }
+
+  /** 소스 1개의 최신 날짜 스칼라 서브쿼리(::text). NEWS 는 KST 익일 자정 미만의 마지막 published_at 을 KST 날짜로 */
+  private static String latestDateSql(String key, Source source) {
+    if ("NEWS".equals(key)) {
+      return "(SELECT (published_at AT TIME ZONE 'Asia/Seoul')::date FROM tb_stock_news "
+          + "WHERE published_at < (CAST(:tomorrow AS date)::timestamp AT TIME ZONE 'Asia/Seoul') ORDER BY published_at DESC LIMIT 1)::text";
+    }
+    return "(SELECT " + source.date + " FROM " + source.table + " WHERE " + source.date + " <= :today ORDER BY " + source.date + " DESC LIMIT 1)::text";
   }
 
   static LocalDate end(String value) {

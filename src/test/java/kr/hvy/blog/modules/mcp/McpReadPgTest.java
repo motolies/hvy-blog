@@ -39,7 +39,8 @@ class McpReadPgTest {
     jdbc = new JdbcTemplate(ds);
     reader = new McpReadService(new NamedParameterJdbcTemplate(ds), JsonMapper.builder().build());
     tx = McpConfig.readTransaction(new DataSourceTransactionManager(ds));
-    jdbc.execute("TRUNCATE tb_stock_investor_daily, tb_stock_daily_price, tb_stock_adjust_event, tb_stock_financial, tb_stock_macro_daily, tb_stock_event_timeline, tb_advisor_advice CASCADE");
+    jdbc.execute("TRUNCATE tb_stock_investor_daily, tb_stock_daily_price, tb_stock_adjust_event, tb_stock_financial, tb_stock_macro_daily, tb_stock_event_timeline, "
+        + "tb_stock_news, tb_stock_global_market_daily, tb_advisor_advice CASCADE");
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_adjust_factor");
   }
   @SuppressWarnings("unchecked") List<Map<String, Object>> items(Map<String, Object> result) { return (List<Map<String, Object>>) result.get("items"); }
@@ -148,6 +149,32 @@ class McpReadPgTest {
     assertThat(write.isError()).isTrue();
     assertThat(write.structuredContent().toString()).contains("internal").doesNotContain("INSERT", "tb_stock");
     assertThat(jdbc.queryForObject("SELECT count(*) FROM tb_stock_adjust_event WHERE ticker='WRITE'", Integer.class)).isZero();
+  }
+
+  @Test void freshnessShapeAndLatestDatePerSource() {
+    // NEWS 는 KST 날짜: 01-02 23:30 과 01-03 00:10 (KST) → 최신은 01-03. 미래 가격 행은 제외돼 RAW_PRICE 는 01-05.
+    jdbc.execute("INSERT INTO tb_stock_news(source,published_at,title,title_hash) VALUES ('GDELT','2026-01-02T23:30:00+09:00','a','\\x01'),('GDELT','2026-01-03T00:10:00+09:00','b','\\x02')");
+    String future = kr.hvy.blog.modules.stock.domain.model.MarketClock.today().plusDays(1).toString();
+    jdbc.update("INSERT INTO tb_stock_daily_price(ticker,trade_date,open_price,high_price,low_price,close_price,volume,trading_value) VALUES ('005930','2026-01-05',1,1,1,1,1,1),('005930',?::date,1,1,1,1,1,1)", future);
+    jdbc.execute("INSERT INTO tb_stock_global_market_daily(symbol,trade_date,market_div,close_price) VALUES ('SPX','2026-01-06','N',100)");
+    jdbc.execute("INSERT INTO tb_stock_financial(ticker,fiscal_period,period_type,revision_seq,available_from,available_rule) VALUES ('005930','202512','Y',0,'2026-01-07','TEST')");
+    var result = reader.freshness();
+    assertThat(result.keySet()).containsExactly("today", "dataAsOf", "latestAdviceByKind");
+    @SuppressWarnings("unchecked") Map<String, Object> dataAsOf = (Map<String, Object>) result.get("dataAsOf");
+    var expectedKeys = new java.util.HashSet<>(McpReadService.STOCK.keySet());
+    expectedKeys.addAll(McpReadService.MARKET.keySet());
+    expectedKeys.addAll(List.of("FINANCIAL", "NEWS"));
+    assertThat(dataAsOf.keySet()).containsExactlyInAnyOrderElementsOf(expectedKeys);
+    assertThat(dataAsOf.values()).allMatch(v -> v == null || v.toString().matches("\\d{4}-\\d{2}-\\d{2}"));
+    assertThat(dataAsOf).containsEntry("NEWS", "2026-01-03").containsEntry("RAW_PRICE", "2026-01-05").containsEntry("PRICE", "2026-01-05")
+        .containsEntry("GLOBAL", "2026-01-06").containsEntry("FINANCIAL", "2026-01-07").containsEntry("METRIC", null).containsEntry("EVENT", null);
+  }
+
+  @Test void freshnessIndexesExist() {
+    // 정본 스키마(stock-schema/stock-derived)와 migrate 20261016_02 가 어긋나지 않게 고정한다
+    List<String> names = jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE indexname IN ('idx_mv_stock_index_metric_date','idx_mv_stock_sector_daily_date',"
+        + "'idx_mv_stock_market_breadth_daily_date','idx_stock_global_market_daily_date','idx_stock_financial_available_from') ORDER BY 1", String.class);
+    assertThat(names).hasSize(5);
   }
 
   @Test void catalogUsesOnlyDataTables() {

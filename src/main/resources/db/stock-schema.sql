@@ -479,6 +479,9 @@ COMMENT ON COLUMN tb_stock_financial.created_at       IS '적재 시각';
 
 CREATE INDEX IF NOT EXISTS idx_stock_financial_available
     ON tb_stock_financial (ticker, available_from DESC);
+-- 날짜 선두 인덱스: dataFreshness(최신 available_from) 용 (2026-10-16, migrate 20261016_02)
+CREATE INDEX IF NOT EXISTS idx_stock_financial_available_from
+    ON tb_stock_financial (available_from);
 
 
 -- ---------------------------------------------
@@ -540,6 +543,10 @@ COMMENT ON COLUMN tb_stock_global_market_daily.close_price  IS '종가';
 COMMENT ON COLUMN tb_stock_global_market_daily.volume       IS '거래량';
 COMMENT ON COLUMN tb_stock_global_market_daily.change_rate  IS '전일 대비 등락률 (%)';
 COMMENT ON COLUMN tb_stock_global_market_daily.collected_at IS '적재 시각';
+
+-- 날짜 선두 인덱스: dataFreshness(최신 trade_date) 용 (2026-10-16, migrate 20261016_02)
+CREATE INDEX IF NOT EXISTS idx_stock_global_market_daily_date
+    ON tb_stock_global_market_daily (trade_date);
 
 
 -- ---------------------------------------------

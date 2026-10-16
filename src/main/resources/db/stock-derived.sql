@@ -95,6 +95,8 @@ FROM (
 WINDOW w AS (PARTITION BY index_code ORDER BY trade_date)
 WITH DATA;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_mv_stock_index_metric ON mv_stock_index_metric (index_code, trade_date);
+-- 날짜 선두 인덱스: dataFreshness(최신 trade_date)·날짜 범위 조회용 (2026-10-16, migrate 20261016_02). REFRESH 가 함께 유지한다
+CREATE INDEX IF NOT EXISTS idx_mv_stock_index_metric_date ON mv_stock_index_metric (trade_date);
 
 -- ---------------------------------------------
 -- 섹터 일별 집계 (KRX 중분류 현재 매핑 기준). 매핑 이력은 구축일부터라 과거 구성은 현재 구성으로 근사한다(문서화된 편향).
@@ -120,6 +122,7 @@ FROM tb_stock_daily_price p
 GROUP BY s.sector_code, p.trade_date
 WITH DATA;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_mv_stock_sector_daily ON mv_stock_sector_daily (sector_code, trade_date);
+CREATE INDEX IF NOT EXISTS idx_mv_stock_sector_daily_date ON mv_stock_sector_daily (trade_date);
 
 -- ---------------------------------------------
 -- 시장 breadth (시장별 일별): MA20·MA60 상회 종목 비율, 상승 종목 비율. advisor 의 규칙 기반 추세 국면(강세·보합·약세) 성분이다.
@@ -138,6 +141,7 @@ FROM tb_stock_daily_metric d
 GROUP BY m.market_type, d.trade_date
 WITH DATA;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_mv_stock_market_breadth_daily ON mv_stock_market_breadth_daily (market_type, trade_date);
+CREATE INDEX IF NOT EXISTS idx_mv_stock_market_breadth_daily_date ON mv_stock_market_breadth_daily (trade_date);
 
 -- ---------------------------------------------
 -- 유니버스: 활성·주권·비거래정지·비관리·비정리매매 + 시총 1,000억·거래대금 5일 평균 10억 하한 (1차 상수, 추후 테이블화).

@@ -192,6 +192,25 @@ class IntradayCheckJobTest {
     assertThat(blocks).as("요약 section + 픽 줄 section + context").hasSize(3);
     assertThat(sectionText(blocks.get(0))).contains("12:00 중간 점검").doesNotContain("장외 점검");
     assertThat(sectionText(blocks.get(1))).contains("SK하이닉스 시가대비 -2.2%").contains("IDIOSYNCRATIC").contains("ON_TRACK").contains("FLAT").doesNotContain("999999");
+    assertThat(byTicker.get("005930").zScore()).as("후보 feature_json.vol20d 로 σ 를 구해 z 가 채워진다").isNotNull();
+    assertThat(byTicker.get("000660").zScore()).isNotNull();
+  }
+
+  @Test
+  @DisplayName("회귀(2026-10-16): 후보 특징 키가 vol20d 가 아니라 옛 vol20 이면 σ 를 못 구해 전 픽 z NULL·FLAT·REFLECT 생략 — 키 불일치가 노트 파이프라인을 통째로 끈다")
+  void wrongFeatureKeyYieldsFlat_regression() {
+    stubAdvice842();
+    when(adviceWriter.candidates(842L)).thenReturn(List.of(
+        CandidateRow.builder().ticker("005930").stockName("삼성전자").benchIndexCode("0001").sectorCode("G2510").features(Map.of("vol20", 0.01)).build(),
+        CandidateRow.builder().ticker("000660").stockName("SK하이닉스").benchIndexCode("0001").sectorCode("G2510").features(Map.of("vol20", 0.015)).build(),
+        CandidateRow.builder().ticker("035420").stockName("NAVER").benchIndexCode("0001").sectorCode("G2520").features(Map.of("vol20", 0.02)).build()));
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    verify(assist, never()).call(any(), any(), any(), any());
+    assertThat(execution.metadata("skip.REFLECT")).asString().contains("회고 대상 없음");
+    assertThat(savedNotes().values()).hasSize(3).allMatch(n -> n.noteClass() == PickNoteClass.FLAT && n.zScore() == null && n.why() == null);
   }
 
   @Test
@@ -309,8 +328,8 @@ class IntradayCheckJobTest {
         PickRow.builder().ticker("111111").pickRank(1).direction(PickDirection.LONG).conviction(0.7).thesis("a").riskNote("b").build(),
         PickRow.builder().ticker("222222").pickRank(2).direction(PickDirection.LONG).conviction(0.7).thesis("c").riskNote("d").build()));
     when(adviceWriter.candidates(7L)).thenReturn(List.of(
-        CandidateRow.builder().ticker("111111").stockName("코스피종목").benchIndexCode("0001").sectorCode("G1").features(Map.of("vol20", 0.02)).build(),
-        CandidateRow.builder().ticker("222222").stockName("코스닥종목").benchIndexCode("1001").sectorCode("G2").features(Map.of("vol20", 0.02)).build()));
+        CandidateRow.builder().ticker("111111").stockName("코스피종목").benchIndexCode("0001").sectorCode("G1").features(Map.of(CandidateScreeningService.FEATURE_VOL20D, 0.02)).build(),
+        CandidateRow.builder().ticker("222222").stockName("코스닥종목").benchIndexCode("1001").sectorCode("G2").features(Map.of(CandidateScreeningService.FEATURE_VOL20D, 0.02)).build()));
     when(marketData.fetchIndexPrice(eq("0001"), any())).thenReturn(index("2700.00", "0.50", ""));      // 시가 결손
     when(marketData.fetchIndexPrice(eq("1001"), any())).thenReturn(index("880.00", "0.20", "881.00"));
     when(marketData.fetchPrice(eq("111111"), any())).thenReturn(price("970", "-3.00", "1000", "1000"));  // 전일 대비 −3% vs KOSPI +0.5%
@@ -358,10 +377,10 @@ class IntradayCheckJobTest {
         PickRow.builder().ticker("999999").pickRank(4).direction(PickDirection.LONG).conviction(0.6).build()));
     when(adviceWriter.candidates(842L)).thenReturn(List.of(
         CandidateRow.builder().ticker("005930").stockName("삼성전자").benchIndexCode("0001").sectorCode("G2510")
-            .features(Map.of("vol20", 0.01, "secRs5", 0.01, "secRs20", -0.02, "secRs60", 0.03)).build(),
+            .features(Map.of(CandidateScreeningService.FEATURE_VOL20D, 0.01, "secRs5", 0.01, "secRs20", -0.02, "secRs60", 0.03)).build(),
         CandidateRow.builder().ticker("000660").stockName("SK하이닉스").benchIndexCode("0001").sectorCode("G2510")
-            .features(Map.of("vol20", 0.015, "secRs5", 0.01, "secRs20", 0.02, "secRs60", 0.03)).build(),
-        CandidateRow.builder().ticker("035420").stockName("NAVER").benchIndexCode("0001").sectorCode("G2520").features(Map.of("vol20", 0.02)).build()));
+            .features(Map.of(CandidateScreeningService.FEATURE_VOL20D, 0.015, "secRs5", 0.01, "secRs20", 0.02, "secRs60", 0.03)).build(),
+        CandidateRow.builder().ticker("035420").stockName("NAVER").benchIndexCode("0001").sectorCode("G2520").features(Map.of(CandidateScreeningService.FEATURE_VOL20D, 0.02)).build()));
     when(marketData.fetchIndexPrice(eq("0001"), any())).thenReturn(index("2740.10", "0.31", "2730.00"));
     when(marketData.fetchIndexPrice(eq("1001"), any())).thenReturn(index("880.00", "-0.12", "881.00"));
     when(marketData.fetchPrice(eq("005930"), any())).thenReturn(price("71000", "1.20", "70000", "70200"));

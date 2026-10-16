@@ -123,7 +123,7 @@ class AdvisorScreeningPgTest {
       assertThat(candidates.get(i).signals().values()).allMatch(v -> v.pct() >= 0 && v.pct() <= 1);
       assertThat(candidates.get(i).signals().get("VALUE_RANK").pct()).as("밸류 없음 → 중립 0.5").isEqualTo(0.5);
       assertThat(candidates.get(i).signals().get("MOM_20D").w()).isEqualTo(0.12);
-      assertThat(candidates.get(i).features()).containsKeys("r20", "tvRatio", "close");
+      assertThat(candidates.get(i).features()).containsKeys("r20", "tvRatio", "close", CandidateScreeningService.FEATURE_VOL20D);
       assertThat(candidates.get(i).benchIndexCode()).isIn("0001", "1001");
       // advice-v6: 업종 지수 30행 → rs5·rs20 은 있고 rs60 은 없다(키 생략) → secCons null, SECTOR_MOM_60D 는 중립 0.5
       assertThat(candidates.get(i).features()).containsKeys("secRs5", "secRs20").doesNotContainKey("secRs60");

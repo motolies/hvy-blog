@@ -43,6 +43,9 @@ public class CandidateScreeningService {
    */
   static final String PICK_FILTER = "(CAST(:allUniverse AS boolean) OR COALESCE(f.is_kospi200, FALSE))";
 
+  /** 후보 feature_json 의 20일 변동성 키. 장중 점검(IntradayCheckJob)의 z 계산과 가드 별칭이 같은 키를 읽어야 한다 — 2026-10-16 "vol20" 오타로 노트가 전부 FLAT 이던 결함 */
+  public static final String FEATURE_VOL20D = "vol20d";
+
   private final NamedParameterJdbcTemplate jdbc;
   private final WeightSetRepository weightSets;
   private final AdvisorProperties properties;
@@ -175,7 +178,7 @@ public class CandidateScreeningService {
     putFeature(features, "per", rs, "per");
     putFeature(features, "pbr", rs, "pbr");
     putFeature(features, "sectorCw5d", rs, "sector_cw_5d");
-    putFeature(features, "vol20d", rs, "vol_20d");
+    putFeature(features, FEATURE_VOL20D, rs, "vol_20d");
     putFeature(features, "rsIdx20d", rs, "index_ret_20d");
     // advice-v6: 소속 업종 지수의 시장 대비 초과(1주·1개월·3개월). 지수가 없으면 키 자체가 빠진다 → 프롬프트 secCons null
     putFeature(features, "secRs5", rs, "sector_rs_5d");

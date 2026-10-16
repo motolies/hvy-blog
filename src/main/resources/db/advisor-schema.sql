@@ -645,7 +645,7 @@ COMMENT ON COLUMN tb_advisor_pick_note.gap_rate        IS '시가/기준가(stck
 COMMENT ON COLUMN tb_advisor_pick_note.since_open_rate IS '현재가/시가 − 1 (소수) — 진입가 대비 1차 지표';
 COMMENT ON COLUMN tb_advisor_pick_note.bench_rate      IS '소속 지수(bench_index_code) 전일 대비율 % (KIS bstp_nmix_prdy_ctrt)';
 COMMENT ON COLUMN tb_advisor_pick_note.excess_rate     IS '지수 대비 초과 (소수). tags_json.excessBasis 가 OPEN 이면 sinceOpen − 지수 sinceOpen, PREV_CLOSE 면 (change_rate − bench_rate)/100 폴백';
-COMMENT ON COLUMN tb_advisor_pick_note.z_score         IS 'excess_rate / 반나절 σ. OPEN: vol20 × √(3/6.5), PREV_CLOSE: vol20 (후보 feature_json.vol20, 없으면 NULL → FLAT)';
+COMMENT ON COLUMN tb_advisor_pick_note.z_score         IS 'excess_rate / 반나절 σ. OPEN: vol20d × √(3/6.5), PREV_CLOSE: vol20d (후보 feature_json.vol20d, 없으면 NULL → FLAT)';
 COMMENT ON COLUMN tb_advisor_pick_note.note_class      IS 'FLAT | ON_TRACK | MARKET_DRAG | IDIOSYNCRATIC | OVERSHOOT (PickNoteClass, 결정론 — AVOID 는 부호 반전)';
 COMMENT ON COLUMN tb_advisor_pick_note.deviation       IS '회고: 얼마나·어떻게 (≤120자 목표, FLAT·LLM 실패는 NULL)';
 COMMENT ON COLUMN tb_advisor_pick_note.why             IS '회고: thesis 의 어떤 가정이 흔들렸는지·risk 첫 신호 발동 여부 (≤200자 목표, 입력 숫자만 인용)';

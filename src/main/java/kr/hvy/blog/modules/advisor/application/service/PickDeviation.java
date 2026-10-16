@@ -8,7 +8,8 @@ import kr.hvy.blog.modules.advisor.domain.code.PickNoteClass;
  * <ul>
  *   <li>sinceOpen = 현재가/시가 − 1 — 픽 진입 규약(D+1 시가)과 정합하는 1차 지표. gap = 시가/기준가 − 1 은 기록만(MORNING 축)</li>
  *   <li>excess: 지수 시가가 있으면 OPEN 기준 sinceOpen − benchSinceOpen, 없으면 PREV_CLOSE 기준 (changeRate − benchRate)/100 으로 폴백</li>
- *   <li>σ: OPEN 기준은 vol20 × √(3/6.5) — 일 σ 를 개장 후 3시간 스케일로, PREV_CLOSE 기준은 vol20 (하루 스케일, 보수적). z = excess/σ, zMove = move/σ</li>
+ *   <li>σ: OPEN 기준은 vol20 × √(3/6.5) — 일 σ 를 개장 후 3시간 스케일로, PREV_CLOSE 기준은 vol20 (하루 스케일, 보수적). z = excess/σ, zMove = move/σ.
+ *       vol20 은 후보 feature_json 의 vol20d(CandidateScreeningService.FEATURE_VOL20D) 값이다</li>
  *   <li>classify: |z| 가 임계 미만이어도 픽 자체가 −임계σ 이상 빠졌으면(지수와 같이 빠짐) MARKET_DRAG, 아니면 FLAT. AVOID 는 부호 반전.
  *       지수 대비 뒤처진 하락은 "하락분의 절반 이상이 지수로 설명" 이면 MARKET_DRAG</li>
  * </ul>
@@ -58,7 +59,7 @@ final class PickDeviation {
   }
 
   /**
-   * 기준에 맞는 σ: OPEN 은 vol20 × √(3/6.5)(반나절), PREV_CLOSE 는 vol20(하루). vol20 이 없거나 0 이하면 null.
+   * 기준에 맞는 σ: OPEN 은 vol20 × √(3/6.5)(반나절), PREV_CLOSE 는 vol20(하루). vol20(후보 feature_json.vol20d)이 없거나 0 이하면 null.
    */
   static Double sigma(String basis, Double vol20) {
     if (basis == null || vol20 == null || vol20 <= 0 || Double.isNaN(vol20)) {

@@ -393,7 +393,7 @@ public final class AdviceGuard {
     known.putIfAbsent("frgnFlow", known.get("FOREIGN_FLOW"));
     known.putIfAbsent("instFlow", known.get("INST_FLOW"));
     known.putIfAbsent("rsIdx", known.get("RS_INDEX"));
-    known.putIfAbsent("vol20", known.get("vol20d"));
+    known.putIfAbsent("vol20", known.get(CandidateScreeningService.FEATURE_VOL20D));
     // advice-v6: secCons 는 파생 열(1/0)이라 특징 맵에 없다 — 인용되면 같은 정의로 대조한다
     Integer secCons = AdvicePromptBuilder.secCons(candidate.features());
     if (secCons != null) {

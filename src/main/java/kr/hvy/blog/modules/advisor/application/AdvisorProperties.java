@@ -643,7 +643,7 @@ public class AdvisorProperties {
     /** false 면 회고 LLM 호출(REFLECT)을 건너뛴다. 정량·분류 노트는 그대로 저장된다(무료·결정론) */
     private boolean enabled = true;
 
-    /** 분류 임계 |z|. z = 지수 대비 초과 / (vol20 × √(3/6.5)) — 미만이면 FLAT 로 회고를 생략한다 */
+    /** 분류 임계 |z|. z = 지수 대비 초과 / (vol20d × √(3/6.5), 후보 feature_json 키) — 미만이면 FLAT 로 회고를 생략한다 */
     private double zThreshold = 1.0;
 
     /** 회고 호출 1건에 넣는 픽 상한 (|z| 큰 순) */

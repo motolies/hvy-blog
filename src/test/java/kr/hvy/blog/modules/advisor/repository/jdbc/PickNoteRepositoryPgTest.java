@@ -11,6 +11,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import kr.hvy.blog.modules.advisor.application.service.CandidateScreeningService;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.DataQuality;
@@ -215,7 +216,7 @@ class PickNoteRepositoryPgTest {
 
   private static CandidateRow candidate(String ticker) {
     return CandidateRow.builder().ticker(ticker).quantRank(1).quantScore(0.5).stockName("종목" + ticker).marketType("KOSPI").benchIndexCode("0001")
-        .sectorCode("S1").signals(Map.of()).features(Map.of("vol20", 0.02)).appliedLessonIds(List.of()).build();
+        .sectorCode("S1").signals(Map.of()).features(Map.of(CandidateScreeningService.FEATURE_VOL20D, 0.02)).appliedLessonIds(List.of()).build();
   }
 
   private static PickRow pick(String ticker, int rank, PickDirection direction) {

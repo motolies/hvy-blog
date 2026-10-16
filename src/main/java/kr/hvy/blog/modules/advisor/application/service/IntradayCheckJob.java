@@ -320,7 +320,7 @@ public class IntradayCheckJob implements AdvisorJob {
       Double benchRate = bench == null ? null : bench.changeRatePct();
       Double benchSinceOpen = bench == null ? null : bench.sinceOpen();
       PickDeviation.Excess excess = PickDeviation.excess(sinceOpen, benchSinceOpen, rate, benchRate);
-      Double vol20 = feature(candidate, "vol20");
+      Double vol20 = feature(candidate, CandidateScreeningService.FEATURE_VOL20D);
       Double z = PickDeviation.z(excess, vol20);
       Double move = PickObs.move(excess, sinceOpen, rate);
       Double zMove = excess == null ? null : PickDeviation.zOf(move, excess.basis(), vol20);

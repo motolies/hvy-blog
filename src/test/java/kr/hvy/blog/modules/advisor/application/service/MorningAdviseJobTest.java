@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -206,10 +208,11 @@ class MorningAdviseJobTest {
     assertThat(execution.skipReason()).contains("08:50");
     verify(judge, never()).call(anyString(), anyString(), anyString(), any());
     verify(adviceWriter, never()).insertHeader(any());
+    verify(notifier, never()).alert(anyString(), anyBoolean());
   }
 
   @Test
-  @DisplayName("저녁 DAILY LIVE 판단이 없거나 직전 영업일보다 오래됐거나 이미 재판정했으면 SKIPPED")
+  @DisplayName("저녁 DAILY LIVE 판단이 없거나 직전 영업일보다 오래됐으면 SKIPPED + #hvy-notify 경보(보충 절차), 이미 재판정했으면 조용히 SKIPPED")
   void skipWithoutEvening() {
     when(adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1))).thenReturn(Optional.empty());
     AdvisorExecution none = execution();
@@ -229,6 +232,9 @@ class MorningAdviseJobTest {
     assertThat(already.isSkipped()).isTrue();
     assertThat(already.skipReason()).contains("advice=77");
 
+    // 2026-10-16(P1-8): 없음·오래됨 두 경우만 경보(멘션 없음), 중복 재판정은 정상이라 알리지 않는다
+    verify(notifier, times(2)).alert(contains("아침 재판정 미실행"), eq(false));
+    verify(notifier, times(2)).alert(contains("MORNING_ADVISE"), eq(false));
     verify(judge, never()).call(anyString(), anyString(), anyString(), any());
     verify(adviceWriter, never()).insertHeader(any());
     verify(adviceWriter, never()).markPublished(anyLong(), any());

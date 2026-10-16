@@ -119,7 +119,11 @@ public class MorningAdviseJob implements AdvisorJob {
       return;
     }
     Optional<AdviceHeader> latest = adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, today.minusDays(1));
-    if (latest.isEmpty() || latest.get().baseDate().isBefore(calendar.lastTradingDayOnOrBefore(today.minusDays(1)))) {
+    LocalDate lastTradingDay = calendar.lastTradingDayOnOrBefore(today.minusDays(1));
+    if (latest.isEmpty() || latest.get().baseDate().isBefore(lastTradingDay)) {
+      // 2026-10-16(P1-8): 전날 ADVISE 가 수집 지연으로 SKIPPED 되면 아침도 조용히 빠져 하루 전체가 누락됐다 — #hvy-notify(멘션 없음, 전날 #hvy-error 가 이미 울렸다)
+      notifier.alert(String.format("[아침 재판정 미실행] %s — 직전 영업일(%s) 저녁 DAILY LIVE 판단이 없어 건너뜁니다. "
+          + "보충: POST /api/advisor/admin/jobs/ADVISE?baseDate=%s 뒤 08:50 전이면 POST /api/advisor/admin/jobs/MORNING_ADVISE", today, lastTradingDay, lastTradingDay), false);
       execution.skip("재판정할 직전 영업일 저녁 LIVE 판단이 없습니다");
       return;
     }

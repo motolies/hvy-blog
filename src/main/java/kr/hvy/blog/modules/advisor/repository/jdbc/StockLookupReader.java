@@ -39,7 +39,8 @@ public class StockLookupReader {
   private final JdbcTemplate jdbc;
 
   /**
-   * 코드 정확 일치 → 이름 정확 일치 → 이름 접두 → 이름 포함 순. ~2,700행이라 시퀀스 스캔을 허용한다. 활성 종목 우선.
+   * 코드 정확 일치 → 이름 정확 일치 → 이름 접두 → 이름 포함 순, 같은 등급 안에서는 주권(ST) > ETF > ETN > 리츠, 활성 우선, 짧은 이름 순. ~2,700행이라 시퀀스 스캔을 허용한다.
+   * 2026-10-16 이전엔 is_active 가 최우선이고 증권 그룹 정렬이 없어 "삼성" 이 ETN 8개로 차고 삼성전자가 빠졌다(P2). 정확히 일치한 상폐 종목은 사용자가 그 이름을 친 것이므로 접두 일치보다 앞.
    */
   public List<StockHit> resolve(String query, int limit) {
     String q = query == null ? "" : query.trim();
@@ -50,7 +51,9 @@ public class StockLookupReader {
     String prefix = escapeLike(q) + "%";
     return jdbc.query("SELECT ticker, stock_name, market_type, security_group, is_active, delisting_date FROM tb_stock_master "
             + "WHERE ticker = ? OR stock_name ILIKE ? ESCAPE '\\' "
-            + "ORDER BY is_active DESC, (ticker = ?) DESC, (stock_name = ?) DESC, (stock_name ILIKE ? ESCAPE '\\') DESC, stock_name LIMIT ?",
+            + "ORDER BY CASE WHEN ticker = ? THEN 0 WHEN stock_name = ? THEN 1 WHEN stock_name ILIKE ? ESCAPE '\\' THEN 2 ELSE 3 END, "
+            + "CASE security_group WHEN 'ST' THEN 0 WHEN 'EF' THEN 1 WHEN 'EN' THEN 2 WHEN 'RT' THEN 3 ELSE 4 END, "
+            + "is_active DESC, LENGTH(stock_name), stock_name LIMIT ?",
         HIT_MAPPER, q, like, q, q, prefix, limit);
   }
 

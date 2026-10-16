@@ -32,7 +32,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class StockToolkit {
 
-  static final int RESOLVE_LIMIT = 8;
+  /** resolveStock 최대 반환 수. 2026-10-16: 8 → 20 ("삼성" 처럼 ETN·ETF 가 많은 이름도 주권이 들어오게) */
+  static final int RESOLVE_LIMIT = 20;
   static final int SERIES_MAX_ROWS = 250;
   static final int SERIES_DEFAULT_DAYS = 60;
   static final int TOPN_CAP = 20;
@@ -48,16 +49,20 @@ public class StockToolkit {
   private final StockNewsWriter news;
 
   @Tool(name = "resolveStock", description = "사용자가 한글 종목명(일부라도)이나 6자리 코드로 물었을 때 종목코드를 찾는다. 다른 종목 도구(stockSnapshot·priceSeries)를 쓰기 전에 "
-      + "반드시 먼저 호출한다. 여러 종목이 걸리면 후보를 사용자에게 보여 주고 되묻는다. grp: ST 주권, EF ETF, EN ETN, RT 리츠. act=false 는 상장폐지.")
+      + "반드시 먼저 호출한다. 여러 종목이 걸리면 후보를 사용자에게 보여 주고 되묻는다. 정렬은 코드·이름 정확 일치 > 이름 접두 > 포함, 같은 등급 안에서 주권(ST) 우선. "
+      + "최대 20건이며 truncated=true 면 더 구체적인 이름으로 다시 찾는다. grp: ST 주권, EF ETF, EN ETN, RT 리츠. act=false 는 상장폐지.")
   public Map<String, Object> resolveStock(@ToolParam(description = "종목명 일부 또는 6자리 종목코드 (예: 삼성전자, 005930)") String query, ToolContext context) {
     return support.run("resolveStock", context, () -> {
-      List<StockHit> hits = reader.resolve(query, RESOLVE_LIMIT);
-      if (hits.isEmpty()) {
+      List<StockHit> found = reader.resolve(query, RESOLVE_LIMIT + 1);   // 상한+1 로 읽어 잘림을 판정한다
+      if (found.isEmpty()) {
         return ToolJson.error(ToolJson.ERROR_NO_DATA, "'" + query + "' 와 일치하는 종목이 없다", null);
       }
+      boolean truncated = found.size() > RESOLVE_LIMIT;
+      List<StockHit> hits = truncated ? found.subList(0, RESOLVE_LIMIT) : found;
       Map<String, Object> m = ToolJson.obj();
       m.put("query", query);
       m.put("n", hits.size());
+      m.put("truncated", truncated);
       List<Map<String, Object>> items = new ArrayList<>();
       for (StockHit h : hits) {
         Map<String, Object> x = ToolJson.obj();

@@ -190,10 +190,23 @@ class AdvisorChatToolPgTest {
     assertThat(items.getFirst()).containsEntry("tk", "T05").containsEntry("nm", "종목5").containsEntry("mkt", "KOSDAQ").containsEntry("grp", "ST").containsEntry("act", true);
 
     Map<String, Object> byName = stock.resolveStock("종목1", context);
-    assertThat((Integer) byName.get("n")).isEqualTo(StockToolkit.RESOLVE_LIMIT);   // 종목1, 종목10~19 → 8행 상한
+    assertThat(byName).containsEntry("n", 11).containsEntry("truncated", false);   // 종목1, 종목10~19 → 11행 (상한 20 안)
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> named = (List<Map<String, Object>>) byName.get("items");
     assertThat(named.getFirst()).containsEntry("nm", "종목1");   // 정확 일치 우선
+    Map<String, Object> many = stock.resolveStock("종목", context);
+    assertThat(many).containsEntry("n", StockToolkit.RESOLVE_LIMIT).containsEntry("truncated", true);   // 40행 → 20 상한·잘림 표시
+
+    // 2026-10-16(P2): 정확 일치 > 접두 일치, 같은 등급 안에서 주권(ST) > ETN, 활성보다 정확 일치가 앞 — "삼성" 이 ETN 8개로 차던 결함
+    jdbc.update("INSERT INTO tb_stock_master (ticker, stock_name, market_type, security_group, is_active, created_at, updated_at) VALUES "
+        + "('ZZ1', '테스트 레버리지 ETN', 'KOSPI', 'EN', TRUE, NOW(), NOW()), ('ZZ2', '테스트전자', 'KOSPI', 'ST', TRUE, NOW(), NOW()), ('ZZ3', '테스트', 'KOSPI', 'ST', FALSE, NOW(), NOW())");
+    try {
+      @SuppressWarnings("unchecked")
+      List<Map<String, Object>> ordered = (List<Map<String, Object>>) stock.resolveStock("테스트", context).get("items");
+      assertThat(ordered).extracting(x -> x.get("tk")).containsExactly("ZZ3", "ZZ2", "ZZ1");
+    } finally {
+      jdbc.update("DELETE FROM tb_stock_master WHERE ticker IN ('ZZ1', 'ZZ2', 'ZZ3')");
+    }
 
     assertThat(stock.resolveStock("없는회사", context)).containsEntry("error", ToolJson.ERROR_NO_DATA);
     assertThat(stock.resolveStock("%_", context)).containsEntry("error", ToolJson.ERROR_NO_DATA);   // LIKE 와일드카드는 이스케이프

@@ -177,9 +177,10 @@ public class McpConfig {
       목록은 날짜와 고유키 오름차순, 기본 50 최대 250. nextCursor는 동일 필터로 전달. 종료 시 null.
       stockSeries PRICE는 vw_stock_daily_price_adj: adj_* 수정가격(원), raw_close 원종가(원), raw_volume 원거래량(주).
       METRIC 가격·수익률은 수정주가 기반. ret_*·dist_*는 비율(0.01=1%), tv_*·net_* 금액은 원.
-      VALUATION 시총 원, EPS/BPS 원, PER/PBR 배(0 이 아니라 null 이 결측·산출 불가), foreign_hold_rate %. ETF_NAV close_price 원가격(원), nav 원, disparity_rate %.
+      VALUATION 시총 원, EPS/BPS 원, PER/PBR 배(0 이 아니라 null 이 결측·산출 불가), foreign_hold_rate_pct %. ETF_NAV close_price 원가격(원), nav 원, disparity_rate_pct %.
       stockMaster·MASTER_HISTORY listed_shares는 천주(주 단위는 VALUATION listed_shares), capital·par_value는 원.
-      INDEX·INDEX_METRIC 지수 포인트, ret_* 비율. BREADTH *_ratio는 비율. MASTER_HISTORY는 valid_from 기준 변경 이력, ADJUST_EVENT의 *_factor는 배수. INDEX 지수 포인트. GLOBAL 가격은 원천 통화/포인트이며 symbol·market_div로 구분. change_rate 필드는 %(1=1%).
+      INDEX·INDEX_METRIC 지수 포인트, ret_* 비율. BREADTH *_ratio는 비율. MASTER_HISTORY는 valid_from 기준 변경 이력, ADJUST_EVENT의 *_factor는 배수. INDEX 지수 포인트. GLOBAL 가격은 원천 통화/포인트이며 symbol·market_div로 구분.
+      *_pct 접미 필드(change_rate_pct·prtt_rate_pct·bench_rate_pct·avg_change_rate_pct·disparity_rate_pct·foreign_hold_rate_pct 등)는 %(1=1%)이고, 그 외 ret_*·dist_*·*_ratio·excess_rate 같은 수익률·비율은 소수(0.01=1%)입니다. 재무 비율(roe·debt_ratio 등)은 %.
       INVESTOR 금액은 원, null은 결측, 0은 실제 0입니다.
       종목 5일·업종 수급 합계는 복구된 비결측 값만 집계하므로 부분 복구 기간은 전체 합계로 해석하지 마세요.
       MARKET_INVESTOR 금액은 원(KIS 백만원 ×1e6), 수량은 천주(KIS 원천 그대로), null은 결측, 0은 실제 0입니다.
@@ -195,6 +196,7 @@ public class McpConfig {
       adviceDetail: header 기준일·실제 dataAsOf, candidates 동결 정량 후보·signals, picks 근거·위험·인용,
       candidateScores/callScores 사후 채점, morningCheck/intradayChecks 점검, notes 오답노트.
       성과 가격은 수정주가, 수익률·excessRet은 비율(0.01=1%). 방향·stage·status를 함께 읽으세요.
+      adviceNotes: change_rate_pct·bench_rate_pct는 %(1.2=1.2%), gap_rate·since_open_rate·excess_rate·final_excess는 소수 비율, z_score는 σ 배수(반나절 σ 기준).
       morningCheck 임계(threshold)는 2026-10-16부터 밤사이 갭 σ(detail.index.*.sigmaBasis=GAP), 그 전 행은 종가 σ_1d(키 없음)라 HOLD 적중률을 전환일 전후로 나눠 읽으세요.
       adviceScores 기본 호라이즌은 advisor.horizons의 해당 판단 종류. signalIc는 기존 IC 창 및 n_eff=IC일수/호라이즌 계산.
       adviceWeights는 가중치 세트·시그널 가중치 이력, adviceLessons는 근거·조건·상태, adviceNotes 가격은 원가격(원).

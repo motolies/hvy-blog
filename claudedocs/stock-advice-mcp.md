@@ -138,7 +138,7 @@ MCP 도구 결과는 JSON `structuredContent`와 동일한 JSON 텍스트를 제
 - 날짜는 `yyyy-MM-dd`. 잘못된 날짜를 오늘로 대체하지 않는다.
 - `requestedAsOf`: 명시적으로 요청한 기준일. `queryTo`: 미래를 오늘 (KST)로 제한한 조회 상한. `dataAsOf`: 실제 관측일 또는 데이터별 관측일. 페이지의 `dataAsOf`는 그 페이지 마지막 날짜다.
 - `PRICE`의 `adj_*`는 수정가격 (원)·수정거래량 (주), `raw_close`·`raw_volume`은 원종가·원거래량이다. 전체 원 OHLC는 `RAW_PRICE`를 사용한다.
-- 수익률 `ret_*`, 거리 `dist_*`, 성과 `excessRet`은 비율 (0.01=1%). 일반 `change_rate`와 재무 비율은 % (1=1%). 시총·종목 수급 금액은 원, 재무 금액은 백만원이다. 시장 수급은 원천 단위가 확인되지 않은 값을 원으로 가정하지 않는다.
+- 수익률 `ret_*`, 거리 `dist_*`, 성과 `excessRet`은 비율 (0.01=1%). % 단위 컬럼은 2026-10-16 부터 응답 키에 `_pct` 접미가 붙는다(`change_rate_pct`·`prtt_rate_pct`·`bench_rate_pct`·`avg_change_rate_pct`·`disparity_rate_pct`·`foreign_hold_rate_pct`, `McpFields` 의 `col AS alias` — DB 컬럼명은 그대로). 재무 비율은 % (1=1%). 시총·종목 수급 금액은 원, 재무 금액은 백만원, 시장 수급 금액은 원(KIS 백만원 ×1e6)·수량은 천주다.
 - 재무는 `available_from`과 `first_seen_at` KST 날짜가 모두 상한 이하인 행만 제공한다. 거시는 `available_from<=to`, `obs_date<to`를 적용한다. 당시 정정 전 버전까지 완벽하게 재현하지는 않는다.
 - EVENT는 완결된 UTC 관측일만 제공하고 기본 LIVE다. BACKFILL은 명시적으로 지정한다.
 - 수정계수는 현재 뷰 기준이며 과거 당시의 계수 버전을 보장하지 않는다. 섹터·시장 폭은 현재 구성에 따른 재현 한계가 있다.

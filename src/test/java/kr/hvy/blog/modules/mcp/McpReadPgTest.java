@@ -66,6 +66,13 @@ class McpReadPgTest {
     assertThat(items(first)).hasSize(2);
     assertThat(((Number) items(first).getFirst().get("adj_close")).doubleValue()).isEqualTo(50);
     assertThat(((Number) items(first).getFirst().get("raw_close")).doubleValue()).isEqualTo(100);
+    // 2026-10-16: % 컬럼은 _pct 별칭으로만 나간다(물리 컬럼명은 응답에 없다). 카탈로그 필드명도 별칭
+    assertThat(items(first).getFirst()).containsKey("change_rate_pct").doesNotContainKey("change_rate");
+    @SuppressWarnings("unchecked") var fields = (Map<String, List<Map<String, Object>>>) reader.catalog().get("fields");
+    assertThat(fields.get("vw_stock_daily_price_adj")).extracting(f -> f.get("field")).contains("change_rate_pct").doesNotContain("change_rate");
+    // 뷰 컬럼엔 COMMENT 가 없어 description 이 null 이고, 원본 테이블은 DB 주석을 그대로 싣는다
+    assertThat(fields.get("tb_stock_daily_price").stream().filter(f -> "change_rate_pct".equals(f.get("field"))).findFirst().orElseThrow().get("description"))
+        .asString().contains("%");
     var second = reader.series(true,"PRICE","005930","2026-01-01","2026-01-04",null,2,(String) first.get("nextCursor"));
     assertThat(items(second)).extracting(x -> x.get("trade_date")).containsExactly("2026-01-03","2026-01-04");
     assertThat(second.get("nextCursor")).isNull();

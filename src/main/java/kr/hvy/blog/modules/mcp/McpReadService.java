@@ -167,10 +167,14 @@ public class McpReadService {
     Map<String, Object> fields = new LinkedHashMap<>();
     for (String table : McpFields.COLUMNS.keySet()) {
       Source source = new Source(table, null, null, null);
-      fields.put(source.table, rows("SELECT jsonb_build_object('field', a.attname, 'type', format_type(a.atttypid, a.atttypmod), "
+      Map<String, String> aliases = McpFields.aliases(table);
+      List<Map<String, Object>> columns = rows("SELECT jsonb_build_object('field', a.attname, 'type', format_type(a.atttypid, a.atttypmod), "
           + "'description', col_description(a.attrelid, a.attnum)) AS data FROM pg_attribute a WHERE a.attrelid = to_regclass(:table) "
           + "AND a.attnum > 0 AND NOT a.attisdropped AND a.attname IN (:fields) ORDER BY a.attnum",
-          new MapSqlParameterSource("table", source.table).addValue("fields", McpFields.names(source.table))));
+          new MapSqlParameterSource("table", source.table).addValue("fields", McpFields.names(source.table)));
+      // 응답 키가 별칭(*_pct)인 컬럼은 카탈로그 필드명도 별칭으로 — 설명은 DB 주석 그대로
+      for (Map<String, Object> column : columns) column.put("field", aliases.getOrDefault(String.valueOf(column.get("field")), String.valueOf(column.get("field"))));
+      fields.put(source.table, columns);
     }
     catalog.put("fields", fields);
     catalog.put("adviceKinds", java.util.Arrays.stream(kr.hvy.blog.modules.advisor.domain.code.AdviceKind.values()).map(Enum::name).toList());

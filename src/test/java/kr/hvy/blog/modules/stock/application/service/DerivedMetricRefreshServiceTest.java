@@ -39,6 +39,37 @@ class DerivedMetricRefreshServiceTest {
     when(refresher.tableExists(DerivedViewRefresher.TB_DAILY_METRIC)).thenReturn(true);
     when(refresher.refresh(anyString(), anyBoolean(), any(), any())).thenReturn(10L);
     when(refresher.recomputeDailyMetric(any(), any(), any(), any())).thenReturn(1234);
+    when(refresher.corrections(any(), any(), any())).thenReturn(new DerivedViewRefresher.CorrectionRange(null, 0));
+  }
+
+  @Test
+  @DisplayName("증분(DAILY): run 시작 뒤 정정된 가격·투자자 행이 30일 창보다 앞(140일 창 안)에 있으면 그 날짜까지 창을 넓히고 correctedFrom/Rows 를 남긴다")
+  void correctionsWidenIncrementalWindow() {
+    LocalDate today = MarketClock.today();
+    LocalDate corrected = today.minusDays(90);
+    when(refresher.corrections(any(), eq(today.minusDays(140)), eq(today.minusDays(31)))).thenReturn(new DerivedViewRefresher.CorrectionRange(corrected, 3));
+    CollectExecution exec = execution(BackfillRequest.empty());
+
+    service.refreshAll(exec);
+
+    verify(refresher).corrections(eq(exec.run().getStartedAt()), eq(today.minusDays(140)), eq(today.minusDays(31)));
+    verify(refresher).recomputeDailyMetric(eq(corrected), eq(corrected.minusDays(420)), eq("512MB"), eq(0));
+    assertThat(exec.metadataSnapshot()).containsEntry("metricFrom", corrected.toString()).containsEntry("correctedFrom", corrected.toString())
+        .containsEntry("correctedRows", 3);
+  }
+
+  @Test
+  @DisplayName("정정이 증분 창 안(30일 이내)이거나 없으면 기존 30일 창 그대로, correctedFrom 없음")
+  void correctionsInsideWindowKeepDefault() {
+    LocalDate today = MarketClock.today();
+    when(refresher.corrections(any(), any(), any())).thenReturn(new DerivedViewRefresher.CorrectionRange(today.minusDays(3), 2));
+    CollectExecution exec = execution(BackfillRequest.empty());
+
+    service.refreshAll(exec);
+
+    verify(refresher).recomputeDailyMetric(eq(today.minusDays(30)), eq(today.minusDays(450)), eq("512MB"), eq(0));
+    assertThat(exec.metadataSnapshot()).containsEntry("metricFrom", today.minusDays(30).toString()).containsEntry("correctedRows", 2)
+        .doesNotContainKey("correctedFrom");
   }
 
   @Test
@@ -51,6 +82,7 @@ class DerivedMetricRefreshServiceTest {
 
     LocalDate from = MarketClock.today().minusDays(30);
     verify(refresher).recomputeDailyMetric(eq(from), eq(from.minusDays(420)), eq("512MB"), eq(0));
+    assertThat(exec.metadataSnapshot()).containsEntry("correctedRows", 0).doesNotContainKey("correctedFrom");
     verify(refresher).refresh(eq(DerivedViewRefresher.MV_ADJUST_FACTOR), eq(false), eq("512MB"), eq(0));
     verify(refresher).refresh(eq("mv_stock_sector_daily"), eq(false), eq("512MB"), eq(0));
     verify(refresher).refresh(eq("mv_stock_market_breadth_daily"), eq(false), eq("512MB"), eq(0));

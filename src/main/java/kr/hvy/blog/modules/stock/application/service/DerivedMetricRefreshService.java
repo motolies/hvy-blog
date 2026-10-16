@@ -20,6 +20,9 @@ import org.springframework.stereotype.Service;
  * 종목 일별 지표는 2026-09-08 MV 에서 테이블로 바꿨다. 전체 재계산이 22분(2026-09-09 실측)이라 DAILY 는 최근 metric-recompute-days 만
  * 다시 계산하고, WEEKLY 가 전체를 다시 계산해 수정계수 변경 같은 과거 구간 변화를 흡수한다. MV 3개는 매번 전체 REFRESH 라
  * 증분이어도 약 5분의 고정 비용이 있다.
+ * <p>
+ * 2026-10-16: DAILY 증분은 이 run 이 시작된 뒤 정정된(collected_at 갱신) 원주가·투자자 행이 증분 창보다 앞에 있으면 그 날짜까지 창을 넓힌다 —
+ * 가격 재수집 창(backfill.window-days 140일) 안의 종가 정정이 다음 WEEKLY 까지 지표에 안 묻히던 구간(plan/mcp.md P0-5).
  */
 @Slf4j
 @Service
@@ -61,10 +64,24 @@ public class DerivedMetricRefreshService implements CollectJob {
   }
 
   /**
-   * 증분 갱신(DAILY): 지표는 오늘 − metric-recompute-days 부터 다시 계산한다.
+   * 증분 갱신(DAILY): 지표는 오늘 − metric-recompute-days 부터 다시 계산한다. 이 run 이 시작된 뒤 그보다 앞(최대 backfill.window-days)의
+   * 원주가·투자자 행이 정정됐으면 가장 이른 정정일까지 창을 넓히고 correctedFrom·correctedRows 를 메타데이터에 남긴다.
+   * API DERIVED_REFRESH(본문 없음)는 run 시작이 곧 지금이라 정정 0 → 기존 30일 그대로다.
    */
   public int refreshAll(CollectExecution execution) {
-    return refreshAll(execution, MarketClock.today().minusDays(properties.getDerived().getMetricRecomputeDays()));
+    LocalDate today = MarketClock.today();
+    LocalDate from = today.minusDays(properties.getDerived().getMetricRecomputeDays());
+    LocalDate windowStart = today.minusDays(properties.getBackfill().getWindowDays());
+    DerivedViewRefresher.CorrectionRange corrections = windowStart.isBefore(from)
+        ? viewRefresher.corrections(execution.run().getStartedAt(), windowStart, from.minusDays(1)) : null;
+    int correctedRows = corrections == null ? 0 : corrections.rows();
+    execution.putMetadata("correctedRows", correctedRows);
+    if (corrections != null && corrections.earliest() != null && corrections.earliest().isBefore(from)) {
+      log.info("파생 증분 창 확장: {} → {} (run 중 정정된 가격·투자자 {}행)", from, corrections.earliest(), correctedRows);
+      execution.putMetadata("correctedFrom", corrections.earliest().toString());
+      from = corrections.earliest();
+    }
+    return refreshAll(execution, from);
   }
 
   /**

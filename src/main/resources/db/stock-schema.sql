@@ -870,7 +870,7 @@ COMMENT ON COLUMN tb_stock_daily_metric.high_52w           IS '최근 252거래�
 COMMENT ON COLUMN tb_stock_daily_metric.dist_high_52w      IS '52주 고점 대비 = 종가/high_52w − 1';
 COMMENT ON COLUMN tb_stock_daily_metric.tv_ratio_5_60      IS '거래대금 5일 평균 / 60일 평균';
 COMMENT ON COLUMN tb_stock_daily_metric.foreign_net_5d     IS '외국인 순매수 5일 누적 (tb_stock_investor_daily)';
-COMMENT ON COLUMN tb_stock_daily_metric.computed_at        IS '마지막 계산 시각';
+COMMENT ON COLUMN tb_stock_daily_metric.computed_at        IS '값이 바뀐 마지막 계산 시각 — upsert 가 IS DISTINCT FROM 이라 값이 하나도 안 바뀌면 갱신되지 않는다. 재계산 범위는 tb_stock_collect_run.metadata_json.metricFrom/correctedFrom';
 
 CREATE INDEX IF NOT EXISTS idx_stock_daily_metric_date
     ON tb_stock_daily_metric (trade_date);

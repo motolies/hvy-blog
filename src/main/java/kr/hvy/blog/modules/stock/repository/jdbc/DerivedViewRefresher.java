@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -129,6 +130,23 @@ public class DerivedViewRefresher {
 
   /** 수정주가 뷰 1행 */
   public record AdjustedClose(LocalDate tradeDate, BigDecimal adjClose, BigDecimal adjVolume, BigDecimal rawClose) {
+  }
+
+  /** 입력 정정 범위: since 이후 갱신된 원주가·투자자 행 중 가장 이른 거래일과 행 수 (없으면 earliest null, rows 0) */
+  public record CorrectionRange(LocalDate earliest, int rows) {
+  }
+
+  /**
+   * since 이후 갱신된(upsert 의 IS DISTINCT FROM 을 통과해 collected_at 이 찍힌) 원주가·투자자 행 중 가장 이른 거래일과 행 수.
+   * [from, to] 로 한정해 trade_date 인덱스를 탄다 — DAILY 가 지표 증분 창(30일)보다 앞의 종가·수급을 정정했는지 묻는 용도.
+   */
+  public CorrectionRange corrections(Instant since, LocalDate from, LocalDate to) {
+    return jdbcTemplate.queryForObject(
+        "SELECT MIN(d), COUNT(*) FROM ("
+            + "SELECT trade_date AS d FROM tb_stock_daily_price WHERE trade_date BETWEEN ? AND ? AND collected_at >= ? "
+            + "UNION ALL SELECT trade_date FROM tb_stock_investor_daily WHERE trade_date BETWEEN ? AND ? AND collected_at >= ?) x",
+        (rs, i) -> new CorrectionRange(rs.getObject(1, LocalDate.class), rs.getInt(2)),
+        from, to, java.sql.Timestamp.from(since), from, to, java.sql.Timestamp.from(since));
   }
 
   /**

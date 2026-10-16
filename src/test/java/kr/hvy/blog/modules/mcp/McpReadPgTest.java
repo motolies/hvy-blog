@@ -40,7 +40,7 @@ class McpReadPgTest {
     reader = new McpReadService(new NamedParameterJdbcTemplate(ds), JsonMapper.builder().build());
     tx = McpConfig.readTransaction(new DataSourceTransactionManager(ds));
     jdbc.execute("TRUNCATE tb_stock_investor_daily, tb_stock_daily_price, tb_stock_adjust_event, tb_stock_financial, tb_stock_macro_daily, tb_stock_event_timeline, "
-        + "tb_stock_news, tb_stock_global_market_daily, tb_advisor_advice CASCADE");
+        + "tb_stock_news, tb_stock_global_market_daily, tb_stock_corporate_action, tb_advisor_advice CASCADE");
     jdbc.execute("REFRESH MATERIALIZED VIEW mv_stock_adjust_factor");
   }
   @SuppressWarnings("unchecked") List<Map<String, Object>> items(Map<String, Object> result) { return (List<Map<String, Object>>) result.get("items"); }
@@ -88,8 +88,26 @@ class McpReadPgTest {
     var second = reader.financials("005930","2026-01-03",1,(String)first.get("nextCursor"));
     assertThat(items(first)).hasSize(1);
     assertThat(items(second)).hasSize(1);
-    assertThat(items(second).getFirst().get("revenue")).isNull();
+    // 2026-10-16: 최신순 — 같은 available_from 이면 키(202512|Y) 가 202509|Q 보다 앞, 역방향 커서로 이어진다
+    assertThat(first.get("order")).isEqualTo("desc");
+    assertThat(items(first).getFirst().get("fiscal_period")).isEqualTo("202512");
+    assertThat(items(first).getFirst().get("revenue")).isNull();
+    assertThat(items(second).getFirst().get("fiscal_period")).isEqualTo("202509");
+    assertThat(items(second).getFirst().get("revenue")).isEqualTo(100);
     assertThat(second.get("nextCursor")).isNull();
+  }
+  @Test void corporateActionsDefaultToFullHistoryNewestFirst() {
+    jdbc.execute("INSERT INTO tb_stock_corporate_action(ticker,effective_date,action_type,ratio_after,source) VALUES "
+        + "('187870','2015-03-02','SPLIT',0.2,'KSD'),('187870','2026-04-28','BONUS_ISSUE',1,'KSD')");
+    var all = reader.actions("187870", null, null, 50, null);
+    assertThat(all.get("order")).isEqualTo("desc");
+    assertThat(all.get("from")).isEqualTo("0001-01-01");
+    assertThat(items(all)).extracting(x -> x.get("effective_date")).containsExactly("2026-04-28", "2015-03-02");
+    assertThat(all.get("dataAsOf")).as("내림차순이면 첫 항목이 최대 날짜").isEqualTo("2026-04-28");
+    var paged = reader.actions("187870", null, null, 1, null);
+    assertThat(items(paged)).hasSize(1);
+    assertThat(items(reader.actions("187870", null, null, 1, (String) paged.get("nextCursor"))).getFirst().get("effective_date")).isEqualTo("2015-03-02");
+    assertThat(items(reader.actions("187870", "2026-01-01", null, 50, null))).hasSize(1);
   }
   @Test void macroPublicationDelayAndLiveBackfill() {
     jdbc.execute("INSERT INTO tb_stock_macro_daily(series_code,obs_date,value,source,available_from) VALUES ('VIX','2026-01-01',20,'CBOE','2026-01-02'),('VIX','2026-01-02',30,'CBOE','2026-01-03')");

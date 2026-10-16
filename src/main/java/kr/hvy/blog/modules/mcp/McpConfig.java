@@ -174,7 +174,7 @@ public class McpConfig {
   static final String STOCK_GUIDE = """
       먼저 dataFreshness, 다음 resolveStock으로 코드를 확인하세요. 날짜는 yyyy-MM-dd, 국내 시점은 KST.
       기존 도구 asOf는 실제 수집 기준일, requestedAsOf는 요청 날짜, queryTo는 미래 날짜를 오늘로 제한한 조회 상한, dataAsOf는 해당 페이지 마지막 관측 날짜.
-      목록은 날짜와 고유키 오름차순, 기본 50 최대 250. nextCursor는 동일 필터로 전달. 종료 시 null.
+      목록은 날짜와 고유키 오름차순(stockFinancials·stockCorporateActions는 최신순 내림차순, 응답 order 키로 구분), 기본 50 최대 250. nextCursor는 동일 필터로 전달. 종료 시 null.
       stockSeries PRICE는 vw_stock_daily_price_adj: adj_* 수정가격(원), raw_close 원종가(원), raw_volume 원거래량(주).
       METRIC 가격·수익률은 수정주가 기반. ret_*·dist_*는 비율(0.01=1%), tv_*·net_* 금액은 원.
       VALUATION 시총 원, EPS/BPS 원, PER/PBR 배(0 이 아니라 null 이 결측·산출 불가), foreign_hold_rate_pct %. ETF_NAV close_price 원가격(원), nav 원, disparity_rate_pct %.

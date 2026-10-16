@@ -68,15 +68,17 @@ public class McpReadService {
         new MapSqlParameterSource("ticker", ticker)));
   }
 
+  /** 재무 이력 — 최신 available_from 순(내림차순, 2026-10-16). 그 전엔 2004년 결산부터 와서 limit 50 안에 최신이 없었다(P2) */
   public Map<String, Object> financials(String ticker, String asOf, Integer limit, String cursor) {
     return page(new Source("tb_stock_financial", "ticker", "available_from",
         "fiscal_period || '|' || period_type || '|' || lpad(revision_seq::text, 10, '0')"),
         "ticker = :ticker AND (first_seen_at AT TIME ZONE 'Asia/Seoul')::date <= :end",
-        new MapSqlParameterSource("ticker", ticker), "0001-01-01", asOf, limit, cursor);
+        new MapSqlParameterSource("ticker", ticker), "0001-01-01", asOf, limit, cursor, true);
   }
+  /** 기업행사 — from 생략 시 전체 이력, 최신 effective_date 순(2026-10-16). 종목당 수십 건이라 전체여도 작고 기본 90일로는 4월 무상증자가 안 보였다(P2) */
   public Map<String, Object> actions(String ticker, String from, String to, Integer limit, String cursor) {
     return page(new Source("tb_stock_corporate_action", "ticker", "effective_date", "lpad(id::text, 20, '0')"),
-        "ticker = :ticker", new MapSqlParameterSource("ticker", ticker), from, to, limit, cursor);
+        "ticker = :ticker", new MapSqlParameterSource("ticker", ticker), from == null || from.isBlank() ? "0001-01-01" : from, to, limit, cursor, true);
   }
   public Map<String, Object> sectors(String ticker, String asOf, Integer limit, String cursor) {
     return page(new Source("tb_stock_sector_map", "ticker", "valid_from", "sector_code"),
@@ -113,13 +115,21 @@ public class McpReadService {
 
   private Map<String, Object> page(Source source, String filter, MapSqlParameterSource params, String from,
       String to, Integer limit, String cursor) {
+    return page(source, filter, params, from, to, limit, cursor, false);
+  }
+
+  /**
+   * 날짜·고유키 순 페이지. descending 이면 최신순(커서 비교·ORDER BY 반전, dataAsOf 는 첫 항목 날짜)이고 응답 order 키로 방향을 알린다. 커서 scope 에 방향이 들어가 섞어 쓸 수 없다.
+   */
+  private Map<String, Object> page(Source source, String filter, MapSqlParameterSource params, String from,
+      String to, Integer limit, String cursor, boolean descending) {
     LocalDate end = end(to);
     LocalDate start = from == null || from.isBlank() ? end.minusDays(90) : LocalDate.parse(from);
     if (start.isAfter(end)) throw new IllegalArgumentException("from 은 to 이전이어야 합니다");
     if (limit != null && limit < 1) throw new IllegalArgumentException("limit must be positive");
     int size = limit == null ? 50 : Math.min(250, limit);
     params.addValue("start", start).addValue("end", end);
-    String scope = source.table + filter + params.getValues();
+    String scope = source.table + filter + params.getValues() + (descending ? "|desc" : "");
     String after = "";
     if (cursor != null && !cursor.isBlank()) {
       try {
@@ -128,14 +138,14 @@ public class McpReadService {
         LocalDate.parse(decoded.get(1));
         if (decoded.get(2) == null) throw new IllegalArgumentException();
         params.addValue("cursorDate", decoded.get(1)).addValue("cursorKey", decoded.get(2));
-        after = " AND ((" + source.date + ")::text, (" + source.key + ")::text) > (:cursorDate, :cursorKey)";
+        after = " AND ((" + source.date + ")::text, (" + source.key + ")::text) " + (descending ? "<" : ">") + " (:cursorDate, :cursorKey)";
       } catch (RuntimeException e) { throw new IllegalArgumentException("유효하지 않은 cursor"); }
     }
     params.addValue("limit", size + 1);
     String sql = "SELECT to_jsonb(t) AS data, (" + source.date + ")::text AS cursor_date, ("
         + source.key + ")::text AS cursor_key FROM (SELECT " + McpFields.columns(source.table) + " FROM " + source.table + ") t WHERE " + filter
         + " AND " + source.date + " BETWEEN :start AND :end" + after
-        + " ORDER BY (" + source.date + ")::text, (" + source.key + ")::text LIMIT :limit";
+        + " ORDER BY (" + source.date + ")::text" + (descending ? " DESC" : "") + ", (" + source.key + ")::text" + (descending ? " DESC" : "") + " LIMIT :limit";
     List<Map<String, Object>> items = new ArrayList<>();
     List<String> cursors = new ArrayList<>();
     jdbc.query(sql, params, rs -> {
@@ -149,7 +159,9 @@ public class McpReadService {
     result.put("requestedAsOf", to == null || to.isBlank() ? end.toString() : to);
     result.put("queryTo", end.toString());
     result.put("from", start.toString());
-    result.put("dataAsOf", items.isEmpty() ? null : mapper.readValue(new String(Base64.getUrlDecoder().decode(cursors.get(items.size()-1)), StandardCharsets.UTF_8), new TypeReference<List<String>>() {}).get(1));
+    result.put("order", descending ? "desc" : "asc");
+    // dataAsOf 는 페이지 안 최대 날짜 — 오름차순이면 마지막, 내림차순이면 첫 항목
+    result.put("dataAsOf", items.isEmpty() ? null : mapper.readValue(new String(Base64.getUrlDecoder().decode(cursors.get(descending ? 0 : items.size() - 1)), StandardCharsets.UTF_8), new TypeReference<List<String>>() {}).get(1));
     result.put("items", items);
     result.put("nextCursor", more ? cursors.get(size - 1) : null);
     return result;

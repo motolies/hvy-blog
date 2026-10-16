@@ -35,12 +35,12 @@ public class McpDataToolkit {
       @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor) {
     return reader.series(true, type, ticker, from, to, null, limit, cursor);
   }
-  @Tool(description = "재무 이력. available_from 및 first_seen_at KST 날짜가 asOf 이하인 행만 제공. 금액·비율 단위는 stock://guide 확인.")
+  @Tool(description = "재무 이력. available_from 및 first_seen_at KST 날짜가 asOf 이하인 행만, 최신 available_from 순(내림차순)으로 제공. limit 기본 50 최대 250. 금액·비율 단위는 stock://guide 확인.")
   public Map<String, Object> stockFinancials(String ticker, @ToolParam(required = false) String asOf,
       @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor) {
     return reader.financials(ticker, asOf, limit, cursor);
   }
-  @Tool(description = "기업행사 이력. effective_date 기간, limit 기본 50 최대 250.")
+  @Tool(description = "기업행사 이력. effective_date 내림차순(최신순). from 생략 시 전체 이력, limit 기본 50 최대 250.")
   public Map<String, Object> stockCorporateActions(String ticker, @ToolParam(required = false) String from,
       @ToolParam(required = false) String to, @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor) {
     return reader.actions(ticker, from, to, limit, cursor);

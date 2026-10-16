@@ -16,6 +16,7 @@ import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
 import kr.hvy.blog.modules.stock.domain.code.MarketType;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -460,8 +461,16 @@ public class AdvisorProperties {
      */
     private SigmaBasis sigmaBasis = SigmaBasis.GAP;
 
-    /** 아침 점검 임계 σ 의 기준 */
-    public enum SigmaBasis { GAP, CLOSE }
+    /** 아침 점검 임계 σ 의 기준 (advisor enum 규약: EnumCode, code == name) */
+    @Getter
+    @AllArgsConstructor
+    public enum SigmaBasis implements kr.hvy.common.core.code.base.EnumCode<String> {
+      GAP("GAP", "밤사이 갭(시가/전일 종가) σ"),
+      CLOSE("CLOSE", "종가 σ_1d (이전 동작, 롤백용)");
+
+      private final String code;
+      private final String desc;
+    }
 
     /** 미국 데이터가 판단 기준일보다 이 캘린더일 이상 오래됐으면(휴장·수집 실패) 점검을 SKIPPED 로 닫는다 */
     private int maxUsLagDays = 4;

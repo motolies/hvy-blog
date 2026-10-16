@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.advisor.domain.code;
 
 import java.util.Arrays;
 import java.util.Optional;
+import kr.hvy.common.core.code.base.EnumCode;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -11,12 +12,14 @@ import lombok.Getter;
  */
 @Getter
 @AllArgsConstructor
-public enum ScreenOp {
-  GTE(">="),
-  GT(">"),
-  LTE("<="),
-  LT("<");
+public enum ScreenOp implements EnumCode<String> {
+  GTE("GTE", "이상", ">="),
+  GT("GT", "초과", ">"),
+  LTE("LTE", "이하", "<="),
+  LT("LT", "미만", "<");
 
+  private final String code;
+  private final String desc;
   /** SQL 비교 연산자 — 보간되는 유일한 값 */
   private final String sql;
 

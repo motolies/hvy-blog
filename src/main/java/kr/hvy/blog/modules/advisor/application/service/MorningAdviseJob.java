@@ -301,14 +301,18 @@ public class MorningAdviseJob implements AdvisorJob {
       GlobalLinkService.Overnight o = symbol == null ? null : us.get(symbol);
       Double usR1 = o == null || usClosed ? null : o.r1();
       Double gapEst = beta == null || usR1 == null ? null : beta * usR1;
-      Double sigma = links.sigma1d(code, base);
+      Double sigma1d = links.sigma1d(code, base);
+      Double sigmaGap = links.sigmaGap(code, base);
+      // 트리거 임계는 아침 점검과 같은 σ(sigma-basis, 기본 GAP — 2026-10-16). payload 는 morning-v2 문구대로 sigma1d 를 유지하고 sigmaGap 을 덧붙인다
+      Double sigma = properties.getMorning().getSigmaBasis() == AdvisorProperties.Morning.SigmaBasis.CLOSE ? sigma1d : sigmaGap;
       Map<String, Object> m = new LinkedHashMap<>();
       m.put("index", code);
       m.put("symbol", symbol);
       m.put("beta", round(beta));
       m.put("usR1", round(usR1));
       m.put("gapEst", round(gapEst));
-      m.put("sigma1d", round(sigma));
+      m.put("sigma1d", round(sigma1d));
+      m.put("sigmaGap", round(sigmaGap));
       gaps.add(m);
       if (gapEst != null && sigma != null && sigma > 0 && Math.abs(gapEst) >= sigma) {
         gapTriggered.add(code);

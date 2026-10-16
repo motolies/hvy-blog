@@ -451,8 +451,17 @@ public class AdvisorProperties {
     /** β·상관 추정 창(국내 거래일) */
     private int linkWindowDays = 60;
 
-    /** 판정 임계 = 이 배수 × σ_1d(직전 sigma-lookback-days). |예상 갭| 이 미만이면 HOLD */
+    /** 판정 임계 = 이 배수 × σ(sigma-basis 가 고른 σ, 직전 sigma-lookback-days). |예상 갭| 이 미만이면 HOLD */
     private double sigmaMultiple = 1.0;
+
+    /**
+     * 임계의 분모 σ. GAP(기본, 2026-10-16): 밤사이 갭(시가/전일 종가 − 1) σ — 예상 갭과 같은 척도. CLOSE: 종가 σ_1d(이전 동작, 갭보다 약 2배 커서
+     * HOLD 가 사실상 자동 적중이던 P1-12 결함 — 롤백용). 점검 detail_json.index.*.sigmaBasis 에 기록된다
+     */
+    private SigmaBasis sigmaBasis = SigmaBasis.GAP;
+
+    /** 아침 점검 임계 σ 의 기준 */
+    public enum SigmaBasis { GAP, CLOSE }
 
     /** 미국 데이터가 판단 기준일보다 이 캘린더일 이상 오래됐으면(휴장·수집 실패) 점검을 SKIPPED 로 닫는다 */
     private int maxUsLagDays = 4;

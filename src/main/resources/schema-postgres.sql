@@ -2335,7 +2335,7 @@ COMMENT ON COLUMN tb_advisor_morning_check.us_date      IS '반영한 미국 세
 COMMENT ON COLUMN tb_advisor_morning_check.gap_kospi    IS 'KOSPI 예상 갭 = β(주 심볼) × 미국 1일 수익률';
 COMMENT ON COLUMN tb_advisor_morning_check.gap_kosdaq   IS 'KOSDAQ 예상 갭';
 COMMENT ON COLUMN tb_advisor_morning_check.verdict      IS 'REINFORCE 강화 | HOLD 유지 | CAUTION 주의 (지수별 판정 중 가장 심각한 것)';
-COMMENT ON COLUMN tb_advisor_morning_check.detail_json  IS '{us:{sym:{date,r1}}, index:{code:{beta,symbol,gapEst,threshold,predicted,verdict}}}';
+COMMENT ON COLUMN tb_advisor_morning_check.detail_json  IS '{us:{sym:{date,r1}}, index:{code:{beta,symbol,gapEst,threshold,sigma,sigmaBasis,predicted,verdict}}}. sigmaBasis GAP(2026-10-16 부터, 밤사이 갭 σ) | CLOSE(종가 σ_1d). 키가 없는 과거 행은 CLOSE';
 COMMENT ON COLUMN tb_advisor_morning_check.published_at IS 'Slack 발행 시각';
 COMMENT ON COLUMN tb_advisor_morning_check.created_at   IS '생성일시';
 

@@ -68,7 +68,8 @@ class MorningCheckJobTest {
         "FX@KRW", new GlobalLinkService.Overnight("FX@KRW", today.minusDays(1), 0.001)));
     when(links.link("0001", "SPX", base)).thenReturn(new GlobalLink("0001", "SPX", 0.6, 0.55, 60));
     when(links.link("1001", "COMP", base)).thenReturn(new GlobalLink("1001", "COMP", 0.8, 0.5, 60));
-    when(links.sigma1d(any(), eq(base))).thenReturn(0.01);
+    when(links.sigma1d(any(), eq(base))).thenReturn(0.02);   // 종가 σ — 기본 basis(GAP)에서는 임계에 쓰이지 않는다
+    when(links.sigmaGap(any(), eq(base))).thenReturn(0.01);  // 밤사이 갭 σ(2026-10-16 기본) → 임계 0.01
   }
 
   @Test
@@ -91,6 +92,7 @@ class MorningCheckJobTest {
     Map<String, Object> index = (Map<String, Object>) saved.detailJson().get("index");
     @SuppressWarnings("unchecked")
     Map<String, Object> kospi = (Map<String, Object>) index.get("0001");
+    assertThat(kospi).containsEntry("sigma", 0.01).containsEntry("sigmaBasis", "GAP");
     assertThat(kospi).containsEntry("symbol", "SPX").containsEntry("beta", 0.6).containsEntry("threshold", 0.01).containsEntry("verdict", "REINFORCE")
         .containsEntry("predicted", "UP");
     @SuppressWarnings("unchecked")

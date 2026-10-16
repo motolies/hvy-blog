@@ -123,7 +123,7 @@ public class MorningCheckJob implements AdvisorJob {
       String symbol = primary.get(code);
       GlobalLinkService.Overnight o = symbol == null ? null : overnight.get(symbol);
       GlobalLink link = symbol == null ? null : links.link(code, symbol, advice.baseDate());
-      Double sigma = links.sigma1d(code, advice.baseDate());
+      Double sigma = thresholdSigma(code, advice.baseDate());
       double threshold = sigma == null || sigma <= 0 ? FALLBACK_THRESHOLD : properties.getMorning().getSigmaMultiple() * sigma;
       Double beta = link == null ? null : link.beta();
       Double usR1 = o == null || usClosed ? null : o.r1();
@@ -138,6 +138,8 @@ public class MorningCheckJob implements AdvisorJob {
       m.put("usR1", usR1);
       m.put("gapEst", gapEst);
       m.put("threshold", threshold);
+      m.put("sigma", sigma);
+      m.put("sigmaBasis", properties.getMorning().getSigmaBasis().name());
       m.put("predicted", predicted == null ? null : predicted.getCode());
       m.put("verdict", verdict.getCode());
       indexJson.put(code, m);
@@ -165,6 +167,13 @@ public class MorningCheckJob implements AdvisorJob {
     } else {
       execution.warn("아침 점검 Slack 발행 실패 (check=" + checkId + ")");
     }
+  }
+
+  /**
+   * 임계의 분모 σ: GAP(기본, 2026-10-16)은 밤사이 갭 σ, CLOSE 는 종가 σ_1d(이전 동작·롤백용). 채점(AdviceScoringService.morningScores)은 저장된 threshold 를 쓰므로 자동으로 따른다.
+   */
+  private Double thresholdSigma(String code, LocalDate asOf) {
+    return properties.getMorning().getSigmaBasis() == AdvisorProperties.Morning.SigmaBasis.CLOSE ? links.sigma1d(code, asOf) : links.sigmaGap(code, asOf);
   }
 
   /**

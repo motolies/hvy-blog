@@ -150,10 +150,22 @@ public class GlobalLinkService {
    * 지수 σ_1d (asOf 이하 sigma-lookback-days 의 ret_1d 표준편차). 없으면 null.
    */
   public Double sigma1d(String indexCode, LocalDate asOf) {
+    // 표본이 1개면 STDDEV_SAMP 가 NULL — Stream.findFirst 는 null 요소에 NPE 라 ResultSetExtractor 로 읽는다
     return jdbc.query("SELECT STDDEV_SAMP(ret_1d) AS s FROM (SELECT ret_1d FROM mv_stock_index_metric WHERE index_code = :code AND trade_date <= :d "
             + "ORDER BY trade_date DESC LIMIT :n) t",
-        Map.of("code", indexCode, "d", asOf, "n", properties.getScoring().getSigmaLookbackDays()), (rs, i) -> d(rs.getObject("s")))
-        .stream().findFirst().orElse(null);
+        Map.of("code", indexCode, "d", asOf, "n", properties.getScoring().getSigmaLookbackDays()), rs -> rs.next() ? d(rs.getObject("s")) : null);
+  }
+
+  /**
+   * 지수 밤사이 갭 σ (asOf 이하 sigma-lookback-days 세션의 시가/전일 종가 − 1 표준편차). 아침 점검·재판정이 "예상 갭" 과 비교하는 임계의 분모 —
+   * 종가 기준 σ_1d 는 갭 σ 의 약 2배라 HOLD 가 사실상 자동 적중이었다(2026-10-16 P1-12). 행이 부족하면 null.
+   */
+  public Double sigmaGap(String indexCode, LocalDate asOf) {
+    return jdbc.query("SELECT STDDEV_SAMP(gap) AS s FROM ("
+            + "SELECT open_price / NULLIF(LAG(close_price) OVER (ORDER BY trade_date), 0) - 1 AS gap FROM ("
+            + "SELECT trade_date, open_price, close_price FROM tb_stock_index_daily WHERE index_code = :code AND trade_date <= :d "
+            + "ORDER BY trade_date DESC LIMIT :n + 1) w) t",
+        Map.of("code", indexCode, "d", asOf, "n", properties.getScoring().getSigmaLookbackDays()), rs -> rs.next() ? d(rs.getObject("s")) : null);
   }
 
   private static Double d(Object value) {

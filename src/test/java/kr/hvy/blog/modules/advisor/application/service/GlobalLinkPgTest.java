@@ -103,6 +103,10 @@ class GlobalLinkPgTest {
             org.assertj.core.groups.Tuple.tuple("1001", "COMP"), org.assertj.core.groups.Tuple.tuple("1001", "SOX"));
     assertThat(all.get(1).n()).as("데이터 없는 심볼은 n=0").isZero();
     assertThat(links.sigma1d("0001", AS_OF)).isCloseTo(0.005, within(1e-4));
+    // 2026-10-16: 밤사이 갭 σ — 합성 지수는 시가=종가라 갭 = ret_1d 와 같고(≈0.005), 상수 지수(1001)는 0. 기준일 이후 행은 안 들어간다
+    assertThat(links.sigmaGap("0001", AS_OF)).isCloseTo(0.005, within(1e-4));
+    assertThat(links.sigmaGap("1001", AS_OF)).isEqualTo(0.0);
+    assertThat(links.sigmaGap("0001", D.get(1))).as("행 1~2개면 표본 σ 없음").isNull();
   }
 
   @Test

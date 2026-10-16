@@ -318,7 +318,8 @@ advisor:
   morning:                        # 미국 연동 입력(market.link)과 07:30 아침 점검(MORNING_CHECK) 판정
     link-pairs: ["0001:SPX", "0001:SOX", "1001:COMP", "1001:SOX"]   # 지수별 첫 쌍이 예상 갭의 주 심볼
     link-window-days: 60
-    sigma-multiple: 1.0           # 판정 임계 = 배수 × σ_1d. |β × 미국 1일 수익률| 이 미만이면 HOLD
+    sigma-multiple: 1.0           # 판정 임계 = 배수 × σ(sigma-basis). |β × 미국 1일 수익률| 이 미만이면 HOLD
+    sigma-basis: GAP              # GAP(2026-10-16 기본): 밤사이 갭(시가/전일 종가) σ — 예상 갭과 같은 척도. CLOSE: 종가 σ_1d(이전 동작, 갭 σ 의 ≈2배라 HOLD 자동 적중) 롤백용
     max-us-lag-days: 4            # 미국 데이터가 기준일보다 이만큼 오래됐으면(휴장·수집 실패) SKIPPED
     advise-deadline: "08:50"      # 07:40 아침 재판정(MORNING_ADVISE, M4) 발행 마감(KST). 이후 실행은 SKIPPED — 개장 후 발행은 D+1 시가 진입과 모순
     sector-sigma-multiple: 2.0    # 아침 재판정 트리거 플래그: 섹터 연동 심볼 |r1| ≥ 배수 × 자기 σ. 플래그는 호출 여부가 아니라 diff_json 기록용

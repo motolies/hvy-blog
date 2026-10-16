@@ -97,7 +97,8 @@ class MorningAdviseJobTest {
         "FX@KRW", new GlobalLinkService.Overnight("FX@KRW", base, 0.002)));
     when(links.link(eq("0001"), eq("SPX"), eq(base))).thenReturn(new GlobalLink("0001", "SPX", 0.5, 0.5, 60));
     when(links.link(eq("1001"), eq("COMP"), eq(base))).thenReturn(new GlobalLink("1001", "COMP", 0.8, 0.5, 60));
-    when(links.sigma1d(anyString(), eq(base))).thenReturn(0.01);
+    when(links.sigma1d(anyString(), eq(base))).thenReturn(0.02);   // payload 표기용 종가 σ
+    when(links.sigmaGap(anyString(), eq(base))).thenReturn(0.01);  // 갭 트리거 임계(sigma-basis GAP, 2026-10-16)
     when(links.sectorMoves(today)).thenReturn(List.of(
         new GlobalLinkService.SectorMove("SOXX", "SEMICON", base, 0.01, 0.02),
         new GlobalLinkService.SectorMove("XBI", "BIO", today, 0.20, 0.02)));
@@ -169,6 +170,7 @@ class MorningAdviseJobTest {
     assertThat(evening).as("저녁 입력 스냅샷이 원문 그대로 실린다").containsEntry("asOf", "2026-09-24");
     verify(links).link("0001", "SPX", base);
     verify(links).sigma1d("0001", base);
+    verify(links).sigmaGap("0001", base);
   }
 
   @Test

@@ -194,6 +194,7 @@ public class McpConfig {
       adviceDetail: header 기준일·실제 dataAsOf, candidates 동결 정량 후보·signals, picks 근거·위험·인용,
       candidateScores/callScores 사후 채점, morningCheck/intradayChecks 점검, notes 오답노트.
       성과 가격은 수정주가, 수익률·excessRet은 비율(0.01=1%). 방향·stage·status를 함께 읽으세요.
+      morningCheck 임계(threshold)는 2026-10-16부터 밤사이 갭 σ(detail.index.*.sigmaBasis=GAP), 그 전 행은 종가 σ_1d(키 없음)라 HOLD 적중률을 전환일 전후로 나눠 읽으세요.
       adviceScores 기본 호라이즌은 advisor.horizons의 해당 판단 종류. signalIc는 기존 IC 창 및 n_eff=IC일수/호라이즌 계산.
       adviceWeights는 가중치 세트·시그널 가중치 이력, adviceLessons는 근거·조건·상태, adviceNotes 가격은 원가격(원).
       성과·통계는 표본 수와 데이터 품질을 함께 확인하세요. H60/H180 판정 한계는 기존 설정을 따릅니다.

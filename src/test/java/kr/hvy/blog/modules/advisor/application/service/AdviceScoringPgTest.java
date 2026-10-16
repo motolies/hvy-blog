@@ -543,7 +543,7 @@ class AdviceScoringPgTest {
     assertThat(scoring.morningScores(advice, 1, ScoreStage.PROVISIONAL)).as("점검 행 없음").isEmpty();
 
     Map<String, Object> detail = Map.of("index", Map.of(
-        "0001", Map.of("symbol", "SPX", "beta", 0.6, "usR1", 0.02, "gapEst", 0.012, "threshold", 0.01, "predicted", "UP", "verdict", "REINFORCE"),
+        "0001", Map.of("symbol", "SPX", "beta", 0.6, "usR1", 0.02, "gapEst", 0.012, "threshold", 0.01, "sigmaBasis", "GAP", "predicted", "UP", "verdict", "REINFORCE"),
         "1001", new java.util.HashMap<>(Map.of("symbol", "COMP", "threshold", 0.01, "verdict", "HOLD"))));
     long checkId = morningChecks.insert(kr.hvy.blog.modules.advisor.domain.model.MorningCheckRow.builder().adviceId(adviceId).runId(runId)
         .baseDate(D.get(10)).usDate(D.get(10)).gapKospi(0.012).verdict(kr.hvy.blog.modules.advisor.domain.code.MorningVerdict.REINFORCE).detailJson(detail).build());

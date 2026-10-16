@@ -67,6 +67,7 @@ public final class FeatureSql {
                    sm.sector_code, sm.sector_name, sc.cw_5d AS sector_cw_5d,
                    CASE WHEN vo.vol_n >= 15 THEN vo.vol_20d END AS vol_20d,
                    ix.ret_20d AS index_ret_20d,
+                   m.ret_20d - ix.ret_20d AS rs_idx_20d,
                    six.ret_5d - ix.ret_5d AS sector_rs_5d, six.ret_20d - ix.ret_20d AS sector_rs_20d, six.ret_60d - ix.ret_60d AS sector_rs_60d,
                    p.close_price AS raw_close,
                    mh.is_kospi200,

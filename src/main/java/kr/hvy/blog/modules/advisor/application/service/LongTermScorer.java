@@ -71,12 +71,12 @@ public final class LongTermScorer {
           numerator += w * f.sign() * (2 * p - 1);
           covered += w;
         }
-        signals.put(f.getCode(), new SignalValue(p == null ? 0.5 : round4(p), w, raw == null ? null : round6(raw)));
+        signals.put(f.getCode(), new SignalValue(p == null ? 0.5 : AdvisorMath.round4(p), w, raw == null ? null : AdvisorMath.round6(raw)));
       }
       double coverage = weightSum == 0 ? 0 : covered / weightSum;
       boolean inUniverse = rule.allUniverse() || Boolean.TRUE.equals(row.kospi200());
       if (inUniverse && coverage + 1e-12 >= rule.minCoverage()) {
-        eligible.add(new Scored(row, weightSum == 0 ? 0 : round6(numerator / weightSum), round4(coverage), signals));
+        eligible.add(new Scored(row, weightSum == 0 ? 0 : AdvisorMath.round6(numerator / weightSum), AdvisorMath.round4(coverage), signals));
       }
     }
     eligible.sort(Comparator.comparingDouble(Scored::score).reversed().thenComparing(s -> s.row().ticker()));
@@ -124,7 +124,7 @@ public final class LongTermScorer {
     LongTermFactorRow r = s.row();
     Map<String, Object> features = new LinkedHashMap<>();
     if (r.adjClose() != null) {
-      features.put("close", round6(r.adjClose()));
+      features.put("close", AdvisorMath.round6(r.adjClose()));
     }
     features.put("coverage", s.coverage());
     if (r.k200Sector() != null) {
@@ -151,13 +151,5 @@ public final class LongTermScorer {
   }
 
   private record Scored(LongTermFactorRow row, double score, double coverage, Map<String, SignalValue> signals) {
-  }
-
-  static double round4(double v) {
-    return Math.round(v * 1e4) / 1e4;
-  }
-
-  static double round6(double v) {
-    return Math.round(v * 1e6) / 1e6;
   }
 }

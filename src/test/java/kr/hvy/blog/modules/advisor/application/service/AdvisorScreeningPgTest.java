@@ -106,9 +106,16 @@ class AdvisorScreeningPgTest {
   }
 
   @Test
-  @DisplayName("스크리닝: 유니버스 40 → 1차 컷 39 → 섹터당 ≤4 후보, 점수 내림차순, 시그널 스냅샷 동결")
+  @DisplayName("스크리닝: 유니버스 40 → 1차 컷 39 → 섹터당 ≤4 후보, 점수 내림차순, 시그널 스냅샷 동결. 원 단위 시총은 포화 없이·rsIdx20d 는 종목−지수·수급 raw 는 비율")
   void screensWithSectorCapAndSnapshots() {
-    ScreeningResult result = screening.screen(BASE);
+    // 2026-10-15 P0-1 회귀: 원 단위 시총(1.37e15)이 round6 의 Math.round 포화로 9.223372036854775E12 가 되던 결함. pbr 은 넣지 않아 VALUE_RANK 0.5 단언이 유지된다
+    jdbc.update("INSERT INTO tb_stock_valuation_daily (ticker, trade_date, market_cap) VALUES ('T39', ?, 1365106100000000)", BASE);
+    ScreeningResult result;
+    try {
+      result = screening.screen(BASE);
+    } finally {
+      jdbc.update("DELETE FROM tb_stock_valuation_daily WHERE ticker = 'T39' AND trade_date = ?", BASE);
+    }
     assertThat(result.universeSize()).isEqualTo(40);
     assertThat(result.cutSize()).as("T00 은 모멘텀 0·거래대금 급증 없음이라 컷").isEqualTo(39);
     List<CandidateRow> candidates = result.candidates();
@@ -131,7 +138,16 @@ class AdvisorScreeningPgTest {
       assertThat(candidates.get(i).signals().get("SECTOR_MOM_20D").raw()).isNotNull();
       assertThat(candidates.get(i).signals().get("SECTOR_MOM_60D").pct()).isEqualTo(0.5);
       assertThat(candidates.get(i).signals().get("SECTOR_MOM_60D").raw()).isNull();
+      // 2026-10-15 P0-3 회귀: rsIdx20d 가 지수 20일 수익률이라 전 후보 동일하던 결함 → RS_INDEX 원값(종목 − 지수)과 같아야 한다
+      assertThat((Double) candidates.get(i).features().get("rsIdx20d")).as("rsIdx20d = ret_20d − index_ret_20d")
+          .isEqualTo(candidates.get(i).signals().get("RS_INDEX").raw());
+      // 2026-10-15 P0-2 회귀: 수급 raw(원/원 비율)가 6자리 반올림에 살아남는다 — 시드 foreign_net_5d=(i−20)·1e8, tv_avg_60d·5=1e10
+      int n = Integer.parseInt(candidates.get(i).ticker().substring(1));
+      assertThat(candidates.get(i).signals().get("FOREIGN_FLOW").raw()).as("FOREIGN_FLOW raw")
+          .isCloseTo((n - 20) / 100.0, org.assertj.core.data.Offset.offset(1e-6));
     }
+    assertThat(candidates.stream().map(c -> c.features().get("rsIdx20d")).distinct().count()).as("후보마다 상대강도가 다르다").isGreaterThan(1);
+    assertThat(candidates.stream().anyMatch(c -> Math.abs(c.signals().get("FOREIGN_FLOW").raw()) >= 0.01)).as("수급 raw 가 전부 0 이 아니다").isTrue();
     CandidateRow s0 = candidates.stream().filter(c -> c.sectorCode().equals("S0")).findFirst().orElseThrow();
     CandidateRow s1 = candidates.stream().filter(c -> c.sectorCode().equals("S1")).findFirst().orElseThrow();
     assertThat((Double) s0.features().get("secRs20")).as("S0 업종 지수 +0.5%/일, KOSPI 상수 → 양수").isPositive();
@@ -139,6 +155,8 @@ class AdvisorScreeningPgTest {
     CandidateRow top = candidates.stream().filter(c -> c.ticker().equals("T39")).findFirst().orElseThrow();
     assertThat(top.signals().get("MOM_20D").pct()).as("가장 큰 모멘텀은 백분위 1.0").isEqualTo(1.0);
     assertThat(top.signals().get("MOM_20D").raw()).isCloseTo(39 / 40.0, org.assertj.core.data.Offset.offset(1e-6));
+    assertThat((Double) top.features().get("marketCap")).as("원 단위 시총은 포화 없이 원값").isEqualTo(1.3651061E15);
+    assertThat((Double) top.features().get("rsIdx20d")).as("지수가 상수(수익률 0)라 rsIdx20d = ret_20d = 39/40").isCloseTo(39 / 40.0, org.assertj.core.data.Offset.offset(1e-6));
     assertThat(result.weightSetId()).isPositive();
   }
 

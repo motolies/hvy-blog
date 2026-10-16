@@ -159,7 +159,8 @@ public class CandidateScreeningService {
       boolean pctNull = rs.wasNull();
       double raw = rs.getDouble("v_" + s.getCode());
       Double rawValue = rs.wasNull() ? null : raw;
-      signalValues.put(s.getCode(), new SignalValue(pctNull ? 0.5 : round4(pct), weights.getOrDefault(s.getCode(), 0.0), rawValue == null ? null : round6(rawValue)));
+      signalValues.put(s.getCode(), new SignalValue(pctNull ? 0.5 : AdvisorMath.round4(pct), weights.getOrDefault(s.getCode(), 0.0),
+          rawValue == null ? null : AdvisorMath.round6(rawValue)));
     }
     Map<String, Object> features = new LinkedHashMap<>();
     putFeature(features, "close", rs, "adj_close");
@@ -179,7 +180,8 @@ public class CandidateScreeningService {
     putFeature(features, "pbr", rs, "pbr");
     putFeature(features, "sectorCw5d", rs, "sector_cw_5d");
     putFeature(features, FEATURE_VOL20D, rs, "vol_20d");
-    putFeature(features, "rsIdx20d", rs, "index_ret_20d");
+    // 2026-10-16: 지수 20일 수익률(index_ret_20d)을 그대로 넣어 전 후보가 같은 값이던 결함 → 종목 − 지수(RS_INDEX 시그널 식과 동일)
+    putFeature(features, "rsIdx20d", rs, "rs_idx_20d");
     // advice-v6: 소속 업종 지수의 시장 대비 초과(1주·1개월·3개월). 지수가 없으면 키 자체가 빠진다 → 프롬프트 secCons null
     putFeature(features, "secRs5", rs, "sector_rs_5d");
     putFeature(features, "secRs20", rs, "sector_rs_20d");
@@ -188,7 +190,7 @@ public class CandidateScreeningService {
     putFeature(features, "theme", rs, "k200_sector");
     CandidateRow row = CandidateRow.builder()
         .ticker(rs.getString("ticker"))
-        .quantScore(round6(rs.getDouble("score")))
+        .quantScore(AdvisorMath.round6(rs.getDouble("score")))
         .stockName(rs.getString("stock_name"))
         .marketType(rs.getString("market_type"))
         .benchIndexCode(rs.getString("bench_index_code"))
@@ -209,7 +211,10 @@ public class CandidateScreeningService {
       return;
     }
     if (value instanceof Number n) {
-      features.put(key, round6(n.doubleValue()));
+      // 비유한값은 JSON 을 깨뜨리므로 키를 넣지 않는다(실제로는 SQL NULLIF 가드 때문에 생기지 않는다)
+      if (Double.isFinite(n.doubleValue())) {
+        features.put(key, AdvisorMath.round6(n.doubleValue()));
+      }
     } else {
       features.put(key, value);
     }
@@ -218,13 +223,5 @@ public class CandidateScreeningService {
   private static Double nullable(ResultSet rs, String column) throws SQLException {
     double v = rs.getDouble(column);
     return rs.wasNull() ? null : v;
-  }
-
-  static double round4(double v) {
-    return Math.round(v * 1e4) / 1e4;
-  }
-
-  static double round6(double v) {
-    return Math.round(v * 1e6) / 1e6;
   }
 }

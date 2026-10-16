@@ -433,10 +433,6 @@ public class AdvicePromptBuilder {
   }
 
   static Double round(Double value, int digits) {
-    if (value == null || value.isNaN() || value.isInfinite()) {
-      return null;
-    }
-    double scale = Math.pow(10, digits);
-    return Math.round(value * scale) / scale;
+    return AdvisorMath.round(value, digits);
   }
 }

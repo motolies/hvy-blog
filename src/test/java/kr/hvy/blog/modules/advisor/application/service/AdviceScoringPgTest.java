@@ -393,6 +393,13 @@ class AdviceScoringPgTest {
     assertThat(pair.triggered().meanDiff()).isCloseTo(pair.pairs().getFirst().diff(), within(1e-12));
     assertThat(pair.untriggered().n()).isEqualTo(1);
     assertThat(pair.all().seDiff()).isNotNull();
+    // 2026-10-16(P1-11): 조치 집계 — D10 KEEP 1·ADD 1(바뀐 날), D11 KEEP 1, drop 은 diff_json.drop 없음 → 0
+    assertThat(pair.pairs().getFirst().keep()).isEqualTo(1);
+    assertThat(pair.pairs().getFirst().add()).isEqualTo(1);
+    assertThat(pair.pairs().getFirst().drop()).isZero();
+    assertThat(pair.pairs().getFirst().changed()).isTrue();
+    assertThat(pair.pairs().get(1).changed()).isFalse();
+    assertThat(pair.actions()).isEqualTo(new AdvisorKpiService.ActionSummary(2, 1, 2, 1, 0, 2.0 / 3));
   }
 
   @Test

@@ -215,11 +215,33 @@ public class AdvisorKpiService {
     return new MorningSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), d(row.get("caution_rate")));
   }
 
-  /** 같은 기준일 아침 재판정·저녁 판단 1쌍: LONG 픽 평균 초과수익(결정 호라이즌)과 그날이 트리거일이었는지 (diff_json.triggers.any) */
-  public record MorningPair(LocalDate baseDate, double dailyMean, double morningMean, int dailyPicks, int morningPicks, boolean triggered) {
+  /**
+   * 같은 기준일 아침 재판정·저녁 판단 1쌍: LONG 픽 평균 초과수익(결정 호라이즌)과 그날이 트리거일이었는지 (diff_json.triggers.any),
+   * 아침 조치 수(keep·add 는 픽 action, drop 은 diff_json.drop 길이 — 2026-10-16 P1-11: "차이 0" 이 전부 KEEP 때문임을 응답만으로 읽게 한다).
+   */
+  public record MorningPair(LocalDate baseDate, double dailyMean, double morningMean, int dailyPicks, int morningPicks, boolean triggered,
+                            int keep, int add, int drop) {
 
     public double diff() {
       return morningMean - dailyMean;
+    }
+
+    /** ADD 나 DROP 이 하나라도 있으면 아침이 저녁을 바꾼 날 */
+    public boolean changed() {
+      return add > 0 || drop > 0;
+    }
+  }
+
+  /** 아침 조치 집계: days 짝 수, changedDays ADD·DROP 이 있던 날 수, keep/add/drop 합, keepRatio = keep / (keep+add+drop) (조치 0건이면 null) */
+  public record ActionSummary(int days, int changedDays, int keep, int add, int drop, Double keepRatio) {
+
+    static ActionSummary of(List<MorningPair> pairs) {
+      int keep = pairs.stream().mapToInt(MorningPair::keep).sum();
+      int add = pairs.stream().mapToInt(MorningPair::add).sum();
+      int drop = pairs.stream().mapToInt(MorningPair::drop).sum();
+      int total = keep + add + drop;
+      return new ActionSummary(pairs.size(), (int) pairs.stream().filter(MorningPair::changed).count(), keep, add, drop,
+          total == 0 ? null : (double) keep / total);
     }
   }
 
@@ -231,7 +253,7 @@ public class AdvisorKpiService {
    * 아침 재판정 대응 비교 KPI (M4): 전체·트리거일·비트리거일. 사전 등록 판정(40거래일 뒤 트리거일 t &gt; 2 면 유지)의 근거다.
    */
   public record MorningVsDaily(LocalDate from, LocalDate to, int horizonDays, PairedDiff all, PairedDiff triggered, PairedDiff untriggered,
-                               List<MorningPair> pairs) {
+                               List<MorningPair> pairs, ActionSummary actions) {
   }
 
   /**
@@ -262,7 +284,10 @@ public class AdvisorKpiService {
         )
         SELECT m.base_date, COALESCE(pd.mean_excess, 0) AS daily_mean, COALESCE(pm.mean_excess, 0) AS morning_mean,
                COALESCE(pd.n, 0) AS daily_n, COALESCE(pm.n, 0) AS morning_n,
-               COALESCE((m.diff_json -> 'triggers' ->> 'any')::boolean, FALSE) AS triggered
+               COALESCE((m.diff_json -> 'triggers' ->> 'any')::boolean, FALSE) AS triggered,
+               (SELECT COUNT(*) FROM tb_advisor_pick pk WHERE pk.advice_id = m.advice_id AND pk.action = 'KEEP') AS keep_n,
+               (SELECT COUNT(*) FROM tb_advisor_pick pk WHERE pk.advice_id = m.advice_id AND pk.action = 'ADD') AS add_n,
+               CASE WHEN jsonb_typeof(m.diff_json -> 'drop') = 'array' THEN jsonb_array_length(m.diff_json -> 'drop') ELSE 0 END AS drop_n
         FROM tb_advisor_advice m
                  JOIN tb_advisor_advice d ON d.advice_id = m.parent_advice_id
                  JOIN side sm ON sm.advice_id = m.advice_id
@@ -276,10 +301,10 @@ public class AdvisorKpiService {
           AND (pd.advice_id IS NOT NULL OR NOT sd.has_long)
         ORDER BY m.base_date
         """, params(from, to), (rs, i) -> new MorningPair(rs.getObject("base_date", LocalDate.class), rs.getDouble("daily_mean"), rs.getDouble("morning_mean"),
-        rs.getInt("daily_n"), rs.getInt("morning_n"), rs.getBoolean("triggered")));
+        rs.getInt("daily_n"), rs.getInt("morning_n"), rs.getBoolean("triggered"), rs.getInt("keep_n"), rs.getInt("add_n"), rs.getInt("drop_n")));
     return new MorningVsDaily(from, to, properties.getHorizonDays(), paired(pairs.stream().map(MorningPair::diff).toList()),
         paired(pairs.stream().filter(MorningPair::triggered).map(MorningPair::diff).toList()),
-        paired(pairs.stream().filter(p -> !p.triggered()).map(MorningPair::diff).toList()), pairs);
+        paired(pairs.stream().filter(p -> !p.triggered()).map(MorningPair::diff).toList()), pairs, ActionSummary.of(pairs));
   }
 
   /**

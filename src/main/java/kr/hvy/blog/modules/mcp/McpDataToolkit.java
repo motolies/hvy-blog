@@ -130,11 +130,13 @@ public class McpDataToolkit {
       @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor) {
     return reader.series(false, type, code, from, to, source, limit, cursor);
   }
-  @Tool(description = "저장된 advice 목록. kind 기본 DAILY, variant 기본 LIVE. 기간 기본 최근 90일. limit 기본 50 최대 250, 날짜·고유키 순 페이지.")
+  @Tool(description = "저장된 advice 목록. kind 기본 DAILY, variant 기본 LIVE. 기간 기본 최근 90일. limit 기본 50 최대 250, 날짜·고유키 순 페이지. "
+      + "기본 summary=true 는 헤더 컬럼만(+pick_count, 0=관망)이고 summary=false 는 32컬럼 전체(trend/outlook/regime/guard/diff JSON 포함, 1건 ≈10KB). 상세는 adviceDetail.")
   public Map<String, Object> listAdvices(@ToolParam(required = false) String from, @ToolParam(required = false) String to,
       @ToolParam(required = false) String kind, @ToolParam(required = false) String variant,
-      @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor) {
-    return reader.advices(from, to, kind, variant, limit, cursor);
+      @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor,
+      @ToolParam(required = false, description = "기본 true(헤더만). false 면 전체 컬럼") Boolean summary) {
+    return reader.advices(from, to, kind, variant, limit, cursor, summary == null || summary);
   }
   @Tool(description = "advice ID 상세: 후보·픽·근거·점검·채점·노트. 0픽은 관망, 빈 채점은 아직 미채점. 프롬프트 원문은 제공하지 않는다.")
   public McpAdviceDetail adviceDetail(long adviceId) {

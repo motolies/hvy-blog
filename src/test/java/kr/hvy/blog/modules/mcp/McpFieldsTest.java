@@ -25,6 +25,15 @@ class McpFieldsTest {
   }
 
   @Test
+  @DisplayName("listAdvices 요약 투영은 전체 투영의 부분집합이고 JSON 블록 컬럼이 없다")
+  void adviceSummaryProjectionIsSubset() {
+    var full = McpFields.published("tb_advisor_advice");
+    var summary = McpFields.published("tb_advisor_advice:summary");
+    assertThat(full).containsAll(summary);
+    assertThat(summary).contains("advice_id", "base_date", "summary", "prompt_version").doesNotContain("trend_json", "regime_json", "guard_json", "diff_json", "regime_rationale");
+  }
+
+  @Test
   @DisplayName("% 컬럼은 전부 _pct 로 나가고, 별칭 대상이 어떤 소스의 필터·날짜·커서 키 컬럼도 아니다(page() 가 물리명으로 WHERE/ORDER BY 를 만든다)")
   void pctAliasesNeverCollideWithSourceKeys() {
     for (String table : McpFields.COLUMNS.keySet()) {

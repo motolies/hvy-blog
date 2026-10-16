@@ -25,7 +25,12 @@ public class McpReadService {
     this.jdbc = jdbc;
     this.mapper = mapper;
   }
-  public record Source(String table, String code, String date, String key) {}
+  /** 조회 소스. projection 은 McpFields.COLUMNS 의 키(기본 table, 요약 투영은 "table:summary") */
+  public record Source(String table, String code, String date, String key, String projection) {
+    public Source(String table, String code, String date, String key) {
+      this(table, code, date, key, table);
+    }
+  }
   static final Map<String, Source> STOCK = Map.of(
       "MASTER_HISTORY", new Source("tb_stock_master_history", "ticker", "valid_from", "ticker"),
       "ADJUST_EVENT", new Source("tb_stock_adjust_event", "ticker", "effective_date", "action_type"),
@@ -101,13 +106,32 @@ public class McpReadService {
         "0001-01-01", asOf, limit, cursor);
   }
   public Map<String, Object> advices(String from, String to, String kind, String variant, Integer limit, String cursor) {
+    return advices(from, to, kind, variant, limit, cursor, true);
+  }
+  /**
+   * 판단 목록. summary(기본)는 헤더 컬럼만(+pick_count), full 은 32컬럼 전체(trend/outlook/regime/guard/diff JSON 포함, 1건 ≈10KB — 2026-10-16 P2). 상세는 adviceDetail.
+   */
+  public Map<String, Object> advices(String from, String to, String kind, String variant, Integer limit, String cursor, boolean summary) {
     String k = kind == null || kind.isBlank() ? "DAILY" : kind;
     String v = variant == null || variant.isBlank() ? "LIVE" : variant;
     kr.hvy.blog.modules.advisor.domain.code.AdviceKind.valueOf(k);
     kr.hvy.blog.modules.advisor.domain.code.AdviceVariant.valueOf(v);
-    return page(new Source("tb_advisor_advice", null, "base_date", "lpad(advice_id::text, 20, '0')"),
+    Map<String, Object> result = page(new Source("tb_advisor_advice", null, "base_date", "lpad(advice_id::text, 20, '0')",
+            summary ? "tb_advisor_advice:summary" : "tb_advisor_advice"),
         "advice_kind = :kind AND variant = :variant", new MapSqlParameterSource("kind", k).addValue("variant", v),
         from, to, limit, cursor);
+    result.put("mode", summary ? "summary" : "full");
+    if (summary) {
+      @SuppressWarnings("unchecked") List<Map<String, Object>> items = (List<Map<String, Object>>) result.get("items");
+      List<Long> ids = items.stream().map(i -> ((Number) i.get("advice_id")).longValue()).toList();
+      Map<Long, Integer> counts = new LinkedHashMap<>();
+      if (!ids.isEmpty()) {
+        jdbc.query("SELECT advice_id, COUNT(*) AS n FROM tb_advisor_pick WHERE advice_id IN (:ids) GROUP BY advice_id", new MapSqlParameterSource("ids", ids),
+            rs -> { counts.put(rs.getLong("advice_id"), rs.getInt("n")); });
+      }
+      for (Map<String, Object> item : items) item.put("pick_count", counts.getOrDefault(((Number) item.get("advice_id")).longValue(), 0));
+    }
+    return result;
   }
   public Map<String, Object> lessons(String from, String to, Integer limit, String cursor) {
     return page(new Source("tb_advisor_lesson", null, "(created_at AT TIME ZONE 'Asia/Seoul')::date", "lpad(lesson_id::text, 20, '0')"),
@@ -144,7 +168,7 @@ public class McpReadService {
     if (limit != null && limit < 1) throw new IllegalArgumentException("limit must be positive");
     int size = limit == null ? 50 : Math.min(250, limit);
     params.addValue("start", start).addValue("end", end);
-    String scope = source.table + filter + params.getValues() + (descending ? "|desc" : "");
+    String scope = source.projection + filter + params.getValues() + (descending ? "|desc" : "");
     String after = "";
     if (cursor != null && !cursor.isBlank()) {
       try {
@@ -158,7 +182,7 @@ public class McpReadService {
     }
     params.addValue("limit", size + 1);
     String sql = "SELECT to_jsonb(t) AS data, (" + source.date + ")::text AS cursor_date, ("
-        + source.key + ")::text AS cursor_key FROM (SELECT " + McpFields.columns(source.table) + " FROM " + source.table + ") t WHERE " + filter
+        + source.key + ")::text AS cursor_key FROM (SELECT " + McpFields.columns(source.projection) + " FROM " + source.table + ") t WHERE " + filter
         + " AND " + source.date + " BETWEEN :start AND :end" + after
         + " ORDER BY (" + source.date + ")::text" + (descending ? " DESC" : "") + ", (" + source.key + ")::text" + (descending ? " DESC" : "") + " LIMIT :limit";
     List<Map<String, Object>> items = new ArrayList<>();
@@ -200,6 +224,7 @@ public class McpReadService {
     }
     Map<String, Object> fields = new LinkedHashMap<>();
     for (String table : McpFields.COLUMNS.keySet()) {
+      if (table.contains(":")) continue;   // 요약 투영(table:summary)은 같은 테이블의 부분집합이라 카탈로그에 따로 싣지 않는다
       Source source = new Source(table, null, null, null);
       Map<String, String> aliases = McpFields.aliases(table);
       List<Map<String, Object>> columns = rows("SELECT jsonb_build_object('field', a.attname, 'type', format_type(a.atttypid, a.atttypmod), "

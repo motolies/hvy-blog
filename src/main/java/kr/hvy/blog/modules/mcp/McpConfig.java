@@ -193,7 +193,7 @@ public class McpConfig {
       원천: 국내 KIS/KRX, 글로벌 KIS, 거시 CBOE/TREASURY, 사건 GDELT. 상세 필드 의미·단위·코드는 stock://catalog 확인.
       """;
   static final String ADVICE_GUIDE = """
-      listAdvices 기본 DAILY/LIVE, 최근 90일. 다른 종류로 대체하지 않습니다. 0픽은 관망, 빈 채점은 미채점입니다.
+      listAdvices 기본 DAILY/LIVE, 최근 90일, 기본 summary=true(헤더+pick_count; JSON 블록은 summary=false 또는 adviceDetail). 다른 종류로 대체하지 않습니다. 0픽은 관망, 빈 채점은 미채점입니다.
       adviceDetail: header 기준일·실제 dataAsOf, candidates 동결 정량 후보·signals, picks 근거·위험·인용,
       candidateScores/callScores 사후 채점, morningCheck/intradayChecks 점검, notes 오답노트.
       성과 가격은 수정주가, 수익률·excessRet은 비율(0.01=1%). 방향·stage·status를 함께 읽으세요.

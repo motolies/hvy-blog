@@ -96,6 +96,24 @@ class McpReadPgTest {
     assertThat(items(second).getFirst().get("revenue")).isEqualTo(100);
     assertThat(second.get("nextCursor")).isNull();
   }
+  @Test void listAdvicesSummaryByDefaultWithPickCount() {
+    long runId = jdbc.queryForObject("INSERT INTO tb_advisor_run(job_type,trigger_type,status,created_at,updated_at) VALUES ('ADVISE','API','SUCCEEDED',now(),now()) RETURNING run_id", Long.class);
+    long adviceId = jdbc.queryForObject("INSERT INTO tb_advisor_advice(run_id,base_date,advice_kind,variant,summary,trend_json) VALUES (?,'2026-01-02','DAILY','LIVE','요약','[{\"code\":\"BEAR\"}]'::jsonb) RETURNING advice_id", Long.class, runId);
+    long abstain = jdbc.queryForObject("INSERT INTO tb_advisor_advice(run_id,base_date,advice_kind,variant,summary) VALUES (?,'2026-01-03','DAILY','LIVE','관망') RETURNING advice_id", Long.class, runId);
+    jdbc.update("INSERT INTO tb_advisor_candidate(advice_id,ticker,quant_rank,quant_score,market_type,bench_index_code,signal_json) VALUES (?,'005930',1,0.7,'KOSPI','0001','{}'::jsonb),(?,'000660',2,0.6,'KOSPI','0001','{}'::jsonb)", adviceId, adviceId);
+    jdbc.update("INSERT INTO tb_advisor_pick(advice_id,ticker,pick_rank,direction,conviction) VALUES (?,'005930',1,'LONG',0.7),(?,'000660',2,'LONG',0.6)", adviceId, adviceId);
+    var summary = reader.advices("2026-01-01","2026-01-05",null,null,50,null);
+    assertThat(summary.get("mode")).isEqualTo("summary");
+    assertThat(items(summary)).hasSize(2);
+    assertThat(items(summary).getFirst()).containsEntry("pick_count", 2).containsEntry("summary", "요약").containsKey("base_date").doesNotContainKeys("trend_json", "regime_json", "guard_json");
+    assertThat(items(summary).getLast()).containsEntry("pick_count", 0);
+    var full = reader.advices("2026-01-01","2026-01-05",null,null,50,null,false);
+    assertThat(full.get("mode")).isEqualTo("full");
+    assertThat(items(full).getFirst()).containsKey("trend_json").doesNotContainKey("pick_count");
+    assertThat(reader.catalog().get("fields").toString()).doesNotContain("tb_advisor_advice:summary");
+    assertThat(abstain).isPositive();
+  }
+
   @Test void corporateActionsDefaultToFullHistoryNewestFirst() {
     jdbc.execute("INSERT INTO tb_stock_corporate_action(ticker,effective_date,action_type,ratio_after,source) VALUES "
         + "('187870','2015-03-02','SPLIT',0.2,'KSD'),('187870','2026-04-28','BONUS_ISSUE',1,'KSD')");

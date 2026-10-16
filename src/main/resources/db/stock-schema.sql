@@ -49,8 +49,8 @@ COMMENT ON COLUMN tb_stock_master.market_type       IS '시장 구분: KOSPI | K
 COMMENT ON COLUMN tb_stock_master.security_group    IS '증권 그룹코드: ST 주권, EF ETF, EN ETN, MF 투자회사, RT 리츠 등';
 COMMENT ON COLUMN tb_stock_master.standard_code     IS '표준코드 (ISIN, 12자리)';
 COMMENT ON COLUMN tb_stock_master.listing_date      IS '상장일';
-COMMENT ON COLUMN tb_stock_master.listed_shares     IS '상장주식수 (주)';
-COMMENT ON COLUMN tb_stock_master.capital           IS '자본금 (백만원 단위, 마스터 파일 표기 그대로)';
+COMMENT ON COLUMN tb_stock_master.listed_shares     IS '상장주식수 (천주, 마스터 파일 lstn_stcn 원천 그대로 — 삼성전자 5,846,278; 주 단위 정본은 tb_stock_valuation_daily.listed_shares. 2026-10-16 실측)';
+COMMENT ON COLUMN tb_stock_master.capital           IS '자본금 (원, 마스터 파일 원천 그대로 — 헤더 표기는 백만원이나 실제 값은 원. 2026-10-16 실측)';
 COMMENT ON COLUMN tb_stock_master.par_value         IS '액면가 (원)';
 COMMENT ON COLUMN tb_stock_master.settle_month      IS '결산월 (MM)';
 COMMENT ON COLUMN tb_stock_master.sector_large_code IS '지수업종 대분류 코드';
@@ -109,7 +109,7 @@ COMMENT ON COLUMN tb_stock_master_history.is_krx300         IS 'KRX300 구성종
 COMMENT ON COLUMN tb_stock_master_history.is_suspended      IS '거래정지 여부';
 COMMENT ON COLUMN tb_stock_master_history.is_administrative IS '관리종목 여부';
 COMMENT ON COLUMN tb_stock_master_history.is_active         IS '활성 여부';
-COMMENT ON COLUMN tb_stock_master_history.listed_shares     IS '상장주식수';
+COMMENT ON COLUMN tb_stock_master_history.listed_shares     IS '상장주식수 (천주, tb_stock_master.listed_shares 와 같은 단위)';
 COMMENT ON COLUMN tb_stock_master_history.snapshot_hash     IS 'SCD 대상 컬럼의 해시 (변경 감지용)';
 COMMENT ON COLUMN tb_stock_master_history.created_at        IS '적재 시각';
 
@@ -263,12 +263,12 @@ CREATE TABLE IF NOT EXISTS tb_stock_valuation_daily
 COMMENT ON TABLE  tb_stock_valuation_daily                   IS '종목 밸류에이션 일별 스냅샷 (시총, PER/PBR, 52주 고저, 외인지분율)';
 COMMENT ON COLUMN tb_stock_valuation_daily.ticker            IS '단축 종목코드';
 COMMENT ON COLUMN tb_stock_valuation_daily.trade_date        IS '기준 거래일';
-COMMENT ON COLUMN tb_stock_valuation_daily.market_cap        IS '시가총액 (억원, hts_avls)';
+COMMENT ON COLUMN tb_stock_valuation_daily.market_cap        IS '시가총액 (원 — KIS hts_avls 억원을 StockRowMapper 가 ×1e8 환산 저장. 삼성전자 ≈1.37e15)';
 COMMENT ON COLUMN tb_stock_valuation_daily.listed_shares     IS '상장주식수 (주, lstn_stcn)';
-COMMENT ON COLUMN tb_stock_valuation_daily.per               IS 'PER';
-COMMENT ON COLUMN tb_stock_valuation_daily.pbr               IS 'PBR';
-COMMENT ON COLUMN tb_stock_valuation_daily.eps               IS 'EPS (원)';
-COMMENT ON COLUMN tb_stock_valuation_daily.bps               IS 'BPS (원)';
+COMMENT ON COLUMN tb_stock_valuation_daily.per               IS 'PER (배). NULL = 결측 또는 산출 불가(적자 등, KIS 0.00 — 2026-10-16 부터 NULL 저장)';
+COMMENT ON COLUMN tb_stock_valuation_daily.pbr               IS 'PBR (배). NULL = 결측 또는 산출 불가(자본잠식 등, KIS 0.00 — 2026-10-16 부터 NULL 저장)';
+COMMENT ON COLUMN tb_stock_valuation_daily.eps               IS 'EPS (원). NULL = 결측 또는 미산출(KIS 0.00 — 2026-10-16 부터 NULL 저장), 음수는 적자';
+COMMENT ON COLUMN tb_stock_valuation_daily.bps               IS 'BPS (원). NULL = 결측 또는 미산출(KIS 0.00 — 2026-10-16 부터 NULL 저장)';
 COMMENT ON COLUMN tb_stock_valuation_daily.week52_high       IS '52주 최고가 (원). 일봉 계산값과 교차검증용';
 COMMENT ON COLUMN tb_stock_valuation_daily.week52_low        IS '52주 최저가 (원)';
 COMMENT ON COLUMN tb_stock_valuation_daily.foreign_hold_rate IS '외국인 보유 비율 (%)';

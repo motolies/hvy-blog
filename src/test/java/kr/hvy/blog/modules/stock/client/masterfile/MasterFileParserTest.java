@@ -36,7 +36,7 @@ class MasterFileParserTest {
         MasterFileLayout.SECTOR_SMALL, "0021",
         MasterFileLayout.KOSPI200_SECTOR, "5",
         MasterFileLayout.LISTING_DATE, "19750611",
-        MasterFileLayout.LISTED_SHARES, "5969782550",
+        MasterFileLayout.LISTED_SHARES, "5846278",       // 천주 — 마스터 파일 원천 단위(2026-10-16 실측 삼성전자 5,846,278 = 58억주). 파서는 변환하지 않는다
         MasterFileLayout.CAPITAL, "897514",
         MasterFileLayout.PAR_VALUE, "100",
         MasterFileLayout.KRX300, "Y"));
@@ -56,8 +56,8 @@ class MasterFileParserTest {
     assertThat(r.isKospi200()).isTrue();
     assertThat(r.isKrx300()).isTrue();
     assertThat(r.listingDate()).isEqualTo(LocalDate.of(1975, 6, 11));
-    assertThat(r.listedShares()).isEqualTo(5_969_782_550L);
-    assertThat(r.capital()).isEqualTo(897_514L);
+    assertThat(r.listedShares()).as("천주 원천 그대로").isEqualTo(5_846_278L);
+    assertThat(r.capital()).as("원천 그대로(실제 단위 원, 헤더 표기 백만원)").isEqualTo(897_514L);
     assertThat(r.parValue()).isEqualByComparingTo(BigDecimal.valueOf(100));
     assertThat(r.isSuspended()).isFalse();
   }

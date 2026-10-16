@@ -177,7 +177,8 @@ public class McpConfig {
       목록은 날짜와 고유키 오름차순, 기본 50 최대 250. nextCursor는 동일 필터로 전달. 종료 시 null.
       stockSeries PRICE는 vw_stock_daily_price_adj: adj_* 수정가격(원), raw_close 원종가(원), raw_volume 원거래량(주).
       METRIC 가격·수익률은 수정주가 기반. ret_*·dist_*는 비율(0.01=1%), tv_*·net_* 금액은 원.
-      VALUATION 시총 원, EPS/BPS 원, PER/PBR 배, foreign_hold_rate %. ETF_NAV close_price 원가격(원), nav 원, disparity_rate %.
+      VALUATION 시총 원, EPS/BPS 원, PER/PBR 배(0 이 아니라 null 이 결측·산출 불가), foreign_hold_rate %. ETF_NAV close_price 원가격(원), nav 원, disparity_rate %.
+      stockMaster·MASTER_HISTORY listed_shares는 천주(주 단위는 VALUATION listed_shares), capital·par_value는 원.
       INDEX·INDEX_METRIC 지수 포인트, ret_* 비율. BREADTH *_ratio는 비율. MASTER_HISTORY는 valid_from 기준 변경 이력, ADJUST_EVENT의 *_factor는 배수. INDEX 지수 포인트. GLOBAL 가격은 원천 통화/포인트이며 symbol·market_div로 구분. change_rate 필드는 %(1=1%).
       INVESTOR 금액은 원, null은 결측, 0은 실제 0입니다.
       종목 5일·업종 수급 합계는 복구된 비결측 값만 집계하므로 부분 복구 기간은 전체 합계로 해석하지 마세요.

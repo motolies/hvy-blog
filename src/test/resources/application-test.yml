@@ -1,7 +1,11 @@
 # H2 Database 설정
 spring:
   datasource:
-    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL
+    # 컨텍스트마다 고유한 in-memory DB (2026-10-16): 설정이 다른 @SpringBootTest 컨텍스트들이 같은 mem:testdb 를 공유하면 한 컨텍스트의
+    # ddl-auto(create/create-drop)·종료가 다른 컨텍스트가 보는 테이블·제약을 지우거나 닫아(McpApplicationTest 의 @DirtiesContext 뒤
+    # PostAdminSearch·StockCollectAdminRunsFilter IntegrationTest 가 "database is empty"/"database has been closed") 전체 실행이 깨졌다.
+    # ${random.uuid} 는 DataSourceProperties 바인딩 때 한 번 해석돼 컨텍스트당 DB 하나가 된다(캐시 재사용 컨텍스트는 같은 DataSource 를 쓴다).
+    url: jdbc:h2:mem:test-${random.uuid};DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL
     driver-class-name: org.h2.Driver
     username: sa
     password:
@@ -13,7 +17,7 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.H2Dialect
     hibernate:
-      ddl-auto: create-drop  # 테스트 후 데이터베이스 초기화
+      ddl-auto: create-drop  # 컨텍스트 종료 때 자기 DB 만 비운다 (위 url 이 컨텍스트별 DB 라 다른 컨텍스트에 영향 없음)
   data:
     redis: # Redis 설정
       host: localhost

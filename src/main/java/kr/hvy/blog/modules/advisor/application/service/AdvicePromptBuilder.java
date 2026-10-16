@@ -28,6 +28,7 @@ import org.springframework.stereotype.Component;
  * 표 컬럼(SECTOR_COLUMNS·CANDIDATE_COLUMNS)은 위치 배열이라 재현성 측정(동결 페이로드 재실행)·테스트가 위치로 읽는다 — 새 열은 맨 뒤에만 붙인다.
  * advice-v6: sectors 에 업종 지수 rs5/rs20/rs60·mom·consistent·overheated, candidates 에 소속 섹터의 secRs60·secCons(LLM 이 두 표를 조인하지 않게).
  * advice-v8(M6): 루트에 regime(합성 국면·정책 표 한도, dataQuality 뒤)·theme(KOSPI200 섹터 대분류 강약, sectors 뒤) 블록, candidates 맨 뒤에 theme 열.
+ * advice-v10(2026-10-16): market.flow 의 frgn/inst/indi 1·5 와 sectors.frgn5 는 억원 정수(AdvisorMath.eok) — 입력 키·열 위치는 v9 와 같다.
  */
 @Component
 @RequiredArgsConstructor
@@ -174,12 +175,13 @@ public class AdvicePromptBuilder {
     for (MarketFeatures.FlowFeature f : market.flows()) {
       Map<String, Object> row = new LinkedHashMap<>();
       row.put("mkt", f.market());
-      row.put("frgn1", f.frgn1());
-      row.put("inst1", f.inst1());
-      row.put("indi1", f.indi1());
-      row.put("frgn5", f.frgn5());
-      row.put("inst5", f.inst5());
-      row.put("indi5", f.indi5());
+      // advice-v10: 원 → 억원 정수. 원 그대로 넣으면 근거 문장에 단위 없는 13자리 숫자가 섞인다(10/13 판단 "-13048931")
+      row.put("frgn1", AdvisorMath.eok(f.frgn1()));
+      row.put("inst1", AdvisorMath.eok(f.inst1()));
+      row.put("indi1", AdvisorMath.eok(f.indi1()));
+      row.put("frgn5", AdvisorMath.eok(f.frgn5()));
+      row.put("inst5", AdvisorMath.eok(f.inst5()));
+      row.put("indi5", AdvisorMath.eok(f.indi5()));
       flows.add(row);
     }
     m.put("flow", flows);
@@ -370,7 +372,7 @@ public class AdvicePromptBuilder {
     row.add(round(s.cw5d()));
     row.add(round(s.rising()));
     row.add(round(s.nearHigh()));
-    row.add(s.frgn5());
+    row.add(AdvisorMath.eok(s.frgn5()));
     row.add(s.members());
     row.add(round(s.rs5()));
     row.add(round(s.rs20()));

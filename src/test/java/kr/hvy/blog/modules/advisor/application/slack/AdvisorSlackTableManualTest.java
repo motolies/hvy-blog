@@ -60,7 +60,7 @@ class AdvisorSlackTableManualTest {
         List.of(new MarketRegime.Theme("5", 31, 0.01, 0.031, 0.02, 0.6, ThemeStrength.STRONG, List.of("삼성전자"))));
     AdviceHeader header = AdviceHeader.builder().adviceId(0L).runId(0L).baseDate(LocalDate.of(2026, 9, 26)).adviceKind(AdviceKind.DAILY)
         .variant(AdviceVariant.LIVE).horizonDays(5).regimeCode(MarketRegimeCode.RISK_ON).pUp(0.65).regime(regime)
-        .summary("[수동 확인 샘플] 표 블록 렌더링 확인용 메시지입니다.").promptVersion("advice-v9").model("sample").build();
+        .summary("[수동 확인 샘플] 표 블록 렌더링 확인용 메시지입니다.").promptVersion("advice-v10").model("sample").build();
     List<PickRow> picks = List.of(
         PickRow.builder().ticker("005930").pickRank(1).direction(PickDirection.LONG).conviction(0.80).thesis("샘플 근거").riskNote("샘플 리스크").build(),
         PickRow.builder().ticker("373220").pickRank(2).direction(PickDirection.LONG).conviction(0.70).thesis("샘플 근거").build(),
@@ -77,7 +77,7 @@ class AdvisorSlackTableManualTest {
   private static DailyAdviceMessage dailyAbstain() {
     AdviceHeader header = AdviceHeader.builder().adviceId(0L).runId(0L).baseDate(LocalDate.of(2026, 9, 26)).adviceKind(AdviceKind.DAILY)
         .variant(AdviceVariant.LIVE).horizonDays(5).regimeCode(MarketRegimeCode.RISK_OFF).pUp(0.6)
-        .summary("[수동 확인 샘플] 확신 있는 매수 근거가 없어 관망합니다. 표가 없어야 정상입니다.").promptVersion("advice-v9").model("sample").build();
+        .summary("[수동 확인 샘플] 확신 있는 매수 근거가 없어 관망합니다. 표가 없어야 정상입니다.").promptVersion("advice-v10").model("sample").build();
     return DailyAdviceMessage.builder().header(header).picks(List.of()).candidates(Map.of()).universeLabel("KOSPI200").scoreboardLines(List.of())
         .runId(0L).build();
   }

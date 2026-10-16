@@ -51,8 +51,11 @@ class AdvicePromptBuilderTest {
 
     // advice-v6: 새 열은 맨 뒤 — 섹터 rs5/rs20/rs60/mom/consistent/overheated, 후보 secRs60/secCons(1·0·null)
     assertThat(json).contains("\"sectors\":{\"columns\":[\"code\",\"name\",\"cw5\",\"rising\",\"nearHigh\",\"frgn5\",\"members\",\"rs5\",\"rs20\",\"rs60\",\"mom\",\"consistent\",\"overheated\"],"
-        + "\"top\":[[\"G2510\",\"반도체\",0.0412,0.71,0.34,286000000000,58,0.0123,0.0456,0.0789,0.9167,true,false]],"
-        + "\"bottom\":[[\"G3020\",\"음식료\",-0.0231,0.19,0.03,-41000000000,42,null,null,null,null,false,false]]}");
+        + "\"top\":[[\"G2510\",\"반도체\",0.0412,0.71,0.34,2860,58,0.0123,0.0456,0.0789,0.9167,true,false]],"
+        + "\"bottom\":[[\"G3020\",\"음식료\",-0.0231,0.19,0.03,-410,42,null,null,null,null,false,false]]}");
+    // advice-v10: 시장·섹터 수급은 원이 아니라 억원 정수(−182,000,000,000원 → −1820)
+    assertThat(json).contains("\"flow\":[{\"mkt\":\"KOSPI\",\"frgn1\":-1820,\"inst1\":940,\"indi1\":880,\"frgn5\":-4100,\"inst5\":2210}]");
+    assertThat(json).doesNotContain("182000000000").doesNotContain("286000000000");
     assertThat(json).contains("\"columns\":[\"tkr\",\"name\",\"sec\",\"score\",\"r20\",\"r60\",\"distHigh\",\"tvRatio\",\"frgnFlow\",\"instFlow\",\"rsIdx\",\"per\",\"pbr\",\"vol20\",\"secRs60\",\"secCons\",\"theme\"]");
     assertThat(json).as("T00: 세 구간 모두 양수 → secCons 1").contains(",14.23,null,0.0182,0.0789,1,null]");
     assertThat(json).as("T01: rs60 음수 → secCons 0").contains(",14.23,null,0.0182,-0.01,0,null]");

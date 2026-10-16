@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.application.service.AdvisorMath;
 import kr.hvy.blog.modules.advisor.application.service.GlobalLinkService;
 import kr.hvy.blog.modules.advisor.application.service.MarketFeatureService;
 import kr.hvy.blog.modules.advisor.application.service.MarketRegimeService;
@@ -72,12 +73,12 @@ public class MarketToolkit {
       m.put("flows", f.flows().stream().map(fl -> {
         Map<String, Object> x = ToolJson.obj();
         x.put("market", fl.market());
-        ToolJson.put(x, "frgn1", eok(fl.frgn1()));
-        ToolJson.put(x, "inst1", eok(fl.inst1()));
-        ToolJson.put(x, "indi1", eok(fl.indi1()));
-        ToolJson.put(x, "frgn5", eok(fl.frgn5()));
-        ToolJson.put(x, "inst5", eok(fl.inst5()));
-        ToolJson.put(x, "indi5", eok(fl.indi5()));
+        ToolJson.put(x, "frgn1", AdvisorMath.eok(fl.frgn1()));
+        ToolJson.put(x, "inst1", AdvisorMath.eok(fl.inst1()));
+        ToolJson.put(x, "indi1", AdvisorMath.eok(fl.indi1()));
+        ToolJson.put(x, "frgn5", AdvisorMath.eok(fl.frgn5()));
+        ToolJson.put(x, "inst5", AdvisorMath.eok(fl.inst5()));
+        ToolJson.put(x, "indi5", AdvisorMath.eok(fl.indi5()));
         return x;
       }).toList());
       m.put("global", f.global().stream().map(g -> {
@@ -267,7 +268,7 @@ public class MarketToolkit {
       ToolJson.put(x, "cw5d", ToolJson.r4(s.cw5d()));
       ToolJson.put(x, "rising", ToolJson.r4(s.rising()));
       ToolJson.put(x, "nearHigh", ToolJson.r4(s.nearHigh()));
-      ToolJson.put(x, "frgn5", eok(s.frgn5()));
+      ToolJson.put(x, "frgn5", AdvisorMath.eok(s.frgn5()));
       x.put("members", s.members());
       out.add(x);
     }
@@ -303,12 +304,5 @@ public class MarketToolkit {
     ToolJson.put(x, "corr", ToolJson.r4(l.corr()));
     x.put("n", l.n());
     return x;
-  }
-
-  /**
-   * 원 → 억원 정수.
-   */
-  static Long eok(Long won) {
-    return won == null ? null : Math.round(won / 1e8);
   }
 }

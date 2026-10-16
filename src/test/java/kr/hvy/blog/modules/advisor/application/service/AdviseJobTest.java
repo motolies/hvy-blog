@@ -153,7 +153,7 @@ class AdviseJobTest {
     assertThat(live.weightSetId()).isEqualTo(1L);
     assertThat(live.leadingSectors()).hasSize(1);
     assertThat(live.leadingSectors().getFirst().consistent()).as("advice-v6: 섹터 맥락(SectorContext)의 consistent 가 주도 섹터 콜에 실린다").isTrue();
-    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION).isEqualTo("advice-v9");
+    assertThat(live.promptVersion()).isEqualTo(PromptResources.ADVICE_VERSION).isEqualTo("advice-v10");
     assertThat(live.guard()).as("T00 은 secCons=1·비과열이라 클램프 없음").doesNotContainKeys("capNonConsistent", "capOverheated");
     assertThat(live.trendKospi()).as("규칙 추세는 시장 특징에서").isEqualTo(kr.hvy.blog.modules.advisor.domain.code.MarketTrendCode.BULL);
     assertThat(live.trendKosdaq()).as("KOSDAQ 추세 없음(픽스처)").isNull();
@@ -497,7 +497,7 @@ class AdviseJobTest {
   }
 
   @Test
-  @DisplayName("M7: H20 은 horizon_days=20·kind=H20 으로 LIVE 와 QUANT_TOPN 섀도를 저장하고, 뉴스·recentOutcomes·교훈·실적 블록 없이 advice-h20-v2 로 1회 판단해 '20일 관점 추천' 으로 발행한다")
+  @DisplayName("M7: H20 은 horizon_days=20·kind=H20 으로 LIVE 와 QUANT_TOPN 섀도를 저장하고, 뉴스·recentOutcomes·교훈·실적 블록 없이 advice-h20-v3 로 1회 판단해 '20일 관점 추천' 으로 발행한다")
   void h20SavesTwentyDayAdviceWithoutNewsOrMemory() {
     properties.getNews().setEnabled(true);   // 뉴스가 켜져 있어도 H20 입력에는 싣지 않는다
     when(adviceWriter.countLivePicks(AdviceKind.DAILY)).thenReturn(10_000);   // 300 게이트를 넘겨도 메모리를 싣지 않는다
@@ -520,7 +520,7 @@ class AdviseJobTest {
       assertThat(h.exitDate()).as("20거래일 창").isEqualTo(LocalDate.of(2026, 10, 13));
     });
     AdviceHeader live = headers.getAllValues().get(1);
-    assertThat(live.promptVersion()).isEqualTo(PromptResources.H20_VERSION).isEqualTo("advice-h20-v2");
+    assertThat(live.promptVersion()).isEqualTo(PromptResources.H20_VERSION).isEqualTo("advice-h20-v3");
     assertThat(live.memoryJson()).isNull();
     assertThat(live.activeLessonIds()).isEmpty();
     verify(adviceWriter).find(base, AdviceKind.H20, AdviceVariant.LIVE);
@@ -535,7 +535,7 @@ class AdviseJobTest {
     verify(icService, never()).computeIncremental(any());
     ArgumentCaptor<kr.hvy.blog.modules.advisor.domain.model.PromptInputRow> inputs = ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.domain.model.PromptInputRow.class);
     verify(promptInputs).upsert(inputs.capture());
-    assertThat(inputs.getValue().promptVersion()).isEqualTo("advice-h20-v2");
+    assertThat(inputs.getValue().promptVersion()).isEqualTo("advice-h20-v3");
     assertThat(inputs.getValue().userPayload()).contains("\"horizonDays\":20").contains("20번째 영업일 종가")
         .doesNotContain("\"news\"").doesNotContain("recentOutcomes").doesNotContain("\"scoreboard\"").doesNotContain("\"lessons\"");
     assertThat(execution.metadata("skip.NEWS")).isEqualTo(AdviseJob.H20_SKIP);

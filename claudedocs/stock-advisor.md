@@ -333,6 +333,14 @@ M1~M8 은 브랜치 스택 한 줄이다: `e9dc4f2`(M1) → `07dd2d2`(M2) → `3
 - ⚠ **invalid_blocks 가 조용히 사라지는 위험**: hvy-common `SlackClient.send` 는 응답 `ok` 를 보지 않아 Slack 이 표를 거부해도 `AdvisorNotifier.publish` 는 true 를 돌려주고 `published_at` 이 찍힌다. 배포 전 `AdvisorSlackTableManualTest`(SDK 로 직접 보내 `ok` 를 단언, 샘플 4종)로 실채널 렌더링(데스크톱·모바일)을 사람이 확인한다: `SLACK_BOT_TOKEN=xoxb-… ADVISOR_SLACK_TEST_CHANNEL=#… ./gradlew test --tests "*AdvisorSlackTableManualTest"`. hvy-common 의 ok 검사는 후속(§10).
 - **적용 순서**: `20260927_01_advisor_long_only.sql`(주석만, 순서 무관) → `AdvisorSlackTableManualTest` 로 표 확인 → 배포. IC 재계산 불필요. **전환일(첫 advice-v9 DAILY LIVE) 을 §8 표에 적는다.** 확인: `SELECT a.base_date, a.prompt_version, COUNT(p.ticker) picks, COUNT(*) FILTER (WHERE p.direction='AVOID') avoids FROM tb_advisor_advice a LEFT JOIN tb_advisor_pick p USING (advice_id) WHERE a.advice_kind='DAILY' AND a.variant='LIVE' GROUP BY 1,2 ORDER BY 1 DESC LIMIT 5;`(v9 행 avoids 0). 롤백: `PromptResources` 상수·파일 경로를 v8·h20-v1·morning-v1 으로 되돌려도 가드는 AVOID 를 제거하므로 **코드 전체를 되돌려야** v8 동작이 된다.
 
+### 1.12 프롬프트 수급 금액 억원 정수 (advice-v10 · advice-h20-v3, 2026-10-16)
+
+MCP 점검(`plan/mcp.md` P0-6)에서 10/13 판단 근거에 "외국인 5일 순매도 -13048931" 처럼 단위 없는 원천 숫자가 그대로 들어간 것이 확인됐다. `AdvicePromptBuilder` 가 `market.flow`(frgn/inst/indi 1·5)와 `sectors.frgn5` 를 Long 원 그대로 넣었고, 10/14·15 투자자 수급이 백만원→원으로 바뀌면서(§stock-collect §13·§14) 100만 배 큰 13자리 숫자가 들어갈 상황이었다.
+
+- **변경**: 두 값을 `AdvisorMath.eok`(원→억원 정수, 채팅 `marketOverview` 와 같은 환산)로 넣고, 프롬프트 입력 설명을 "(억원, 정수) … 근거 문장에 인용할 때는 단위(억원)를 함께 적는다" 로 바꿨다. 입력 키·열 위치·규칙·출력 스키마는 v9 그대로. 새 파일 `advice-system-v10.md`·`advice-h20-v3.md`(v9·h20-v2 보존), `PromptResources.ADVICE_VERSION`·`H20_VERSION` 상향. 아침 재판정(morning-v2)은 저녁 payload 를 재사용하고 단위 문구가 없어 버전 유지.
+- **같은 커밋 묶음(P0)**: 후보 feature `marketCap` 포화(`AdvisorMath.round6`)·`rsIdx20d` 지수 수익률 오매핑·노트 `vol20d` 키 — 판단 입력이 바뀌므로 아래 §8 창 재시작과 함께 본다.
+- **적용**: 코드 배포만(마이그레이션 없음). 확인: 다음 DAILY `GET /advices/{id}/prompt` 의 `market.flow` 값이 수천~수만 단위, `tb_advisor_advice.prompt_version='advice-v10'`. **전환일(첫 advice-v10 DAILY LIVE)을 §8 표에 적는다.** 롤백은 `PromptResources` 상수·파일 경로와 `AdvicePromptBuilder` 의 eok 호출을 함께 되돌린다.
+
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
 19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.
@@ -506,6 +514,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
   - 판정 결과는 이 문서 §8 끝에 날짜·n·통계값과 함께 덧붙인다.
   - ★ **매수 전용 전환(2026-09-27, advice-v9·advice-h20-v2·morning-v2)으로 LLM 이 관여하는 판정은 창을 다시 연다** — 위 규율("판정 전에 프롬프트를 바꾸면 창을 다시 연다")대로 #1·#3·#4 의 시작일은 **v9 전환일 이후 첫 해당 행**이다. #2(QUANT 두 섀도)는 LLM 무관이라 창을 유지한다. 섀도 NOMEM·NONEWS 도 같은 스키마·프롬프트(advice-v9)로 바뀌어 LIVE 와 비교 조건이 같다.
     - 시작일 SQL: #1 `… AND memory_json IS NOT NULL AND prompt_version = 'advice-v9'`, #3 `SELECT MIN(base_date) FROM tb_advisor_advice WHERE advice_kind='MORNING' AND variant='LIVE' AND prompt_version='morning-v2'`, #4 `… advice_kind='H20' AND variant='LIVE' AND prompt_version='advice-h20-v2'`. v8 시절 행은 판정에 넣지 않는다(참고용).
+  - ★ **수급 억원 전환(2026-10-16, advice-v10·advice-h20-v3, §1.12)과 후보 feature 정정(marketCap 포화·rsIdx20d·vol20d)으로 LLM 입력이 바뀌어 #1·#4 창을 다시 연다** — 시작일은 `prompt_version='advice-v10'` / `'advice-h20-v3'` 의 첫 LIVE 행. #3(morning-v2)은 저녁 payload 를 재사용하므로 저녁이 v10 인 첫 MORNING 행부터. #2(QUANT 두 섀도)는 LLM 무관이나 rsIdx20d·marketCap 은 feature_json 에만 있고 점수에 들어가지 않아 창을 유지한다.
     - **관망일의 d_i(등록, 결과를 보기 전)**: 한쪽만 관망이면 그쪽 픽 평균 초과를 0(현금)으로 둔다(`morningVsDaily` 와 같은 정의). 양쪽 다 관망이면 그날은 뺀다. #1 의 Jaccard 는 양쪽 다 관망이면 1, 한쪽만이면 0 이다. 관망 비율 자체는 판정 지표가 아니라 `abstainDays` 로 보고만 한다.
 - 재현성: 주 1회 직전 LIVE 입력 동결 재실행, Jaccard <0.7 이면 경고(LLM 랭킹 관여 축소 검토).
 - 룩어헤드 불변식: 특징 SQL 은 기준일 이하만(`FeatureSqlTest.noLookahead`, `AdvisorScreeningPgTest.futureRowsDoNotChangeScreening`), LEAD 는 IC·채점에만, 밸류에이션은 당일 스냅샷만(과거 IC 제외), 12:00 정보 소급 금지 — `tb_advisor_pick_note`·`tb_advisor_intraday_check` 를 `FeatureSql`·`SignalIcService`·`AdviceScoringService`·`LessonService`·`CandidateScreeningService`·`MarketFeatureService` 가 참조하지 않음을 `AdvisorSqlBoundaryTest` 가 소스 문자열로 단언한다.

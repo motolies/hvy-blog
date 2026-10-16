@@ -406,6 +406,10 @@ advisor:
     strong-rs20: 0.02             # rs20 ≥ +0.02 & rs60 > 0 → STRONG, rs20 ≤ −0.02 & rs60 < 0 → WEAK
     min-members: 3                # 지표 있는 구성 종목이 이보다 적은 대분류는 제외
     leaders: 3                    # 대표 종목명(60일 거래대금 상위) 수 — 코드 의미 단서
+    names: {}                     # kospi200_sector 코드 → 이름(MCP 응답 name, 프롬프트 입력 아님). 코드표가 없어 운영 SQL 로 확인한 코드만 적는다 (2026-10-16):
+                                  #   SELECT kospi200_sector, COUNT(*), STRING_AGG(stock_name, ',' ORDER BY listed_shares DESC NULLS LAST) FROM tb_stock_master WHERE is_kospi200 AND is_active GROUP BY 1 ORDER BY 1;
+                                  #   2026-10-15 대표 종목으로 본 잠정 후보(검증 전): 1 건설, 2 중공업, 3 철강·소재, 4 에너지·화학, 5 정보기술, 6 금융, 7 생활소비재, 8 경기소비재, 9 산업재, A 헬스케어, B 커뮤니케이션서비스
+                                  #   확인되면 예: names: {"5": "정보기술", "6": "금융"}
   retention-days: 180             # 프롬프트 입력 스냅샷 보존
   # Slack #hvy-advisor 채팅 봇 (chat-v1, 2026-09-13). Socket Mode 수신 — 공개 URL·서명 검증 없음, app-level 토큰 1개.
   # 토큰·채널·허용 사용자 중 하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨). bot 토큰은 slack.token(SLACK_BOT_TOKEN) 재사용

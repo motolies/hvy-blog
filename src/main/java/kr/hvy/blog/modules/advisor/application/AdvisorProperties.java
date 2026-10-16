@@ -751,6 +751,12 @@ public class AdvisorProperties {
     /** 지표가 있는 구성 종목이 이보다 적은 대분류는 뺀다(중앙값이 한두 종목에 좌우) */
     private int minMembers = 3;
 
+    /**
+     * kospi200_sector 코드 → 테마 이름(MCP marketRegime·adviceDetail 응답의 name). 코드표가 코드베이스에 없어 운영 데이터(대표 종목)로 확인한 코드만 적는다 —
+     * 비어 있으면 name 은 null 이고 leaders 로 성격을 읽는다. 판단 프롬프트 입력(THEME_COLUMNS)에는 들어가지 않는다 (2026-10-16)
+     */
+    private java.util.Map<String, String> names = new java.util.LinkedHashMap<>();
+
     /** 대분류마다 싣는 대표 종목명 수(60일 평균 거래대금 상위) — 코드 의미를 LLM 이 추정하는 단서 */
     private int leaders = 3;
   }

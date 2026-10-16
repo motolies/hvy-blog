@@ -172,6 +172,17 @@ class MarketRegimePgTest {
     assertThat(one.breadth()).as("종가 ≥ 100 > ma20 90").isEqualTo(1.0);
     assertThat(one.strength()).isEqualTo(ThemeStrength.STRONG);
     assertThat(one.leaders()).hasSize(3);
+    // 2026-10-16: rsEq = 테마 중앙값 − 전 구성 종목 중앙값. KOSPI 수익률이 0 이라 rs − rsEq 가 전체 중앙값으로 모든 테마에서 같다. name 은 설정 매핑, 없으면 null
+    MarketRegime.Theme three = atBase.get("3");
+    assertThat(one.rsEq20()).isNotNull();
+    assertThat(one.rs20() - one.rsEq20()).as("전 구성 종목 ret_20d 중앙값").isCloseTo(three.rs20() - three.rsEq20(), within(1e-9));
+    assertThat(one.rs60() - one.rsEq60()).isCloseTo(three.rs60() - three.rsEq60(), within(1e-9));
+    assertThat(one.rsEq5()).as("ret_5d 없음").isNull();
+    assertThat(one.name()).isNull();
+    properties.getTheme().getNames().put("1", "테스트테마");
+    assertThat(new ThemeStrengthService(named, properties).themes(BASE).stream().filter(t -> t.code().equals("1")).findFirst().orElseThrow().name())
+        .isEqualTo("테스트테마");
+    properties.getTheme().getNames().clear();
     assertThat(atBase.get("X").members()).as("BASE 에 편입된 T04").isEqualTo(1);
     assertThat(service.themes(BASE).getFirst().code()).as("rs20 내림차순 — '3' 중앙값 20/40").isEqualTo("3");
 

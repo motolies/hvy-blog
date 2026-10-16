@@ -170,7 +170,8 @@ public class MarketToolkit {
       m.put("rule", String.format("변동성 국면 = %s %d일 σ 의 직전 최대 %d년 분포 백분위: < %.2f LOW, ≥ %.2f HIGH, 표본 < %d 이면 UNKNOWN. 정책 표 %s 는 사전 등록 — 수치 변경 시 새 버전",
           cfg.getIndexCode(), cfg.getVolWindowDays(), cfg.getVolLookbackYears(), cfg.getVolLowPct(), cfg.getVolHighPct(), cfg.getVolMinHistoryDays(),
           cfg.getPolicy().getVersion()));
-      m.put("note", "rs 는 소수(0.021 = 2.1%p). 테마 code 는 KOSPI200 섹터 대분류 코드이며 이름 대신 leaders(대표 종목)로 성격을 읽는다. 구성은 그날 기준(PIT)");
+      m.put("note", "rs 는 소수(0.021 = 2.1%p), KOSPI 대비. rsEq 는 KOSPI200 전 구성 종목 중앙값 대비(동일가중, 시장 전체가 눌릴 때 상대 강도). strength 는 rs20/rs60 기준. "
+          + "테마 code 는 KOSPI200 섹터 대분류 코드이며 name 은 설정 매핑(없으면 leaders 대표 종목으로 성격을 읽는다). 구성은 그날 기준(PIT)");
       return m;
     });
   }
@@ -199,10 +200,15 @@ public class MarketToolkit {
       m.put("themes", r.themes().stream().map(t -> {
         Map<String, Object> x = ToolJson.obj();
         x.put("code", t.code());
+        ToolJson.put(x, "name", t.name());
         x.put("members", t.members());
         ToolJson.put(x, "rs5", ToolJson.r4(t.rs5()));
         ToolJson.put(x, "rs20", ToolJson.r4(t.rs20()));
         ToolJson.put(x, "rs60", ToolJson.r4(t.rs60()));
+        // 2026-10-16: 동일가중 벤치(전 구성 종목 중앙값) 대비 — KOSPI 가 반도체 대형주에 끌려 눌릴 때 테마 대부분이 STRONG 으로 보이는 편향의 대조용. strength 는 rs20/rs60 기준 그대로
+        ToolJson.put(x, "rsEq5", ToolJson.r4(t.rsEq5()));
+        ToolJson.put(x, "rsEq20", ToolJson.r4(t.rsEq20()));
+        ToolJson.put(x, "rsEq60", ToolJson.r4(t.rsEq60()));
         ToolJson.put(x, "breadth", ToolJson.r4(t.breadth()));
         ToolJson.put(x, "strength", t.strength() == null ? null : t.strength().getCode());
         ToolJson.put(x, "leaders", t.leaders());

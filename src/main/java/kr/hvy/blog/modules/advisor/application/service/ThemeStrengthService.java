@@ -41,14 +41,23 @@ public class ThemeStrengthService {
                                                   AND (mh.valid_to IS NULL OR mh.valid_to > k.trade_date) AND mh.is_kospi200
                    JOIN tb_stock_master ms ON ms.ticker = m.ticker
           WHERE ms.kospi200_sector IS NOT NULL
+      ),
+      -- 동일가중 벤치(2026-10-16): KOSPI200 전 구성 종목(테마 있는 것) 수익률 중앙값. KOSPI 종합(시총가중, 반도체 대형주 비중)이 눌리면 테마 대부분이 STRONG 으로 보이는 편향의 대조용
+      allmem AS (
+          SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ret_5d) AS m5, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ret_20d) AS m20,
+                 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ret_60d) AS m60
+          FROM mem
       )
       SELECT mem.theme, COUNT(*) AS members,
              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mem.ret_5d) - MAX(k.ret_5d)   AS rs5,
              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mem.ret_20d) - MAX(k.ret_20d) AS rs20,
              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mem.ret_60d) - MAX(k.ret_60d) AS rs60,
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mem.ret_5d) - MAX(allmem.m5)   AS rs_eq5,
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mem.ret_20d) - MAX(allmem.m20) AS rs_eq20,
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mem.ret_60d) - MAX(allmem.m60) AS rs_eq60,
              AVG(CASE WHEN mem.ma_20 IS NULL OR mem.adj_close IS NULL THEN NULL WHEN mem.adj_close > mem.ma_20 THEN 1.0 ELSE 0.0 END) AS breadth,
              ARRAY_AGG(mem.stock_name ORDER BY mem.tv_avg_60d DESC NULLS LAST, mem.stock_name) AS names
-      FROM mem CROSS JOIN k
+      FROM mem CROSS JOIN k CROSS JOIN allmem
       GROUP BY mem.theme
       HAVING COUNT(*) >= :minMembers
       ORDER BY rs20 DESC NULLS LAST, mem.theme
@@ -67,8 +76,10 @@ public class ThemeStrengthService {
           Double rs5 = d(rs.getObject("rs5"));
           Double rs20 = d(rs.getObject("rs20"));
           Double rs60 = d(rs.getObject("rs60"));
-          return new MarketRegime.Theme(rs.getString("theme"), rs.getInt("members"), rs5, rs20, rs60, d(rs.getObject("breadth")),
-              strength(rs20, rs60, cfg.getStrongRs20()), leaders(rs.getArray("names"), cfg.getLeaders()));
+          String code = rs.getString("theme");
+          return new MarketRegime.Theme(code, rs.getInt("members"), rs5, rs20, rs60, d(rs.getObject("breadth")),
+              strength(rs20, rs60, cfg.getStrongRs20()), leaders(rs.getArray("names"), cfg.getLeaders()),
+              cfg.getNames().get(code), d(rs.getObject("rs_eq5")), d(rs.getObject("rs_eq20")), d(rs.getObject("rs_eq60")));
         });
   }
 

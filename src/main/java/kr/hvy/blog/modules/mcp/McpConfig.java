@@ -33,6 +33,10 @@ public class McpConfig {
       "stockMaster", "stockSeries", "stockFinancials", "stockCorporateActions", "stockSectors", "marketSeries",
       "listAdvices", "adviceDetail", "adviceScores", "signalIc", "adviceWeights", "adviceLessons", "adviceNotes",
       "advicePerformance", "morningPerformanceComparison", "activeAdviceWeights", "dataGuide");
+  /** 도구별 statement_timeout(ms). 기본 5s. screeningTop 실시간 경로(그날 판단이 없거나 가중치가 바뀐 날)는 스크리닝 CTE 가 수 초라 15s (2026-10-16, P1-7) */
+  static final Map<String, Integer> STATEMENT_TIMEOUT_MS = Map.of("screeningTop", 15_000);
+  /** 도구별 트랜잭션 타임아웃(s). 기본 10s. statement_timeout 보다 길어야 DB 쪽 57014 가 먼저 나와 "timeout" 으로 분류된다 */
+  static final Map<String, Integer> TRANSACTION_TIMEOUT_S = Map.of("screeningTop", 20);
 
   @Bean
   List<McpStatelessServerFeatures.SyncToolSpecification> mcpTools(StockToolkit stock, MarketToolkit market,
@@ -44,9 +48,9 @@ public class McpConfig {
         Arrays.stream(MethodToolCallbackProvider.builder().toolObjects(data).build().getToolCallbacks())).toArray(ToolCallback[]::new);
     var selected = Arrays.stream(callbacks).filter(c -> READ_TOOLS.contains(c.getToolDefinition().name())).toList();
     if (selected.size() != READ_TOOLS.size()) throw new IllegalStateException("MCP read tool allowlist mismatch");
-    TransactionTemplate tx = readTransaction(manager);
     return selected.stream().map(callback -> {
       var definition = callback.getToolDefinition();
+      TransactionTemplate tx = readTransaction(manager, TRANSACTION_TIMEOUT_S.getOrDefault(definition.name(), 10));
       var schema = mapper.readValue(definition.inputSchema(), new TypeReference<Map<String, Object>>() {});
       var tool = McpSchema.Tool.builder(definition.name(), schema).description(definition.description())
           .annotations(new McpSchema.ToolAnnotations(null, true, false, true, false, false)).build();
@@ -56,9 +60,13 @@ public class McpConfig {
   }
 
   static TransactionTemplate readTransaction(PlatformTransactionManager manager) {
+    return readTransaction(manager, 10);
+  }
+
+  static TransactionTemplate readTransaction(PlatformTransactionManager manager, int timeoutSeconds) {
     var tx = new TransactionTemplate(manager);
     tx.setReadOnly(true);
-    tx.setTimeout(10);
+    tx.setTimeout(timeoutSeconds);
     return tx;
   }
 
@@ -71,8 +79,8 @@ public class McpConfig {
       validateArguments(args);
       result = tx.execute(status -> {
         jdbc.execute("SET TRANSACTION READ ONLY");
-        jdbc.execute("SET LOCAL statement_timeout = 5000");
-        ChatRequestScope scope = new ChatRequestScope(Instant.now().plusSeconds(10));
+        jdbc.execute("SET LOCAL statement_timeout = " + STATEMENT_TIMEOUT_MS.getOrDefault(name, 5000));
+        ChatRequestScope scope = new ChatRequestScope(Instant.now().plusSeconds(TRANSACTION_TIMEOUT_S.getOrDefault(name, 10)));
         var context = new java.util.HashMap<>(scope.toToolContext());
         context.put("mcp", true);
         String json = callback.call(mapper.writeValueAsString(args == null ? Map.of() : args), new ToolContext(context));

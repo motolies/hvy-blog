@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
@@ -415,7 +416,7 @@ public class AdviceToolkit {
 
   @Tool(name = "screeningTop", description = "정량 스크리닝 상위 종목(판단과 같은 규칙: 시그널 백분위 가중 합, 1차 컷, 섹터당 상한). 종목마다 시그널 백분위(0~1)를 함께 주므로 "
       + "'왜 점수가 높지', '지금 정량 상위는?' 에 답할 수 있다. 백분위는 advisor.markets 시장 전체 기준이고 종목은 픽 유니버스(기본 KOSPI200 구성종목) 안에서만 고른다. "
-      + "LLM 픽이 아니라 순수 정량 순위다.")
+      + "LLM 픽이 아니라 순수 정량 순위다. source=STORED 면 그날 DAILY 판단이 같은 가중치로 저장한 후보(동결 스냅샷), LIVE 면 지금 계산한 결과다.")
   public Map<String, Object> screeningTop(
       @ToolParam(required = false, description = MarketToolkit.AS_OF_DESC) String baseDate,
       @ToolParam(required = false, description = "종목 수 1~20 (기본 10)") Integer limit, ToolContext context) {
@@ -429,6 +430,26 @@ public class AdviceToolkit {
         return ToolJson.error(ToolJson.ERROR_INTERNAL, "활성 가중치 세트가 없다(advisor-seed.sql 미적용)", date.get());
       }
       int n = support.clampLimit(limit == null ? 10 : limit, SCREEN_CAP);
+      // 2026-10-16(P1-7): 기준일의 DAILY LIVE 판단이 같은 가중치 세트로 이미 스크리닝했으면 저장된 후보(동결 스냅샷)를 읽는다 — 실시간 CTE 는 5s statement_timeout 에
+      // 걸려 MCP 에서 항상 timeout 이었다. 판단이 없는 날(결손일)·세트가 바뀐 과거일만 실시간으로 계산한다
+      Optional<AdviceHeader> stored = adviceWriter.find(date.get(), AdviceKind.DAILY, AdviceVariant.LIVE);
+      if (stored.isPresent() && Objects.equals(stored.get().weightSetId(), set.get().weightSetId())) {
+        List<CandidateRow> rows = adviceWriter.candidates(stored.get().adviceId());
+        if (!rows.isEmpty()) {
+          support.noteAsOf(context, date.get());
+          Map<String, Object> m = ToolJson.obj();
+          m.put("asOf", date.get().toString());
+          m.put("source", "STORED");
+          m.put("adviceId", stored.get().adviceId());
+          m.put("markets", advisor.getMarkets());
+          m.put("pickUniverse", advisor.getPickUniverse().getCode());
+          m.put("weightSetId", stored.get().weightSetId());
+          m.put("maxPerSector", advisor.getMaxPerSector());
+          m.put("items", renderCandidates(rows.subList(0, Math.min(n, rows.size()))));
+          m.put("note", "그날 DAILY 판단이 저장한 후보(동결 스냅샷, universe·cut 미기록). sig 는 유니버스 안 백분위(1에 가까울수록 상위). score 는 가중 합 [-1,1]");
+          return m;
+        }
+      }
       ScreeningResult result = screening.screen(date.get(), set.get(), n, advisor.getMaxPerSector());
       if (result.candidates().isEmpty()) {
         return ToolJson.noData(date.get());
@@ -436,33 +457,41 @@ public class AdviceToolkit {
       support.noteAsOf(context, date.get());
       Map<String, Object> m = ToolJson.obj();
       m.put("asOf", result.baseDate().toString());
+      m.put("source", "LIVE");
       m.put("markets", advisor.getMarkets());
       m.put("pickUniverse", advisor.getPickUniverse().getCode());
       m.put("universe", result.universeSize());
       m.put("cut", result.cutSize());
       m.put("weightSetId", result.weightSetId());
       m.put("maxPerSector", advisor.getMaxPerSector());
-      List<Map<String, Object>> items = new ArrayList<>();
-      for (CandidateRow c : result.candidates()) {
-        Map<String, Object> x = ToolJson.obj();
-        x.put("rank", c.quantRank());
-        x.put("tk", c.ticker());
-        x.put("nm", c.stockName());
-        ToolJson.put(x, "sector", c.sectorName());
-        x.put("score", ToolJson.r4(c.quantScore()));
-        if (c.signals() != null && !c.signals().isEmpty()) {
-          Map<String, Object> sig = ToolJson.obj();
-          for (Map.Entry<String, SignalValue> e : c.signals().entrySet()) {
-            ToolJson.put(sig, e.getKey(), e.getValue() == null ? null : ToolJson.r4(e.getValue().pct()));
-          }
-          x.put("sig", sig);
-        }
-        items.add(x);
-      }
-      m.put("items", items);
+      m.put("items", renderCandidates(result.candidates()));
       m.put("note", "sig 는 유니버스 안 백분위(1에 가까울수록 상위). score 는 가중 합 [-1,1]");
       return m;
     });
+  }
+
+  /**
+   * 후보 행 → 응답 항목(rank·tk·nm·sector·score·sig 백분위). 저장 후보와 실시간 결과가 같은 모양을 쓴다.
+   */
+  private static List<Map<String, Object>> renderCandidates(List<CandidateRow> candidates) {
+    List<Map<String, Object>> items = new ArrayList<>();
+    for (CandidateRow c : candidates) {
+      Map<String, Object> x = ToolJson.obj();
+      x.put("rank", c.quantRank());
+      x.put("tk", c.ticker());
+      x.put("nm", c.stockName());
+      ToolJson.put(x, "sector", c.sectorName());
+      x.put("score", ToolJson.r4(c.quantScore()));
+      if (c.signals() != null && !c.signals().isEmpty()) {
+        Map<String, Object> sig = ToolJson.obj();
+        for (Map.Entry<String, SignalValue> e : c.signals().entrySet()) {
+          ToolJson.put(sig, e.getKey(), e.getValue() == null ? null : ToolJson.r4(e.getValue().pct()));
+        }
+        x.put("sig", sig);
+      }
+      items.add(x);
+    }
+    return items;
   }
 
   @Tool(name = "performanceSummary", description = "최근 weeks 주(기본 8, 최대 52)의 판단 성과 요약: 변형별(LIVE 발행본·QUANT_TOPN 정량 섀도·LLM_NOMEM·LLM_NONEWS) 픽 수·적중률·"

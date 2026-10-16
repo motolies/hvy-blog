@@ -34,6 +34,7 @@ import kr.hvy.blog.modules.advisor.domain.code.PickDirection;
 import kr.hvy.blog.modules.advisor.domain.model.AdviceHeader;
 import kr.hvy.blog.modules.advisor.domain.model.CandidateRow;
 import kr.hvy.blog.modules.advisor.domain.model.PickRow;
+import kr.hvy.blog.modules.advisor.domain.model.SignalValue;
 import kr.hvy.blog.modules.advisor.repository.jdbc.AdviceWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.IntradayCheckWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.MorningCheckWriter;
@@ -262,7 +263,7 @@ class AdvisorChatToolPgTest {
     assertThat(advice.adviceChecks(FUTURE.toString(), context)).containsEntry("error", ToolJson.ERROR_NO_DATA);
 
     Map<String, Object> screen = advice.screeningTop(FUTURE.toString(), 99, context);
-    assertThat(screen).containsEntry("asOf", BASE.toString()).containsKeys("universe", "cut", "weightSetId");
+    assertThat(screen).containsEntry("asOf", BASE.toString()).containsEntry("source", "LIVE").containsKeys("universe", "cut", "weightSetId");
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> items = (List<Map<String, Object>>) screen.get("items");
     assertThat(items).isNotEmpty().hasSizeLessThanOrEqualTo(AdviceToolkit.SCREEN_CAP);
@@ -310,6 +311,45 @@ class AdvisorChatToolPgTest {
       assertThat(changes).extracting(c -> c.get("action")).containsExactly("KEEP", "ADD", "DROP");
       assertThat(changes.get(2)).containsEntry("tk", AdvisorSyntheticData.ticker(1)).containsKey("nm").doesNotContainKey("morning");
       assertThat(scope.calls()).contains("latestAdvice", "horizonPicks", "compareAdvice");
+    } finally {
+      jdbc.update("DELETE FROM tb_advisor_advice WHERE run_id = ?", runId);
+      jdbc.update("DELETE FROM tb_advisor_run WHERE run_id = ?", runId);
+    }
+  }
+
+  @Test
+  @DisplayName("screeningTop — 기준일 DAILY LIVE 판단이 활성 가중치 세트로 저장한 후보가 있으면 STORED(동결 스냅샷, rank 순·universe 없음), 세트가 다르면 LIVE 로 폴백")
+  void screeningTopPrefersStoredCandidates() {
+    Long runId = jdbc.queryForObject("INSERT INTO tb_advisor_run (job_type, trigger_type, status, created_at, updated_at) "
+        + "VALUES ('ADVISE', 'API', 'SUCCESS', NOW(), NOW()) RETURNING run_id", Long.class);
+    AdviceWriter writer = new AdviceWriter(jdbc);
+    long activeSet = new WeightSetRepository(jdbc).active(5).orElseThrow().weightSetId();
+    long adviceId = writer.insertHeader(AdviceHeader.builder().runId(runId).baseDate(BASE).adviceKind(AdviceKind.DAILY).variant(AdviceVariant.LIVE)
+        .horizonDays(5).dataQuality(DataQuality.OK).promptVersion("advice-v10").model("m").weightSetId(activeSet).build());
+    try {
+      writer.insertCandidates(adviceId, List.of(
+          CandidateRow.builder().ticker("T39").quantRank(1).quantScore(0.9).stockName("종목39").marketType("KOSPI").benchIndexCode("0001").sectorName("섹터3")
+              .signals(Map.of("MOM_20D", new SignalValue(0.98, 0.12, 0.975))).build(),
+          CandidateRow.builder().ticker("T38").quantRank(2).quantScore(0.8).stockName("종목38").marketType("KOSPI").benchIndexCode("0001")
+              .signals(Map.of("MOM_20D", new SignalValue(0.95, 0.12, 0.95))).build(),
+          CandidateRow.builder().ticker("T37").quantRank(3).quantScore(0.7).stockName("종목37").marketType("KOSDAQ").benchIndexCode("1001")
+              .signals(Map.of()).build()));
+
+      Map<String, Object> stored = advice.screeningTop(BASE.toString(), 2, context);
+      assertThat(stored).containsEntry("source", "STORED").containsEntry("adviceId", adviceId).containsEntry("weightSetId", activeSet)
+          .doesNotContainKeys("universe", "cut");
+      @SuppressWarnings("unchecked")
+      List<Map<String, Object>> items = (List<Map<String, Object>>) stored.get("items");
+      assertThat(items).hasSize(2);
+      assertThat(items.get(0)).containsEntry("rank", 1).containsEntry("tk", "T39").containsEntry("sector", "섹터3").containsEntry("score", 0.9);
+      assertThat(items.get(1)).containsEntry("rank", 2).containsEntry("tk", "T38").doesNotContainKey("sector");
+      @SuppressWarnings("unchecked")
+      Map<String, Object> sig = (Map<String, Object>) items.get(0).get("sig");
+      assertThat(sig).containsEntry("MOM_20D", 0.98);
+
+      jdbc.update("UPDATE tb_advisor_advice SET weight_set_id = NULL WHERE advice_id = ?", adviceId);
+      Map<String, Object> live = advice.screeningTop(BASE.toString(), 2, context);
+      assertThat(live).containsEntry("source", "LIVE").containsKeys("universe", "cut");
     } finally {
       jdbc.update("DELETE FROM tb_advisor_advice WHERE run_id = ?", runId);
       jdbc.update("DELETE FROM tb_advisor_run WHERE run_id = ?", runId);

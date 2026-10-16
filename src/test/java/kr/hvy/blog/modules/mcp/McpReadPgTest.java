@@ -127,6 +127,22 @@ class McpReadPgTest {
     assertThat(future.get("queryTo")).isEqualTo(kr.hvy.blog.modules.stock.domain.model.MarketClock.today().toString());
   }
 
+  @Test void perToolStatementTimeout() {
+    // screeningTop 실시간 경로만 15s(트랜잭션 20s), 나머지는 5s(10s) — 2026-10-16 P1-7
+    var manager = tx.getTransactionManager(); // jdbc 와 같은 DataSource 여야 SET LOCAL 이 같은 커넥션에 적용된다
+    for (var expected : Map.of("screeningTop", "15s", "testRead", "5s").entrySet()) {
+      var callback = org.mockito.Mockito.mock(org.springframework.ai.tool.ToolCallback.class);
+      org.mockito.Mockito.when(callback.getToolDefinition()).thenReturn(org.springframework.ai.tool.definition.ToolDefinition.builder()
+          .name(expected.getKey()).description("t").inputSchema("{\"type\":\"object\"}").build());
+      org.mockito.Mockito.when(callback.call(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
+          .thenAnswer(invocation -> "{\"statementTimeout\":\"" + jdbc.queryForObject("SHOW statement_timeout", String.class) + "\"}");
+      var result = McpConfig.call(callback, Map.of(), JsonMapper.builder().build(),
+          McpConfig.readTransaction(manager, McpConfig.TRANSACTION_TIMEOUT_S.getOrDefault(expected.getKey(), 10)), jdbc);
+      assertThat(result.isError()).as(expected.getKey()).isFalse();
+      assertThat(result.structuredContent().toString()).as(expected.getKey()).contains("statementTimeout=" + expected.getValue());
+    }
+  }
+
   @Test void toolBoundaryClassifiesTimeoutAndPreventsWrites() {
     var callback = org.mockito.Mockito.mock(org.springframework.ai.tool.ToolCallback.class);
     org.mockito.Mockito.when(callback.getToolDefinition()).thenReturn(org.springframework.ai.tool.definition.ToolDefinition.builder()

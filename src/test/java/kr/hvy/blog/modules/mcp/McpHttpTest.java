@@ -112,6 +112,13 @@ class McpHttpTest {
         assertThat(((McpSchema.TextContent)detail.content().getFirst()).text()).contains("\"picks\":[]").doesNotContain("systemFingerprint", "memoryJson", "raw_json");
         assertThat(client.callTool(new McpSchema.CallToolRequest("adviceDetail",Map.of("adviceId",999))).isError()).isTrue();
         assertThat(client.callTool(new McpSchema.CallToolRequest("stockSeries",Map.of("ticker","005930","type","PRICE"))).isError()).isFalse();
+        // screeningTop 저장 경로: 그날 DAILY LIVE 가 활성 세트로 저장한 후보가 있으면 mock 스크리닝(null 반환)을 타지 않고 STORED 로 답한다 (2026-10-16 P1-7)
+        jdbc.execute("INSERT INTO tb_stock_daily_metric(ticker,trade_date) VALUES ('005930','2026-01-02')");
+        jdbc.update("UPDATE tb_advisor_advice SET weight_set_id = (SELECT weight_set_id FROM tb_advisor_weight_set WHERE is_active LIMIT 1) WHERE advice_id = ?", adviceId);
+        jdbc.update("INSERT INTO tb_advisor_candidate(advice_id,ticker,quant_rank,quant_score,stock_name,market_type,bench_index_code,signal_json) VALUES (?,'005930',1,0.7,'삼성전자','KOSPI','0001','{}'::jsonb)", adviceId);
+        var screened = client.callTool(new McpSchema.CallToolRequest("screeningTop", Map.of("baseDate", "2026-01-02", "limit", 5)));
+        assertThat(screened.isError()).isFalse();
+        assertThat(screened.structuredContent().toString()).contains("STORED").contains("005930");
         assertThat(client.listResources().resources()).hasSize(3);
         for (String uri : java.util.List.of("stock://guide","advice://guide","stock://catalog"))
           assertThat(client.readResource(new McpSchema.ReadResourceRequest(uri)).contents()).isNotEmpty();

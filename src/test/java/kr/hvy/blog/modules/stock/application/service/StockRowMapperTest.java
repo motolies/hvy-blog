@@ -140,6 +140,28 @@ class StockRowMapperTest {
   }
 
   @Test
+  @DisplayName("밸류에이션: PER/PBR/EPS/BPS 의 KIS \"0.00\"(미산출)은 null, 음수 EPS(적자)·양수는 그대로, 시총 억원은 원 (2026-10-16)")
+  void valuationZeroRatiosAreNull() {
+    var zero = StockRowMapper.toValuationRow("005930", LocalDate.of(2026, 10, 15), price("0.00", "0.00", "0.00", "0.00"));
+    assertThat(zero.per()).isNull();
+    assertThat(zero.pbr()).isNull();
+    assertThat(zero.eps()).isNull();
+    assertThat(zero.bps()).isNull();
+    assertThat(zero.marketCap()).isEqualTo(4_000_000L * 100_000_000L);
+    var real = StockRowMapper.toValuationRow("005930", LocalDate.of(2026, 10, 15), price("12.3", "1.05", "-123", "45000"));
+    assertThat(real.per()).isEqualByComparingTo("12.3");
+    assertThat(real.pbr()).isEqualByComparingTo("1.05");
+    assertThat(real.eps()).as("적자 EPS 는 유지").isEqualByComparingTo("-123");
+    assertThat(real.bps()).isEqualByComparingTo("45000");
+    assertThat(StockRowMapper.toValuationRow("005930", LocalDate.of(2026, 10, 15), null)).isNull();
+  }
+
+  private static kr.hvy.blog.modules.stock.client.dto.KisPriceResponse.Output price(String per, String pbr, String eps, String bps) {
+    return new kr.hvy.blog.modules.stock.client.dto.KisPriceResponse.Output("005930", "70000", null, null, null, null, null, "4000000", "5969782550",
+        per, pbr, eps, bps, null, null, "50.5", null, null, null, null, null, null, null, null, null, null);
+  }
+
+  @Test
   @DisplayName("시장별 투자자: 31개 키 JSON 이 전부 역직렬화되고(접미사 예외 5개 포함) 15주체 대금은 원으로 환산되고 수량은 천주 그대로 행에 들어간다")
   void marketInvestorRows() throws Exception {
     String json;

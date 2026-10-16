@@ -59,15 +59,23 @@ public record MasterRecord(MasterFileLayout layout, String ticker, String standa
   }
 
   public String sectorLarge() {
-    return blankToNull(get(MasterFileLayout.SECTOR_LARGE));
+    return sectorCode(get(MasterFileLayout.SECTOR_LARGE));
   }
 
   public String sectorMid() {
-    return blankToNull(get(MasterFileLayout.SECTOR_MID));
+    return sectorCode(get(MasterFileLayout.SECTOR_MID));
   }
 
   public String sectorSmall() {
-    return blankToNull(get(MasterFileLayout.SECTOR_SMALL));
+    return sectorCode(get(MasterFileLayout.SECTOR_SMALL));
+  }
+
+  /**
+   * 지수업종 코드. 공백과 "0000" 같은 전부 0 은 미분류라 null — 2026-10-16 이전엔 "0000" 이 그대로 sector_map 에 들어가 stockSnapshot 섹터명이 "0000" 으로 나왔다(P2).
+   */
+  private static String sectorCode(String value) {
+    String code = blankToNull(value);
+    return code == null || code.chars().allMatch(c -> c == '0') ? null : code;
   }
 
   /**

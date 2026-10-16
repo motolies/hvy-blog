@@ -118,8 +118,10 @@ public class StockToolkit {
       ToolJson.put(m, "pbr", ToolJson.r4(s.pbr()));
       ToolJson.put(m, "foreignHoldRate", ToolJson.r4(s.foreignHoldRate()));
       ToolJson.put(m, "valuationAsOf", s.valuationDate() == null ? null : s.valuationDate().toString());
-      ToolJson.put(m, "sector", s.sectorName() == null ? s.sectorCode() : s.sectorName());
-      m.put("note", "수익률·이격은 비율(0.031 = 3.1%), 가격은 수정 종가(원). σ·RSI 는 제공하지 않는다");
+      // 2026-10-16: 섹터명이 없으면 코드("0000")를 이름 자리에 넣지 않는다 — sector 없음 = KRX 미분류. 코드는 sectorCode 로 따로
+      ToolJson.put(m, "sector", s.sectorName());
+      ToolJson.put(m, "sectorCode", s.sectorCode());
+      m.put("note", "수익률·이격은 비율(0.031 = 3.1%), 가격은 수정 종가(원). per/pbr 없음 = 결측·산출 불가, sector 없음 = KRX 미분류. σ·RSI 는 제공하지 않는다");
       return m;
     });
   }

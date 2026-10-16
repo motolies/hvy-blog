@@ -93,6 +93,19 @@ class StockMasterServiceTest {
     assertThat(result.themeSkipped()).isZero();
   }
 
+  @Test
+  @DisplayName("KRX 섹터 매핑: 중분류 \"0000\"(미분류, 2026-10-16 이전 저장 행)·null·비활성은 매핑 행을 만들지 않고 실제 코드만 만든다(이름 없으면 코드)")
+  void zeroSectorCodeMakesNoKrxRow() {
+    List<SectorMapRow> rows = StockMasterService.desiredSectorRows(List.of(
+        StockMaster.builder().ticker("011200").stockName("HMM").marketType(MarketType.KOSPI).securityGroup("ST").sectorMidCode("0000").active(true).build(),
+        StockMaster.builder().ticker("005930").stockName("삼성전자").marketType(MarketType.KOSPI).securityGroup("ST").sectorMidCode("0021").active(true).build(),
+        StockMaster.builder().ticker("000660").stockName("SK하이닉스").marketType(MarketType.KOSPI).securityGroup("ST").sectorMidCode("0021").active(false).build(),
+        StockMaster.builder().ticker("000020").stockName("동화약품").marketType(MarketType.KOSPI).securityGroup("ST").active(true).build()),
+        TODAY, Map.of("0021", "전기·전자"));
+    assertThat(rows).extracting(SectorMapRow::ticker).containsExactly("005930");
+    assertThat(rows.getFirst().sectorName()).isEqualTo("전기·전자");
+  }
+
   private static StockMaster master(String ticker) {
     return StockMaster.builder().ticker(ticker).stockName(ticker).marketType(MarketType.KOSPI).securityGroup("ST").build();
   }

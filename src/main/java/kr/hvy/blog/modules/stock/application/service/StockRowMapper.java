@@ -128,6 +128,8 @@ public final class StockRowMapper {
 
   /**
    * 현재가 스냅샷 → 밸류에이션 행. 시가총액(hts_avls)은 억원이라 원으로 환산한다. 응답이 비면 null.
+   * PER/PBR/EPS/BPS 의 "0.00" 은 KIS 의 미산출·산출 불가(적자·자본잠식) 표기라 null 로 둔다 — 0 으로 저장하면 VALUE_RANK(PBR 낮을수록 좋음)가 최고 밸류로 읽고
+   * stockSnapshot 이 결측을 0.0 으로 낸다(2026-10-16 P2). 가격이 양수인 한 실제 0 은 불가능하다.
    */
   public static ValuationRow toValuationRow(String ticker, LocalDate tradeDate, KisPriceResponse.Output o) {
     if (o == null) {
@@ -139,8 +141,13 @@ public final class StockRowMapper {
       marketCap = capHundredMillion.multiply(HUNDRED_MILLION).setScale(0, RoundingMode.HALF_UP).longValue();
     }
     return new ValuationRow(ticker, tradeDate, marketCap, KisValues.longValue(o.listedShares()),
-        KisValues.decimal(o.per()), KisValues.decimal(o.pbr()), KisValues.decimal(o.eps()), KisValues.decimal(o.bps()),
+        nonZero(KisValues.decimal(o.per())), nonZero(KisValues.decimal(o.pbr())), nonZero(KisValues.decimal(o.eps())), nonZero(KisValues.decimal(o.bps())),
         KisValues.decimal(o.week52High()), KisValues.decimal(o.week52Low()), KisValues.decimal(o.foreignHoldRate()));
+  }
+
+  /** 0 은 결측(KIS "0.00")으로 보고 null */
+  private static BigDecimal nonZero(BigDecimal value) {
+    return value == null || value.signum() == 0 ? null : value;
   }
 
   /**

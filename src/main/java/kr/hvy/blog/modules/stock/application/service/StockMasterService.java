@@ -249,10 +249,11 @@ public class StockMasterService implements CollectJob {
   /**
    * 활성 종목의 지수업종 중분류 → KRX 섹터 매핑 목표 상태.
    */
-  private List<SectorMapRow> desiredSectorRows(List<StockMaster> masters, LocalDate today, Map<String, String> indexNames) {
+  static List<SectorMapRow> desiredSectorRows(List<StockMaster> masters, LocalDate today, Map<String, String> indexNames) {
     List<SectorMapRow> rows = new ArrayList<>();
     for (StockMaster m : masters) {
-      if (m.isActive() && m.getSectorMidCode() != null) {
+      // "0000"(미분류)은 MasterRecord 가 null 로 정규화하지만, 2026-10-16 이전에 저장된 행이 남아 있을 수 있어 여기서도 거른다
+      if (m.isActive() && m.getSectorMidCode() != null && !m.getSectorMidCode().chars().allMatch(c -> c == '0')) {
         rows.add(new SectorMapRow(m.getTicker(), m.getSectorMidCode(), today,
             indexNames.getOrDefault(m.getSectorMidCode(), m.getSectorMidCode()), SectorMapRow.SOURCE_KRX));
       }

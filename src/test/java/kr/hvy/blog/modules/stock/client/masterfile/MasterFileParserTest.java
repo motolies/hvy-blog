@@ -27,6 +27,19 @@ class MasterFileParserTest {
   }
 
   @Test
+  @DisplayName("지수업종 코드가 \"0000\"(미분류)이면 null — 2026-10-16 이전엔 sector_map 에 '0000' 이 섹터명으로 들어갔다")
+  void zeroSectorCodeIsNull() {
+    String line = MasterLineBuilder.line(MasterFileLayout.KOSPI, "011200", "KR7011200003", "HMM", Map.of(
+        MasterFileLayout.GROUP_CODE, "ST", MasterFileLayout.SECTOR_LARGE, "0000", MasterFileLayout.SECTOR_MID, "0000", MasterFileLayout.SECTOR_SMALL, "0000",
+        MasterFileLayout.KOSPI200_SECTOR, "9", MasterFileLayout.LISTING_DATE, "19950726"));
+    MasterRecord r = parser.parse((line + "\r\n").getBytes(MasterFileParser.CP949), MasterFileLayout.KOSPI).get(0);
+    assertThat(r.sectorLarge()).isNull();
+    assertThat(r.sectorMid()).isNull();
+    assertThat(r.sectorSmall()).isNull();
+    assertThat(r.kospi200Sector()).isEqualTo("9");
+  }
+
+  @Test
   @DisplayName("코스피 줄을 파싱해 코드·한글명·꼬리 필드를 꺼낸다")
   void parseKospiLine() {
     String line = MasterLineBuilder.line(MasterFileLayout.KOSPI, "005930", "KR7005930003", "삼성전자", Map.of(

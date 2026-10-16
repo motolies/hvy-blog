@@ -200,6 +200,26 @@ class AdviceGuardTest {
   }
 
   @Test
+  @DisplayName("rsIdx 인용은 feature rsIdx20d 와 대조하고(2026-10-16 RS_INDEX 점수 제외), 그 전 후보는 RS_INDEX 시그널 원값으로 대조한다")
+  void citedRsIdxUsesFeatureThenLegacySignal() {
+    CandidateRow current = CandidateRow.builder().ticker("005930").quantRank(1).quantScore(0.5).stockName("n").marketType("KOSPI")
+        .benchIndexCode("0001").sectorCode("G2510").sectorName("반도체").signals(Map.of())
+        .features(Map.of("r20", 0.05, "rsIdx20d", 0.043)).appliedLessonIds(List.of()).build();
+    assertThat(guard.validate(rsIdxResponse(0.043), List.of(current), sectors, trends).picks()).hasSize(1);
+    assertThat(guard.validate(rsIdxResponse(0.09), List.of(current), sectors, trends).picks()).as("값이 다르면 폐기").isEmpty();
+
+    CandidateRow legacy = CandidateRow.builder().ticker("005930").quantRank(1).quantScore(0.5).stockName("n").marketType("KOSPI")
+        .benchIndexCode("0001").sectorCode("G2510").sectorName("반도체").signals(Map.of("RS_INDEX", new SignalValue(0.8, 0.08, 0.043)))
+        .features(Map.of("r20", 0.05)).appliedLessonIds(List.of()).build();
+    assertThat(guard.validate(rsIdxResponse(0.043), List.of(legacy), sectors, trends).picks()).as("옛 후보는 RS_INDEX 원값").hasSize(1);
+  }
+
+  private AdviceResponse rsIdxResponse(double value) {
+    return new AdviceResponse(new AdviceResponse.Regime("RISK_ON", "UP", "UP", "0.60", ""), outlook, List.of(),
+        List.of(pick("005930", "LONG", "0.60", List.of(new AdviceResponse.Cited("rsIdx", value)))), "");
+  }
+
+  @Test
   @DisplayName("추세 전망: enum 밖은 ABOUT_20D/NONE 폴백, 추세 방향과 모순된 무효화는 NONE 강등, 블록 자체가 없으면 기본값 — 픽 제거율엔 영향 없음")
   void outlookFallbacks() {
     CandidateRow c = candidate("005930", 0.081);

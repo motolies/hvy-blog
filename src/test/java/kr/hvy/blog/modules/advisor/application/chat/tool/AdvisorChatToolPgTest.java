@@ -277,7 +277,7 @@ class AdvisorChatToolPgTest {
     assertThat(advice.latestAdvice(null, null, context)).containsEntry("error", ToolJson.ERROR_NO_DATA);
     assertThat(advice.adviceChecks(FUTURE.toString(), context)).containsEntry("error", ToolJson.ERROR_NO_DATA);
 
-    Map<String, Object> screen = advice.screeningTop(FUTURE.toString(), 99, context);
+    Map<String, Object> screen = advice.screeningTop(FUTURE.toString(), 99, null, context);
     assertThat(screen).containsEntry("asOf", BASE.toString()).containsEntry("source", "LIVE").containsKeys("universe", "cut", "weightSetId");
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> items = (List<Map<String, Object>>) screen.get("items");
@@ -351,7 +351,7 @@ class AdvisorChatToolPgTest {
   }
 
   @Test
-  @DisplayName("screeningTop — 기준일 DAILY LIVE 판단이 활성 가중치 세트로 저장한 후보가 있으면 STORED(동결 스냅샷, rank 순·universe 없음), 세트가 다르면 LIVE 로 폴백")
+  @DisplayName("screeningTop — 기준일 DAILY LIVE 판단의 저장 후보가 있으면 세트와 무관하게 STORED(그날 세트, 다르면 activeWeightSetId 병기), live=true 만 LIVE 로 재계산")
   void screeningTopPrefersStoredCandidates() {
     Long runId = jdbc.queryForObject("INSERT INTO tb_advisor_run (job_type, trigger_type, status, created_at, updated_at) "
         + "VALUES ('ADVISE', 'API', 'SUCCESS', NOW(), NOW()) RETURNING run_id", Long.class);
@@ -368,9 +368,9 @@ class AdvisorChatToolPgTest {
           CandidateRow.builder().ticker("T37").quantRank(3).quantScore(0.7).stockName("종목37").marketType("KOSDAQ").benchIndexCode("1001")
               .signals(Map.of()).build()));
 
-      Map<String, Object> stored = advice.screeningTop(BASE.toString(), 2, context);
+      Map<String, Object> stored = advice.screeningTop(BASE.toString(), 2, null, context);
       assertThat(stored).containsEntry("source", "STORED").containsEntry("adviceId", adviceId).containsEntry("weightSetId", activeSet)
-          .doesNotContainKeys("universe", "cut");
+          .doesNotContainKeys("universe", "cut", "activeWeightSetId");
       @SuppressWarnings("unchecked")
       List<Map<String, Object>> items = (List<Map<String, Object>>) stored.get("items");
       assertThat(items).hasSize(2);
@@ -380,9 +380,14 @@ class AdvisorChatToolPgTest {
       Map<String, Object> sig = (Map<String, Object>) items.get(0).get("sig");
       assertThat(sig).containsEntry("MOM_20D", 0.98);
 
+      // 2차 점검(2026-10-16): 그날 판단이 다른 세트(여기서는 세트 없음)를 썼어도 그날 본 후보를 준다 — 현재 세트로 다시 계산하면 날짜마다 세트가 섞인다
       jdbc.update("UPDATE tb_advisor_advice SET weight_set_id = NULL WHERE advice_id = ?", adviceId);
-      Map<String, Object> live = advice.screeningTop(BASE.toString(), 2, context);
-      assertThat(live).containsEntry("source", "LIVE").containsKeys("universe", "cut");
+      Map<String, Object> otherSet = advice.screeningTop(BASE.toString(), 2, null, context);
+      assertThat(otherSet).containsEntry("source", "STORED").containsEntry("activeWeightSetId", activeSet).doesNotContainKey("weightSetId");
+      assertThat((String) otherSet.get("note")).contains("현재 활성 세트와 다르다");
+
+      Map<String, Object> live = advice.screeningTop(BASE.toString(), 2, true, context);
+      assertThat(live).containsEntry("source", "LIVE").containsEntry("weightSetId", activeSet).containsKeys("universe", "cut");
     } finally {
       jdbc.update("DELETE FROM tb_advisor_advice WHERE run_id = ?", runId);
       jdbc.update("DELETE FROM tb_advisor_run WHERE run_id = ?", runId);

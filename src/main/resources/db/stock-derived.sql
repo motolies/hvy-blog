@@ -99,7 +99,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_mv_stock_index_metric ON mv_stock_index_met
 CREATE INDEX IF NOT EXISTS idx_mv_stock_index_metric_date ON mv_stock_index_metric (trade_date);
 
 -- ---------------------------------------------
--- 섹터 일별 집계 (KRX 중분류 현재 매핑 기준). 매핑 이력은 구축일부터라 과거 구성은 현재 구성으로 근사한다(문서화된 편향).
+-- 섹터 일별 집계 (KRX 유효 업종 — 중분류, 없으면 비집계 대분류 — 현재 매핑 기준). 매핑 이력은 구축일부터라 과거 구성은 현재 구성으로 근사한다(문서화된 편향).
 -- near_high_ratio: 52주 고점의 95% 이상에 있는 종목 비율.
 -- ---------------------------------------------
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stock_sector_daily AS

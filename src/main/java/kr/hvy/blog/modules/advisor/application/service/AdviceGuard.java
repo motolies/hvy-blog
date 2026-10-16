@@ -392,6 +392,8 @@ public final class AdviceGuard {
     known.putIfAbsent("distHigh", known.get("distHigh52w"));
     known.putIfAbsent("frgnFlow", known.get("FOREIGN_FLOW"));
     known.putIfAbsent("instFlow", known.get("INST_FLOW"));
+    // rsIdx 는 2026-10-16 부터 feature rsIdx20d 에서 온다(RS_INDEX 점수 제외). 그 전 후보는 RS_INDEX 시그널 원값으로 메운다
+    known.putIfAbsent("rsIdx", known.get("rsIdx20d"));
     known.putIfAbsent("rsIdx", known.get("RS_INDEX"));
     known.putIfAbsent("vol20", known.get(CandidateScreeningService.FEATURE_VOL20D));
     // advice-v6: secCons 는 파생 열(1/0)이라 특징 맵에 없다 — 인용되면 같은 정의로 대조한다

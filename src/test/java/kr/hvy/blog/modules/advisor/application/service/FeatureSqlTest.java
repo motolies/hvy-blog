@@ -14,14 +14,17 @@ import org.junit.jupiter.api.Test;
 class FeatureSqlTest {
 
   @Test
-  @DisplayName("점수화 가능한 시그널은 표현식이 있는 13개, IC 학습 대상은 밸류를 뺀 12개다 (advice-v6: 섹터 모멘텀 2개 추가, 사전 합 1.10)")
+  @DisplayName("점수화 가능한 시그널은 표현식이 있는 12개, IC 학습 대상은 밸류를 뺀 11개다 (2026-10-16 RS_INDEX 제외, 사전 합 1.02)")
   void catalog() {
-    assertThat(SignalCode.scorable()).hasSize(13).doesNotContain(SignalCode.GLOBAL_LINK)
+    assertThat(SignalCode.scorable()).hasSize(12).doesNotContain(SignalCode.GLOBAL_LINK, SignalCode.RS_INDEX)
         .contains(SignalCode.SECTOR_MOM_20D, SignalCode.SECTOR_MOM_60D);
-    assertThat(SignalCode.learnable()).hasSize(12).doesNotContain(SignalCode.VALUE_RANK, SignalCode.GLOBAL_LINK);
+    assertThat(SignalCode.learnable()).hasSize(11).doesNotContain(SignalCode.VALUE_RANK, SignalCode.GLOBAL_LINK, SignalCode.RS_INDEX);
+    assertThat(SignalCode.RS_INDEX.isScorable()).as("단일 시장 유니버스에서 MOM_20D 와 순위가 같아 점수에서 뺐다").isFalse();
+    assertThat(SignalCode.VALUE_RANK.isScorable()).isTrue();
+    assertThat(SignalCode.VALUE_RANK.isLearnable()).as("밸류는 점수에는 들어가지만 IC 학습 대상이 아니다").isFalse();
     double baseSum = SignalCode.scorable().stream().mapToDouble(SignalCode::getBaseWeight).sum();
     // 점수는 Σw 로 정규화하므로 사전 합이 1.00 일 필요는 없다 — 시드(advisor-seed.sql)와 같은 값인지만 고정한다
-    assertThat(baseSum).isCloseTo(1.10, org.assertj.core.data.Offset.offset(1e-9));
+    assertThat(baseSum).isCloseTo(1.02, org.assertj.core.data.Offset.offset(1e-9));
     assertThat(SignalCode.SECTOR_MOM_60D.getExpression()).isEqualTo("f.sector_rs_60d");
   }
 

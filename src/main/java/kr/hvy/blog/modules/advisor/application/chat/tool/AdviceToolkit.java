@@ -340,7 +340,9 @@ public class AdviceToolkit {
     return spec == null ? Optional.empty() : Optional.ofNullable(spec.getKind());
   }
 
-  @Tool(name = "adviceChecks", description = "일일 판단에 대한 사후 점검과 채점: 아침 점검(07:30, 미국 마감×β 예상 갭, REINFORCE/HOLD/CAUTION), 장중 점검(12:00 일치율·판정), "
+  @Tool(name = "adviceChecks", description = "일일 판단에 대한 사후 점검과 채점: 아침 점검(07:30, 미국 마감×β 예상 갭, REINFORCE/HOLD/CAUTION — "
+      + "morning.detail.usClosed=true 는 판단 기준일 날짜의 미국 새 세션이 없었다(usDate < 기준일, 미국 휴장)는 뜻이며 '미국 장 마감 후' 가 아니다), "
+      + "장중 점검(12:00 지수 대비 앞선 픽 비율 agreement·판정, 지수 방향 적중은 comment 에 따로 — agreementBasis EXCESS(2026-10-16~)·ABSOLUTE(그 전, 전일 대비 상승 비율)), "
       + "픽별 채점(진입·청산가, 수익률, 벤치마크 대비 초과수익, 상태), 지수·섹터·추세 콜 채점(적중·Brier). baseDate 생략 시 가장 최근 판단. "
       + "'그 판단 맞았어?', '점검 결과는?' 에 쓴다. 채점은 청산일이 지나야 생긴다.")
   public Map<String, Object> adviceChecks(@ToolParam(required = false, description = "판단 기준일 yyyy-MM-dd. 생략하면 가장 최근") String baseDate, ToolContext context) {
@@ -371,6 +373,9 @@ public class AdviceToolkit {
         ToolJson.put(x, "at", r.checkedAt() == null ? null : r.checkedAt().atZone(MarketClock.KST).toLocalDateTime().withNano(0).toString());
         ToolJson.put(x, "verdict", r.verdict() == null ? null : r.verdict().getCode());
         ToolJson.put(x, "agreement", ToolJson.r4(r.agreementRatio()));
+        // 2026-10-16: 픽 일치 기준 전환 — 픽 JSON 에 agreeBasis 가 있으면 지수 대비 초과(EXCESS), 없으면 옛 전일 대비 절대 등락(ABSOLUTE)
+        boolean excessBasis = r.pickJson() != null && r.pickJson().stream().anyMatch(p -> p.containsKey("agreeBasis"));
+        x.put("agreementBasis", excessBasis ? "EXCESS" : "ABSOLUTE");
         ToolJson.put(x, "comment", r.comment());
         intraday.add(x);
       }
@@ -416,39 +421,48 @@ public class AdviceToolkit {
 
   @Tool(name = "screeningTop", description = "정량 스크리닝 상위 종목(판단과 같은 규칙: 시그널 백분위 가중 합, 1차 컷, 섹터당 상한). 종목마다 시그널 백분위(0~1)를 함께 주므로 "
       + "'왜 점수가 높지', '지금 정량 상위는?' 에 답할 수 있다. 백분위는 advisor.markets 시장 전체 기준이고 종목은 픽 유니버스(기본 KOSPI200 구성종목) 안에서만 고른다. "
-      + "LLM 픽이 아니라 순수 정량 순위다. source=STORED 면 그날 DAILY 판단이 같은 가중치로 저장한 후보(동결 스냅샷), LIVE 면 지금 계산한 결과다.")
+      + "LLM 픽이 아니라 순수 정량 순위다. source=STORED 면 그날 DAILY 판단이 저장한 후보(그날 쓴 가중치 세트 weightSetId 의 동결 스냅샷 — 현재 활성 세트와 다르면 "
+      + "activeWeightSetId 를 함께 준다), LIVE 면 현재 활성 세트로 지금 계산한 결과다(그날 판단이 없거나 live=true).")
   public Map<String, Object> screeningTop(
       @ToolParam(required = false, description = MarketToolkit.AS_OF_DESC) String baseDate,
-      @ToolParam(required = false, description = "종목 수 1~20 (기본 10)") Integer limit, ToolContext context) {
+      @ToolParam(required = false, description = "종목 수 1~20 (기본 10)") Integer limit,
+      @ToolParam(required = false, description = "true 면 저장 후보를 무시하고 현재 활성 가중치 세트로 다시 계산한다(느림). 기본 false") Boolean live,
+      ToolContext context) {
     return support.run("screeningTop", context, () -> {
       Optional<LocalDate> date = support.asOf(baseDate);
       if (date.isEmpty()) {
         return ToolJson.noData(null);
       }
-      Optional<WeightSet> set = weightSets.active(advisor.getHorizonDays());
-      if (set.isEmpty()) {
-        return ToolJson.error(ToolJson.ERROR_INTERNAL, "활성 가중치 세트가 없다(advisor-seed.sql 미적용)", date.get());
-      }
       int n = support.clampLimit(limit == null ? 10 : limit, SCREEN_CAP);
-      // 2026-10-16(P1-7): 기준일의 DAILY LIVE 판단이 같은 가중치 세트로 이미 스크리닝했으면 저장된 후보(동결 스냅샷)를 읽는다 — 실시간 CTE 는 5s statement_timeout 에
-      // 걸려 MCP 에서 항상 timeout 이었다. 판단이 없는 날(결손일)·세트가 바뀐 과거일만 실시간으로 계산한다
-      Optional<AdviceHeader> stored = adviceWriter.find(date.get(), AdviceKind.DAILY, AdviceVariant.LIVE);
-      if (stored.isPresent() && Objects.equals(stored.get().weightSetId(), set.get().weightSetId())) {
+      Optional<WeightSet> set = weightSets.active(advisor.getHorizonDays());
+      // 2026-10-16(P1-7): 기준일의 DAILY LIVE 판단이 있으면 저장된 후보(동결 스냅샷)를 읽는다 — 실시간 CTE 는 5s statement_timeout 에 걸려 MCP 에서 항상 timeout 이었다.
+      // 2차 점검(2026-10-16): 세트가 바뀐 과거일도 그날 판단이 실제로 본 후보(그날 세트)를 준다 — 현재 세트로 다시 계산해 날짜마다 세트가 섞이던 결함. live=true 만 재계산
+      Optional<AdviceHeader> stored = Boolean.TRUE.equals(live) ? Optional.empty() : adviceWriter.find(date.get(), AdviceKind.DAILY, AdviceVariant.LIVE);
+      if (stored.isPresent()) {
         List<CandidateRow> rows = adviceWriter.candidates(stored.get().adviceId());
         if (!rows.isEmpty()) {
           support.noteAsOf(context, date.get());
+          Long activeId = set.map(WeightSet::weightSetId).orElse(null);
+          boolean sameSet = Objects.equals(stored.get().weightSetId(), activeId);
           Map<String, Object> m = ToolJson.obj();
           m.put("asOf", date.get().toString());
           m.put("source", "STORED");
           m.put("adviceId", stored.get().adviceId());
           m.put("markets", advisor.getMarkets());
           m.put("pickUniverse", advisor.getPickUniverse().getCode());
-          m.put("weightSetId", stored.get().weightSetId());
+          ToolJson.put(m, "weightSetId", stored.get().weightSetId());
+          if (!sameSet) {
+            ToolJson.put(m, "activeWeightSetId", activeId);
+          }
           m.put("maxPerSector", advisor.getMaxPerSector());
           m.put("items", renderCandidates(rows.subList(0, Math.min(n, rows.size()))));
-          m.put("note", "그날 DAILY 판단이 저장한 후보(동결 스냅샷, universe·cut 미기록). sig 는 유니버스 안 백분위(1에 가까울수록 상위). score 는 가중 합 [-1,1]");
+          m.put("note", "그날 DAILY 판단이 저장한 후보(동결 스냅샷, universe·cut 미기록)" + (sameSet ? "" : " — 그날 판단이 쓴 세트라 현재 활성 세트와 다르다(현재 세트 순위는 live=true)")
+              + ". sig 는 유니버스 안 백분위(1에 가까울수록 상위). score 는 가중 합 [-1,1]");
           return m;
         }
+      }
+      if (set.isEmpty()) {
+        return ToolJson.error(ToolJson.ERROR_INTERNAL, "활성 가중치 세트가 없다(advisor-seed.sql 미적용)", date.get());
       }
       ScreeningResult result = screening.screen(date.get(), set.get(), n, advisor.getMaxPerSector());
       if (result.candidates().isEmpty()) {
@@ -465,7 +479,7 @@ public class AdviceToolkit {
       m.put("weightSetId", result.weightSetId());
       m.put("maxPerSector", advisor.getMaxPerSector());
       m.put("items", renderCandidates(result.candidates()));
-      m.put("note", "sig 는 유니버스 안 백분위(1에 가까울수록 상위). score 는 가중 합 [-1,1]");
+      m.put("note", "현재 활성 가중치 세트로 다시 계산한 결과 — 그날 판단이 쓴 세트와 다를 수 있다. sig 는 유니버스 안 백분위(1에 가까울수록 상위). score 는 가중 합 [-1,1]");
       return m;
     });
   }
@@ -495,7 +509,8 @@ public class AdviceToolkit {
   }
 
   @Tool(name = "performanceSummary", description = "최근 weeks 주(기본 8, 최대 52)의 판단 성과 요약: 변형별(LIVE 발행본·QUANT_TOPN 정량 섀도·LLM_NOMEM·LLM_NONEWS) 픽 수·적중률·"
-      + "평균 초과수익±표준오차·후보군 평균·부가가치(픽−후보군), 국면 콜 적중률·Brier skill, 추세 전망 적중률, 아침 점검 적중률, 확신 보정표. "
+      + "평균 초과수익±표준오차·후보군 평균·부가가치(픽−후보군), 국면 콜 적중률·Brier skill, 추세 전망 적중률, 아침 점검 적중률(임계 σ 기준별 byBasis), 확신 보정표. "
+      + "기간 안에 가중치 세트가 바뀌었으면 변형마다 byWeightSet(세트별 픽 KPI)을 준다 — 다른 점수 규칙이 섞인 합계라 세트별로도 읽는다. "
       + "'봇 성적 어때?', '적중률은?' 에 쓴다. n(표본 수)이 작으면 반드시 그 사실을 함께 말한다.")
   public Map<String, Object> performanceSummary(@ToolParam(required = false, description = "최근 몇 주 (1~52, 기본 8)") Integer weeks, ToolContext context) {
     return support.run("performanceSummary", context, () -> {
@@ -520,6 +535,18 @@ public class AdviceToolkit {
         ToolJson.put(x, "valueAdd", ToolJson.r4(v.valueAdd()));
         x.put("avoidPicks", v.avoidPicks());
         ToolJson.put(x, "avoidMeanExcess", ToolJson.r4(v.avoidMeanExcess()));
+        // 2026-10-16: 세트가 2개 이상 섞인 기간만 세트별 분해를 싣는다(한 세트면 합계와 같아 토큰만 쓴다)
+        if (v.byWeightSet().size() > 1) {
+          x.put("byWeightSet", v.byWeightSet().stream().map(s -> {
+            Map<String, Object> y = ToolJson.obj();
+            ToolJson.put(y, "weightSetId", s.weightSetId());
+            y.put("advices", s.advices());
+            y.put("picks", s.picks());
+            ToolJson.put(y, "hitRate", ToolJson.r4(s.hitRate()));
+            ToolJson.put(y, "meanExcess", ToolJson.r4(s.meanExcess()));
+            return y;
+          }).toList());
+        }
         variants.add(x);
         totalPicks += v.picks();
       }
@@ -543,6 +570,17 @@ public class AdviceToolkit {
       mo.put("calls", morning.calls());
       ToolJson.put(mo, "hitRate", ToolJson.r4(morning.hitRate()));
       ToolJson.put(mo, "cautionRate", ToolJson.r4(morning.cautionRate()));
+      // 2026-10-16: 임계 σ 기준별 분해 — CLOSE(종가 σ, 그 전 행)는 HOLD 가 거의 자동 적중이라 GAP 과 섞어 읽으면 안 된다
+      mo.put("byBasis", morning.byBasis().stream().map(b -> {
+        Map<String, Object> x = ToolJson.obj();
+        x.put("basis", b.basis());
+        x.put("calls", b.calls());
+        ToolJson.put(x, "hitRate", ToolJson.r4(b.hitRate()));
+        ToolJson.put(x, "cautionRate", ToolJson.r4(b.cautionRate()));
+        ToolJson.put(x, "meanThreshold", ToolJson.r4(b.meanThreshold()));
+        ToolJson.put(x, "meanAbsGap", ToolJson.r4(b.meanAbsGap()));
+        return x;
+      }).toList());
       m.put("morning", mo);
       List<Map<String, Object>> calibration = new ArrayList<>();
       for (AdvisorKpiService.CalibrationRow c : kpi.calibration(from, to)) {

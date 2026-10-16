@@ -21,7 +21,7 @@
 | 19:30~19:55 5분 간격 | **ADVISE** | `advisor-advise` `0 30/5 19 * * MON-FRI` | DAILY | 일일 판단(T+5) |
 | 금 20:10 | **ADVISE_H20** (M7) | `advisor-h20-advise` `0 10 20 * * FRI` | H20 | 20거래일 LLM 판단, h=20 세트 없으면 SKIPPED |
 | 금 20:20 (짝수 ISO 주만) | **ADVISE_H60** (M8) | `advisor-h60-advise` `0 20 20 * * FRI` | H60 | 규칙 선택 + LLM 서술. 홀수 주는 run 없이 반환 |
-| 평일 20:30 (그 달 첫 거래일만) | **ADVISE_H180** (M8) | `advisor-h180-advise` `0 30 20 * * MON-FRI` | H180 | 규칙 선택 + LLM 서술. 그 외 날은 run 없이 반환 |
+| 평일 20:30 (그 달 첫 거래일, 미발행이면 5거래일까지 따라잡기) | **ADVISE_H180** (M8) | `advisor-h180-advise` `0 30 20 * * MON-FRI` | H180 | 규칙 선택 + LLM 서술. 그 외 날은 run 없이 반환 |
 | 일 03:00 | stock WEEKLY | `stock-weekly` `0 0 3 * * SUN` | — | 재무(`tb_stock_financial`, M8 장기 팩터의 원천) 등 |
 | 일 08:00 | **WEEKLY_REVIEW** | `advisor-weekly-review` `0 0 8 * * SUN` | (DAILY 학습) | 학습 호라이즌(5·20)마다 가중치 세트, 교훈, 보고 |
 | 수동 | SCORE / IC_BACKFILL / ADVISE_ADHOC | — | ADHOC(채팅) | 채점 보충 / IC 사전 추정(`?horizon=`) / 채팅 `requestAdvice`(§1.10) |
@@ -218,7 +218,7 @@
   - 채점은 ScoreJob 이 M5 인프라로 60·180 창 하나로만 한다.
 - **주기**(`LongTermCadence`): cron 은 후보일마다 깨어나고, 주기가 아니면 run 없이 돌아간다.
   - H60 `ADVISE_H60`: 금 20:20, 짝수 ISO 주. 53주가 있는 해는 52주 → 2주 사이가 3주가 된다.
-  - H180 `ADVISE_H180`: 평일 20:30, 그 달 첫 거래일.
+  - H180 `ADVISE_H180`: 평일 20:30, 그 달 첫 거래일. 실패하거나 미발행이면 첫 5거래일 안에서 따라잡는다(`advisor.long-term.h180-catch-up-days`, `AdvisorGateService.h180Due` — 그 달 LIVE H180 이 없을 때만, 2026-10-16). 따라잡기 run 메타에 `catchUp`·`tradingDayOfMonth`.
   - 수동 API 는 주기와 무관하게 돈다. 잡 유형을 둘로 나눈 이유는 월초가 짝수 주 금요일이면 같은 저녁에 둘 다 돌기 때문이다(RUNNING 유니크가 유형 단위).
 - **판정 불가 라벨**: Slack 과 `AdvisorKpiService.VariantSummary.verdictLabel` 에 "판정 불가: 표본 부족, 2년 이상 필요" 가 붙는다. 조건은 결정 호라이즌이 learn=false(설정 맵 기반)인 종류다.
 - **적용 순서**: `20260925_04` SQL(주석만) → 앱 배포. 선행 백필은 없다. 재무 수집(WEEKLY)이 비어 있으면 커버리지 미달로 FAILED 가 나므로, 첫 실행 전에 `tb_stock_financial` 연간 행 수를 확인한다(migrate 파일의 확인 SQL).
@@ -341,6 +341,20 @@ MCP 점검(`plan/mcp.md` P0-6)에서 10/13 판단 근거에 "외국인 5일 순�
 - **같은 커밋 묶음(P0)**: 후보 feature `marketCap` 포화(`AdvisorMath.round6`)·`rsIdx20d` 지수 수익률 오매핑·노트 `vol20d` 키 — 판단 입력이 바뀌므로 아래 §8 창 재시작과 함께 본다.
 - **적용**: 코드 배포만(마이그레이션 없음). 확인: 다음 DAILY `GET /advices/{id}/prompt` 의 `market.flow` 값이 수천~수만 단위, `tb_advisor_advice.prompt_version='advice-v10'`. **전환일(첫 advice-v10 DAILY LIVE)을 §8 표에 적는다.** 롤백은 `PromptResources` 상수·파일 경로와 `AdvicePromptBuilder` 의 eok 호출을 함께 되돌린다.
 
+### 1.13 RS_INDEX 제외·가중치 하한 0·테마 동일가중·morning-v3 (advice-v11 · advice-h20-v4 · morning-v3 · longterm-v2, 2026-10-16)
+
+MCP 2차 점검(17건)에서 남은 결함을 고쳤다. 판정·조치 전체는 `mcp-feedback-2026-10-runbook.md` §9.
+
+- **RS_INDEX 점수·IC 제외**: 유니버스가 KOSPI 하나(`advisor.markets`)라 `ret_20d − index_ret_20d` 의 지수 항이 그날 상수다. 그래서 백분위·rank-IC 가 MOM_20D 와 완전히 같았고(세트 2·3 의 ĪC·se·t 끝자리까지 일치) 20일 모멘텀이 0.12+0.08 로 이중 가중됐다. `SignalCode.RS_INDEX` 는 표현식을 지워 상수만 남긴다(옛 세트·IC·교훈 행 참조). 후보 표 `rsIdx` 열·`AdviceGuard` 인용 대조는 feature `rsIdx20d`(같은 값)에서 읽는다. 시드 base 0, 활성 사전 합 1.02.
+- **가중치 하한 0·미검증 고정**: n_eff 게이트(24)와 prior(24)가 같아 축소 계수가 늘 0.5 → ĪC ≤ 0 이면 t 와 무관하게 하한 0.5(MOM_60D t=−2.16 도 0.5). `ic.multiplier-min: 0` 이면 m = (1+ĪC/0.03)/2 라 ĪC ≤ −0.03 에서 0(부호 반전 없음). 재정규화는 IC 로 검증된 시그널끼리만 하고 VALUE_RANK(IC 없음)는 base 0.05 고정 — 세트 2 에서 0.05 → 0.082 로 커지던 문제. 세트 2 의 IC 로 미리 보면 h=5 는 MOM_20D·MOM_60D·TREND_MA 가 0, h=20 은 TV_SURGE 까지 0 이다. **1차 컷은 모멘텀 기반인데 점수에는 모멘텀이 없는 구성**이 되며, 다음 WEEKLY 세트에서 IC 가 회복되면 자동으로 다시 들어온다. 학습 가중치가 전부 0 이면 세트 사유에 "⚠ 학습 시그널 가중치 전부 0".
+- **테마 강약 동일가중**: strength 를 KOSPI 종합 대비 rs20/rs60 대신 KOSPI200 전 구성 종목 중앙값 대비 rsEq20/rsEq60 으로 판정한다(임계 0.02 그대로, `Theme.basis="EQ"`). 10/14 기준 STRONG 9 → 3(산업재·에너지화학·생활소비재), 반도체(정보기술)는 rsEq 음수라 빠진다. 프롬프트 theme 열 끝에 rsEq20·rsEq60, `advisor.theme.names` 11개(1 건설 … B 커뮤니케이션서비스, 대표 종목으로 확인). advice-v11·h20-v4 는 테마 정의·BEAR "지수보다 약한" = rsIdx < 0·인용 이름 `theme.<code>.rsEq20`·rsIdx 는 r20 과 순서가 같음·weights 0 의 뜻·업종 대분류 표기, longterm-v2 는 테마 정의·결산기.
+- **morning-v3**: 평소 범위를 `|gapEst| < sigmaGap`(07:30 점검 임계와 같은 갭 σ)으로, "전부 KEEP 이 정답" 을 "픽별 thesis·risk 확인, KEEP 은 기본값" 으로, usClosed 를 "저녁 기준일 날짜의 미국 세션 없음" 으로. v2 는 sigma1d(종가 σ ≈ 갭 σ 의 2배) 기준이라 8거래일 픽 변경 0건.
+- **섹터 대분류 대체(stock 모듈)**: 비제조업(HMM·대한항공 0019, KB금융 0021 등)은 마스터에 대분류만 있어 KRX 섹터가 비었다 → 중분류, 없으면 비집계 대분류. SECTOR_STRENGTH·SECTOR_MOM 값이 생기고 섹터당 후보 상한·secCons 확신 상한이 이 종목들에도 업종별로 걸린다. `mv_stock_sector_daily` 는 현재 매핑으로 과거 전 기간을 다시 계산하므로 MASTER → DERIVED_REFRESH 뒤 IC_BACKFILL 을 **전체로** 돌린다. KOSDAQ 일부는 분류 코드가 전무해 여전히 미분류다.
+- **H60 장기 팩터 재무**: 2026-10-16 이전 H60 은 202606 Y 행(KIS 연간 응답에 붙은 상반기 누적)을 연간 재무로 썼다. migrate 08·결산월 필터 뒤에는 결산월 Y 만 쓴다.
+- **그 밖(판단 입력 불변)**: 장중 점검 픽 일치를 지수 대비 초과로(`pick_json[].agreeBasis`), flowProvisional 계산값, screeningTop 은 그날 세트의 STORED, KPI `byWeightSet`·`morning.byBasis`, H180 5거래일 따라잡기, MCP 단위 접미(`_won`·`_eok`·`_thou`·`_shr`).
+- note·lesson 출력 스키마 enum 에서 RS_INDEX 가 빠지고 섹터 코드가 늘어난다 — 선례(SECTOR_MOM 추가)대로 note-v1·lesson-v2 버전은 올리지 않는다.
+- **적용**: 런북 §9 순서(migrate 08·09 → 배포 → 10·11·12·13 → MASTER → DERIVED_REFRESH → IC_BACKFILL 전체). **전환일(첫 advice-v11 DAILY LIVE)을 §8 표에 적는다.** 롤백: 세트는 `POST /weights/sets/{id}/activate`(RS_INDEX 는 코드상 계속 제외), 프롬프트는 `PromptResources`·`THEME_COLUMNS`·`ThemeStrengthService` 를 함께 되돌린다.
+
 ### 1.2 미국 연동 (advice-v3, 2026-09-13)
 
 19:30 판단 시점의 미국 데이터는 **T-1 현지일 마감**이며 이미 국내 종가에 반영된 과거다(미국 당일 세션은 22:30 개장). 그래서 판단 입력에는 **연동 강도만** 넣고, 미국 정보가 전방인 유일한 구간인 **07:30 아침 점검**에서 예측 가치를 취한다.
@@ -359,7 +373,7 @@ MCP 점검(`plan/mcp.md` P0-6)에서 10/13 판단 근거에 "외국인 5일 순�
 | `advisor.model.judge-max-completion-tokens` / `assist-max-completion-tokens` | 8000 / 2000 (yml 20000 / 10000) | Responses `max_output_tokens`(추론 토큰 포함, 비용 손잡이). 잘리면 잡 FAILED `"max_output_tokens 에서 잘렸습니다"` — 상한을 올린다 |
 | `advisor.model.max-retries` / `timeout-seconds` | 3 / 120 | `OpenAiResponsesClient` 재시도(429·408·409·5xx·네트워크, Retry-After ≤30s) / `openAiRestClient` 응답 타임아웃. 세 모델 공통 |
 | `advisor.cost.*` | 0 | 100만 토큰당 USD. 채우면 run.cost_usd 계산 |
-| `advisor.prompt.version` | `advice-v8` | 프롬프트 버전(표기용 — 실제 로드는 `PromptResources.ADVICE_VERSION`·파일명 `prompts/advisor/advice-system-v8.md`). 파일을 고치면 둘을 같이 올린다. 종류별 프롬프트는 따로 있다: MORNING `advice-morning-v1`, H20 `advice-h20-v1`, H60·H180 `advice-longterm-v1`, 채팅 `chat-system-v2` |
+| `advisor.prompt.version` | `advice-v11` | 프롬프트 버전(표기용 — 코드는 읽지 않고 실제 로드·기록은 `PromptResources.ADVICE_VERSION`·파일명 `prompts/advisor/advice-system-v11.md`). 파일을 고치면 둘을 같이 올린다. 종류별 프롬프트는 따로 있다: MORNING `advice-morning-v3`, H20 `advice-h20-v4`, H60·H180 `advice-longterm-v2`, 채팅 `chat-system-v2` |
 | `advisor.advise.non-consistent-conviction-cap` / `overheated-sigma` | 0.70 / 2.0 | advice-v6 가드 클램프: `secCons=0`(소속 업종 지수가 1주·1개월·3개월 중 하나라도 시장 미달) 또는 `overheated` 섹터 LONG 픽의 확신 상한(CONVICTIONS 값 중 하나) / 섹터 과열 = 업종 지수 5일 수익률 > 배수 × σ_5d(KOSPI). stats `capNonConsistent`·`capOverheated` 로 준수율 관찰(§1.6) |
 | `advisor.note.enabled` | `${ADVISOR_NOTE_ENABLED:true}` | false 면 12:00 회고 LLM 호출(REFLECT)만 건너뛴다 — 정량·분류 노트는 그대로 저장(무료·결정론) |
 | `advisor.note.z-threshold` / `max-reflect-picks` | 1.0 / 10 | \|z\| 미만이면 FLAT(회고 생략) / 회고 호출 1건에 넣는 픽 상한(\|z\| 큰 순, assist 1회/일) |
@@ -494,7 +508,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 
 ## 8. 피드백 규율
 
-- 가중치: `m̂ = 1 + n_eff/(n_eff+24)·(ĪC/0.03 − 1)`, clip[0.5, 2.0], Σ 재정규화, 음의 IC 는 뒤집지 않고 하한+flagged. 세트는 새 행(이력), 픽은 세트 id 참조. 수동 롤백 `POST /weights/sets/{id}/activate`.
+- 가중치: `m̂ = 1 + n_eff/(n_eff+24)·(ĪC/0.03 − 1)`, clip[0, 2.0](2026-10-16 전 세트는 [0.5, 2.0]), IC 로 검증된 시그널끼리 Σ 재정규화(VALUE_RANK·IC 없음은 base 고정), 음의 IC 는 뒤집지 않고 하한(0)+flagged. 하한 0 의 근거는 §1.13. 세트는 새 행(이력), 픽은 세트 id 참조. 수동 롤백 `POST /weights/sets/{id}/activate`.
 - 교훈: 기계 판정 `condition`({regime, trend, signal, op, pct, sector}) + evidence(n≥20, |t|≥2) 필수, 종목코드 금지, 활성 ≤8, 활성 4주/적용 20건 후 (적용 − 비적용) ≤0 이면 폐기, 프롬프트에서는 **확신 조정만**. 생성기엔 누적 셀 집계표·보정 표·활성 교훈 사후 성과만 준다. `trend` 키(lesson-v2)는 스키마·판정에 있지만 생성기의 셀 집계는 아직 regime×시그널×섹터라 trend 조건 교훈은 수동 등록으로만 생긴다(후속). **셀의 t 는 base_date 클러스터 se**(2026-09-21, 사용자 결정 ③): 셀 안 픽을 기준일로 묶은 일별 평균 초과의 표본 표준편차/√D 를 se 로 쓰고 D(서로 다른 기준일 수) < 2 면 t=0 — 같은 날 5픽이 전부 +2% 여도 유의해지지 않는다. `Cell.n` 은 픽 수 그대로, `nDays` 가 생성기 입력에 추가(스키마·`LESSON_VERSION` 불변). 게이트 값(n≥20·|t|≥2·300) 은 그대로고 판정만 보수화된다.
 - recentOutcomes(빠른 층, note-v1): 프롬프트에는 **T+5 로 확정된 결정론 빈도표만**(≤5행, 창 20 거래일, `finalized_at·noted_at ≤ 기준일 20:00 KST`, 확정 ≥10 이면), 지시는 확신 **±0.05 한 단계 안**·underpowered(n<30) 참고만·종목 추가/제거/순위 변경 금지. LLM 회고 문장(deviation·why·hypothesis)·OPEN 노트·12:00 원문은 어떤 경로로도 프롬프트에 넣지 않는다(DB·Slack·관리자 기록용). 가드가 recentOutcomes 있는 날 conviction 변화폭을 검사하지는 않는다(원래 확신을 모름) — 대신 NOMEM 대조로 |Δconviction| 을 잰다. 빠른 층은 "규칙 문장" 이 아니라 "관찰 빈도표" 라서 교훈 게이트의 우회가 아니다.
 - **사전 등록 판정(NOMEM 8주, 2026-09-21 등록)**: 첫 메모리 주입 LIVE(`memory_json IS NOT NULL` 의 MIN(base_date)) + 8주 뒤 `GET /scores/summary` 변형 표와 주간 보고 `LIVE vs NOMEM` 줄로 판정한다. (a) 픽 Jaccard ≥ 0.9 ∧ 평균 |Δconviction| < 0.05 → 노트가 행동을 바꾸지 않음(inert) → `recentOutcomes` 주입 off(`note.min-finalized` 를 크게 올려 끈다). (b) 짝지은 일별 차 d̄(LIVE − NOMEM 초과) < −1se → 해침 → off. (c) 그 외 → 300 게이트(느린 층 시작)까지 유지, 그때 3요인 분리가 필요하면 `LLM_NONOTES` 4번째 변형을 검토. 8주로는 "바꾸는가·크게 해치는가" 만 답할 수 있음(σ≈2%/5일·n_eff≈N/3 → se≈0.55%/5일, 탐지 가능 효과 ≈1%/5일) — 0.2%/5일 을 t=2 로 보려면 약 1,200일이므로 8주 뒤 "효과 있음" 을 선언하지 않는다. 판정 규칙을 결과를 본 뒤 바꾸지 않는다.
@@ -515,6 +529,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
   - ★ **매수 전용 전환(2026-09-27, advice-v9·advice-h20-v2·morning-v2)으로 LLM 이 관여하는 판정은 창을 다시 연다** — 위 규율("판정 전에 프롬프트를 바꾸면 창을 다시 연다")대로 #1·#3·#4 의 시작일은 **v9 전환일 이후 첫 해당 행**이다. #2(QUANT 두 섀도)는 LLM 무관이라 창을 유지한다. 섀도 NOMEM·NONEWS 도 같은 스키마·프롬프트(advice-v9)로 바뀌어 LIVE 와 비교 조건이 같다.
     - 시작일 SQL: #1 `… AND memory_json IS NOT NULL AND prompt_version = 'advice-v9'`, #3 `SELECT MIN(base_date) FROM tb_advisor_advice WHERE advice_kind='MORNING' AND variant='LIVE' AND prompt_version='morning-v2'`, #4 `… advice_kind='H20' AND variant='LIVE' AND prompt_version='advice-h20-v2'`. v8 시절 행은 판정에 넣지 않는다(참고용).
   - ★ **수급 억원 전환(2026-10-16, advice-v10·advice-h20-v3, §1.12)과 후보 feature 정정(marketCap 포화·rsIdx20d·vol20d)으로 LLM 입력이 바뀌어 #1·#4 창을 다시 연다** — 시작일은 `prompt_version='advice-v10'` / `'advice-h20-v3'` 의 첫 LIVE 행. #3(morning-v2)은 저녁 payload 를 재사용하므로 저녁이 v10 인 첫 MORNING 행부터. #2(QUANT 두 섀도)는 LLM 무관이나 rsIdx20d·marketCap 은 feature_json 에만 있고 점수에 들어가지 않아 창을 유지한다.
+  - ★ **2차 점검 대응(2026-10-16, advice-v11·h20-v4·morning-v3, §1.13)으로 #1·#3·#4 창을 다시 연다.** 이번에는 점수 구성도 바뀐다(RS_INDEX 제외·하한 0·섹터 대분류 대체) — **#2(QUANT 두 섀도)도 창을 다시 연다.** 시작일은 `prompt_version='advice-v11'` / `'advice-h20-v4'` / `'morning-v3'` 의 첫 LIVE 행, #2 는 첫 advice-v11 DAILY 와 같은 기준일의 첫 QUANT 행. 세트가 섞인 기간은 `performanceSummary` `variants[].byWeightSet` 으로 나눠 읽는다.
     - **관망일의 d_i(등록, 결과를 보기 전)**: 한쪽만 관망이면 그쪽 픽 평균 초과를 0(현금)으로 둔다(`morningVsDaily` 와 같은 정의). 양쪽 다 관망이면 그날은 뺀다. #1 의 Jaccard 는 양쪽 다 관망이면 1, 한쪽만이면 0 이다. 관망 비율 자체는 판정 지표가 아니라 `abstainDays` 로 보고만 한다.
 - 재현성: 주 1회 직전 LIVE 입력 동결 재실행, Jaccard <0.7 이면 경고(LLM 랭킹 관여 축소 검토).
 - 룩어헤드 불변식: 특징 SQL 은 기준일 이하만(`FeatureSqlTest.noLookahead`, `AdvisorScreeningPgTest.futureRowsDoNotChangeScreening`), LEAD 는 IC·채점에만, 밸류에이션은 당일 스냅샷만(과거 IC 제외), 12:00 정보 소급 금지 — `tb_advisor_pick_note`·`tb_advisor_intraday_check` 를 `FeatureSql`·`SignalIcService`·`AdviceScoringService`·`LessonService`·`CandidateScreeningService`·`MarketFeatureService` 가 참조하지 않음을 `AdvisorSqlBoundaryTest` 가 소스 문자열로 단언한다.
@@ -676,7 +691,7 @@ SELECT ticker, action, left(action_reason, 60) FROM tb_advisor_pick WHERE advice
 
 - 20:10 H20: LIVE(`advice-h20-v1`)·QUANT_TOPN 각 1행, `horizon_days=20` 이어야 한다. 세트가 없으면 SKIPPED 가 정상이다.
 - 20:20 H60: 짝수 ISO 주에만 돈다.
-- 월 첫 거래일 20:30 H180.
+- 월 첫 거래일 20:30 H180(미발행이면 5거래일까지 따라잡기).
 - 확인 SQL 은 `20260925_04` 머리 주석에 있다. 장기 행은 `guard_json->>'narrative'`·`ruleOverride`·`weights` 를 본다.
 
 **9. 롤백**
@@ -720,7 +735,7 @@ COMMIT;
   - LLM 이 평소 8개 이하를 고르면 사실상 걸리지 않는다. 실효 제약은 확신 상한 0.70(HIGH 0.65)과 AVOID 4 쪽이다.
   - 더 강하게 하려면 수치를 바꾼 **regime-policy-v2** 를 새 버전으로 등록해야 한다. 결정 근거는 M0-2(BEAR 칸 LIVE 성과)와 M0-3 이다.
 - **`ic.reference-ic` 0.03 이 h=20 에서 상한에 붙을 가능성.**
-  - 배수는 `m̂ = 1 + shrink·(ĪC/0.03 − 1)`, clip[0.5, 2.0] 이다.
+  - 배수는 `m̂ = 1 + shrink·(ĪC/0.03 − 1)`, clip[0, 2.0] 이다(2026-10-16 전 세트는 하한 0.5).
   - 20일 rank-IC 는 5일보다 절대값이 커지기 쉽다(겹치는 수익 창). 그래서 여러 시그널이 동시에 2.0 에 붙으면 재정규화 뒤 가중치가 사실상 base 비율로 돌아가 학습 효과가 사라진다.
   - 첫 h=20 세트의 `multiplier` 분포를 본다. 절반 이상이 2.0 이면 호라이즌별 reference-ic 를 도입한다. 이는 코드 변경이다(`AdvisorProperties.Ic` 는 호라이즌 공통).
 - **실제 OpenAI 호출 미실측.** 아래 스키마는 테스트가 가짜 HTTP 로만 검증했다. 실제 모델의 strict 스키마 수용·토큰·지연은 첫 운영 실행이 실측이다.

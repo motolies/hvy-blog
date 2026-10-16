@@ -56,6 +56,37 @@ class LongTermCadenceTest {
     assertThat(count).as("1년 12회").isEqualTo(12);
   }
 
+  @Test
+  @DisplayName("H180 따라잡기 창: 그 달 몇 번째 거래일인지 세고(휴장 0), 첫 5거래일 안만 true — 창 1 은 첫 거래일 판정과 같다")
+  void h180CatchUpWindow() {
+    Set<LocalDate> holidays = Set.of(LocalDate.of(2026, 10, 1));
+    MarketCalendarService calendar = mock(MarketCalendarService.class);
+    when(calendar.isTradingDay(any())).thenAnswer(inv -> open(inv.getArgument(0), holidays));
+    when(calendar.lastTradingDayOnOrBefore(any())).thenAnswer(inv -> {
+      LocalDate d = inv.getArgument(0);
+      while (!open(d, holidays)) {
+        d = d.minusDays(1);
+      }
+      return d;
+    });
+
+    assertThat(LongTermCadence.tradingDayOfMonth(LocalDate.of(2026, 10, 1), calendar)).as("휴장").isZero();
+    assertThat(LongTermCadence.tradingDayOfMonth(LocalDate.of(2026, 10, 2), calendar)).isEqualTo(1);
+    assertThat(LongTermCadence.tradingDayOfMonth(LocalDate.of(2026, 10, 5), calendar)).isEqualTo(2);
+    assertThat(LongTermCadence.tradingDayOfMonth(LocalDate.of(2026, 10, 8), calendar)).isEqualTo(5);
+    assertThat(LongTermCadence.tradingDayOfMonth(LocalDate.of(2026, 10, 9), calendar)).isEqualTo(6);
+    assertThat(LongTermCadence.isWithinFirstTradingDays(LocalDate.of(2026, 10, 8), calendar, 5)).isTrue();
+    assertThat(LongTermCadence.isWithinFirstTradingDays(LocalDate.of(2026, 10, 9), calendar, 5)).as("6번째").isFalse();
+    assertThat(LongTermCadence.isWithinFirstTradingDays(LocalDate.of(2026, 10, 1), calendar, 5)).as("휴장").isFalse();
+    assertThat(LongTermCadence.isWithinFirstTradingDays(LocalDate.of(2026, 10, 10), calendar, 5)).as("토요일").isFalse();
+    long count = LocalDate.of(2026, 1, 1).datesUntil(LocalDate.of(2027, 1, 1))
+        .filter(d -> LongTermCadence.isWithinFirstTradingDays(d, calendar, 1)).count();
+    assertThat(count).as("창 1 = 첫 거래일 12회").isEqualTo(12);
+    assertThat(LocalDate.of(2026, 1, 1).datesUntil(LocalDate.of(2027, 1, 1))
+        .filter(d -> LongTermCadence.isWithinFirstTradingDays(d, calendar, 1) != LongTermCadence.isFirstTradingDayOfMonth(d, calendar)))
+        .isEmpty();
+  }
+
   private static boolean open(LocalDate d, Set<LocalDate> holidays) {
     return d.getDayOfWeek() != DayOfWeek.SATURDAY && d.getDayOfWeek() != DayOfWeek.SUNDAY && !holidays.contains(d);
   }

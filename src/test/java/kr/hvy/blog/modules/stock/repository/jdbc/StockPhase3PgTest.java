@@ -112,6 +112,43 @@ class StockPhase3PgTest {
   }
 
   @Test
+  @DisplayName("재무 정리 마이그레이션(20261016_08): 진행 중 회계연도 중간기간 Y 만 지우고(옛 회계연도 보존), 비율 0 은 NULL·차입금 의존도 0 은 유지하며 재실행해도 같다")
+  void financialCleanupMigrationIsIdempotent() throws Exception {
+    jdbc.update("INSERT INTO tb_stock_master (ticker, stock_name, market_type, security_group, settle_month, is_active, is_suspended, created_at, updated_at) VALUES "
+        + "('005930','삼성전자','KOSPI','ST','12',TRUE,FALSE,NOW(),NOW()), ('900001','결산변경','KOSPI','ST','12',TRUE,FALSE,NOW(),NOW())");
+    StockFinancialWriter writer = new StockFinancialWriter(jdbc);
+    // 결산월 필터 없는 3인자 merge — 마이그레이션 전 저장 상태 재현(202606 Y 가 들어 있다)
+    writer.apply("005930", FinancialRowMapper.merge("005930", false, List.of(List.of(
+        java.util.Map.of("stac_yymm", "202512", "sale_account", "3336059", "crnt_rate", "232.76", "bram_depn", "4.45"),
+        java.util.Map.of("stac_yymm", "202606", "sale_account", "3053729", "crnt_rate", "282.97", "bram_depn", "2.95")))));
+    writer.apply("005930", FinancialRowMapper.merge("005930", true, List.of(List.of(
+        java.util.Map.of("stac_yymm", "202606", "sale_account", "3053729", "quck_rate", "229.73")))));
+    writer.apply("900001", FinancialRowMapper.merge("900001", false, List.of(List.of(
+        java.util.Map.of("stac_yymm", "202303", "sale_account", "10"),
+        java.util.Map.of("stac_yymm", "202312", "sale_account", "12"),
+        java.util.Map.of("stac_yymm", "202506", "sale_account", "6")))));
+    // 옛 매퍼가 저장한 0(KIS 공란)
+    jdbc.update("UPDATE tb_stock_financial SET quick_ratio = 0, roe = 0, borrowing_dependency = 0 WHERE ticker = '005930' AND fiscal_period = '202512' AND period_type = 'Y'");
+
+    String script;
+    try (var in = getClass().getClassLoader().getResourceAsStream("db/migrate/20261016_08_financial_interim_annual_ratio_zero.sql")) {
+      assertThat(in).isNotNull();
+      script = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+    jdbc.execute(script);
+    jdbc.execute(script);
+
+    assertThat(jdbc.queryForList("SELECT ticker || ':' || fiscal_period || period_type FROM tb_stock_financial ORDER BY 1", String.class))
+        .containsExactly("005930:202512Y", "005930:202606Q", "900001:202303Y", "900001:202312Y");
+    java.util.Map<String, Object> y = jdbc.queryForMap(
+        "SELECT quick_ratio, roe, borrowing_dependency, current_ratio FROM tb_stock_financial WHERE ticker = '005930' AND fiscal_period = '202512'");
+    assertThat(y.get("quick_ratio")).isNull();
+    assertThat(y.get("roe")).isNull();
+    assertThat((BigDecimal) y.get("borrowing_dependency")).isEqualByComparingTo("0");
+    assertThat((BigDecimal) y.get("current_ratio")).isEqualByComparingTo("232.76");
+  }
+
+  @Test
   @DisplayName("ETF NAV 비율 컬럼 확장 마이그레이션은 재실행해도 안전하고 결과 정밀도가 12,4 다")
   void etfNavRateWidthMigrationIsIdempotent() throws Exception {
     String script;

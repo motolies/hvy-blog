@@ -224,19 +224,8 @@ public class LongTermAdviseJob {
     sectors.put("bottom", market.bottomSectors() == null ? List.of() : market.bottomSectors().stream().map(LongTermAdviseJob::sectorRow).toList());
     root.put("sectors", sectors);
     if (context != null && context.themes() != null && !context.themes().isEmpty()) {
-      List<List<Object>> themeRows = new ArrayList<>();
-      for (MarketRegime.Theme t : context.themes()) {
-        List<Object> row = new ArrayList<>();
-        row.add(t.code());
-        row.add(t.members());
-        row.add(AdvicePromptBuilder.round(t.rs5()));
-        row.add(AdvicePromptBuilder.round(t.rs20()));
-        row.add(AdvicePromptBuilder.round(t.rs60()));
-        row.add(AdvicePromptBuilder.round(t.breadth(), 3));
-        row.add(t.strength() == null ? null : t.strength().getCode());
-        row.add(t.leaders() == null ? List.of() : t.leaders());
-        themeRows.add(row);
-      }
+      // 열 정의를 일일 판단과 공유한다 — 헤더(THEME_COLUMNS)와 행이 따로 놀면 열 수가 어긋난다(longterm-v2: rsEq20·rsEq60 추가)
+      List<List<Object>> themeRows = context.themes().stream().map(AdvicePromptBuilder::themeRow).toList();
       root.put("theme", Map.of("columns", AdvicePromptBuilder.THEME_COLUMNS, "rows", themeRows));
     }
     List<String> columns = new ArrayList<>(List.of("rank", "tkr", "name", "sec", "theme", "score", "coverage", "fiscalPeriod"));

@@ -138,9 +138,14 @@ class AdvisorScreeningPgTest {
       assertThat(candidates.get(i).signals().get("SECTOR_MOM_20D").raw()).isNotNull();
       assertThat(candidates.get(i).signals().get("SECTOR_MOM_60D").pct()).isEqualTo(0.5);
       assertThat(candidates.get(i).signals().get("SECTOR_MOM_60D").raw()).isNull();
-      // 2026-10-15 P0-3 회귀: rsIdx20d 가 지수 20일 수익률이라 전 후보 동일하던 결함 → RS_INDEX 원값(종목 − 지수)과 같아야 한다
-      assertThat((Double) candidates.get(i).features().get("rsIdx20d")).as("rsIdx20d = ret_20d − index_ret_20d")
-          .isEqualTo(candidates.get(i).signals().get("RS_INDEX").raw());
+      // 2026-10-15 P0-3 회귀: rsIdx20d 가 지수 20일 수익률이라 전 후보 동일하던 결함 → 종목 − 지수. 같은 날 지수 수익률은 상수라
+      // rsIdx20d − r20 이 전 후보에서 같다 — 그래서 RS_INDEX 시그널(순위가 MOM_20D 와 같음)은 2026-10-16 점수에서 빠졌다
+      assertThat(candidates.get(i).signals()).as("RS_INDEX 는 점수·스냅샷 시그널이 아니다").doesNotContainKey("RS_INDEX");
+      double rsIdx = ((Number) candidates.get(i).features().get("rsIdx20d")).doubleValue();
+      double r20 = ((Number) candidates.get(i).features().get("r20")).doubleValue();
+      double negIndex = ((Number) candidates.get(0).features().get("rsIdx20d")).doubleValue()
+          - ((Number) candidates.get(0).features().get("r20")).doubleValue();
+      assertThat(rsIdx - r20).as("rsIdx20d = ret_20d − index_ret_20d (지수 항은 후보 공통)").isCloseTo(negIndex, org.assertj.core.data.Offset.offset(2e-6));
       // 2026-10-15 P0-2 회귀: 수급 raw(원/원 비율)가 6자리 반올림에 살아남는다 — 시드 foreign_net_5d=(i−20)·1e8, tv_avg_60d·5=1e10
       int n = Integer.parseInt(candidates.get(i).ticker().substring(1));
       assertThat(candidates.get(i).signals().get("FOREIGN_FLOW").raw()).as("FOREIGN_FLOW raw")
@@ -288,7 +293,9 @@ class AdvisorScreeningPgTest {
     assertThat(byCode.get("VALUE_RANK").multiplier()).isEqualTo(1.0);
     double sum = proposed.weights().stream().filter(SignalWeightRow::enabled).mapToDouble(SignalWeightRow::weight).sum();
     double baseSum = SignalCode.scorable().stream().mapToDouble(SignalCode::getBaseWeight).sum();
-    assertThat(sum).as("재정규화로 Σweight = Σbase(1.10, advice-v6 시드) — 소수 6자리 반올림이라 오차 ≤ 1e-5").isCloseTo(baseSum, org.assertj.core.data.Offset.offset(1e-5));
+    assertThat(sum).as("재정규화로 Σweight = Σbase(1.02, 2026-10-16 RS_INDEX 제외) — 소수 6자리 반올림이라 오차 ≤ 1e-5").isCloseTo(baseSum, org.assertj.core.data.Offset.offset(1e-5));
+    assertThat(byCode.get("VALUE_RANK").weight()).as("IC 미검증 밸류는 사전 가중치 고정(2026-10-16)").isEqualTo(0.05);
+    assertThat(byCode.get("RS_INDEX").enabled()).as("시드의 RS_INDEX 행은 비활성").isFalse();
     assertThat(byCode.get("SECTOR_MOM_60D").multiplier()).as("IC 없음 → 배수 1.0 유지").isEqualTo(1.0);
     assertThat(proposed.source()).isEqualTo(WeightSetSource.BACKFILL);
   }

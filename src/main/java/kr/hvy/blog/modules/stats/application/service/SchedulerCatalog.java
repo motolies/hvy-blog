@@ -102,7 +102,7 @@ public class SchedulerCatalog {
       new Definition("scheduler.advisor-h60-advise.lock-name", "AI 60거래일 규칙 추천(격주)",
           null, List.of("0 20 20 * * FRI"), "scheduler.advisor-h60-advise.enabled", "Asia/Seoul",
           ManualTrigger.advisor("ADVISE_H60")),
-      new Definition("scheduler.advisor-h180-advise.lock-name", "AI 180거래일 규칙 추천(월초)",
+      new Definition("scheduler.advisor-h180-advise.lock-name", "AI 180거래일 규칙 추천(월초, 5거래일 따라잡기)",
           null, List.of("0 30 20 1 * *"), "scheduler.advisor-h180-advise.enabled", "Asia/Seoul",
           ManualTrigger.advisor("ADVISE_H180")),
       new Definition("scheduler.advisor-weekly-review.lock-name", "AI 주간 검토(가중치·교훈·보고)",

@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 /**
  * 재무제표 수집(FINANCIAL_BACKFILL 잡 + 주간 재조회). 종목당 12호출(FinancialKind 6종 × 연/분기).
  * 값이 바뀐 결산기만 revision_seq+1 로 쌓이므로 주간 재조회는 정정 공시 감지기 역할을 한다.
+ * 연간은 마스터 결산월 행만 남긴다(FinancialRowMapper — KIS 연간 응답 끝의 진행 중 회계연도 중간기간 제외, 2026-10-16).
  */
 @Slf4j
 @Service
@@ -49,12 +50,13 @@ public class StockFinancialCollectService implements CollectJob {
     java.util.Set<String> targets = new java.util.HashSet<>(tickers);
     List<StockCollectCheckpoint> pending = checkpointService.findResumable(CollectJobType.FINANCIAL_BACKFILL, RESUMABLE_FETCH_LIMIT)
         .stream().filter(cp -> targets.contains(cp.getId().getTargetKey())).toList();
+    Map<String, String> settleMonths = targetResolver.settleMonths(tickers);
     runner.run(execution, pending, checkpoint -> {
       String ticker = checkpoint.getId().getTargetKey();
       checkpoint.start(execution.runId());
       StockCollectCheckpoint cp = checkpointService.save(checkpoint);
       try {
-        execution.addRows(collectOne(execution, ticker));
+        execution.addRows(collectOne(execution, ticker, settleMonths.get(ticker)));
         cp.markDone();
         execution.targetDone();
       } catch (RuntimeException e) {
@@ -71,9 +73,10 @@ public class StockFinancialCollectService implements CollectJob {
    * 주간 재조회: 체크포인트 없이 전 종목을 다시 받아 정정만 추가한다.
    */
   public void collectAll(CollectExecution execution, List<String> tickers) {
+    Map<String, String> settleMonths = targetResolver.settleMonths(tickers);
     runner.run(execution, tickers, ticker -> {
       try {
-        execution.addRows(collectOne(execution, ticker));
+        execution.addRows(collectOne(execution, ticker, settleMonths.get(ticker)));
         execution.targetDone();
       } catch (RuntimeException e) {
         execution.recordFailure(ticker, e.getMessage());
@@ -84,15 +87,17 @@ public class StockFinancialCollectService implements CollectJob {
 
   /**
    * 종목 1개: 연간·분기 각각 6종을 FinancialKind 선언 순서로 받아 결산기별로 합친 뒤 리비전 규칙으로 저장한다.
+   *
+   * @param settleMonth 마스터 결산월. null 이면 연간 행을 거르지 않는다
    */
-  int collectOne(CollectExecution execution, String ticker) {
+  int collectOne(CollectExecution execution, String ticker, String settleMonth) {
     int applied = 0;
     for (boolean quarterly : new boolean[]{false, true}) {
       List<List<Map<String, String>>> sources = new ArrayList<>();
       for (FinancialKind kind : FinancialKind.values()) {
         sources.add(marketDataPort.fetchFinancial(kind, ticker, quarterly, execution.context(ticker)));
       }
-      List<FinancialRow> rows = FinancialRowMapper.merge(ticker, quarterly, sources);
+      List<FinancialRow> rows = FinancialRowMapper.merge(ticker, quarterly, settleMonth, sources);
       applied += financialWriter.apply(ticker, rows);
     }
     return applied;

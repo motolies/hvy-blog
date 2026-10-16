@@ -5,7 +5,7 @@ import java.time.LocalDate;
 import java.util.Objects;
 
 /**
- * tb_stock_financial 1행(정정 이력 전). 금액 단위는 KIS 재무 API 응답 그대로(억원 추정, 실측 필요).
+ * tb_stock_financial 1행(정정 이력 전). 금액 단위는 KIS 재무 API 응답 그대로 억원(2026-10-16 실측 — 삼성전자 202512 매출 3,336,059 = 333.6조). Q 손익은 회계연도 누적(YTD).
  * available_from 은 룩어헤드 방지용 "이 날부터 알 수 있었다" 날짜다.
  * <p>
  * 핵심 10개(손익·대차·재무비율)와 2026-09-08 승격한 확장 9개(성장성·수익성·안정성)로 나뉜다.

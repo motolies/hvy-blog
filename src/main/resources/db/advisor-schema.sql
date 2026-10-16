@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS tb_advisor_weight_set
 
 COMMENT ON TABLE  tb_advisor_weight_set               IS '정량 시그널 가중치 세트. 픽은 그날 쓴 세트 id 를 참조해 재현 가능';
 COMMENT ON COLUMN tb_advisor_weight_set.weight_set_id IS '세트 식별자';
-COMMENT ON COLUMN tb_advisor_weight_set.as_of         IS '산출 기준일 (IC 창의 마지막 영업일)';
+COMMENT ON COLUMN tb_advisor_weight_set.as_of         IS '산출 기준일 = IC 창의 마지막 기준일 d (d+h 영업일 수익률이 실현된 마지막 날). 생성 시각(created_at)보다 h 영업일 이상 이르다';
 COMMENT ON COLUMN tb_advisor_weight_set.window_days   IS 'IC 집계 창(영업일). 시드는 0';
 COMMENT ON COLUMN tb_advisor_weight_set.n_eff         IS '겹침 보정 유효 표본 수 = 창/호라이즌';
 COMMENT ON COLUMN tb_advisor_weight_set.source        IS '출처: SEED 초기값 | BACKFILL 사전 추정 | WEEKLY 주간 갱신 | MANUAL 수동 활성';
@@ -121,15 +121,15 @@ CREATE TABLE IF NOT EXISTS tb_advisor_signal_weight
 COMMENT ON TABLE  tb_advisor_signal_weight               IS '세트 안 시그널별 가중치 (SignalCode)';
 COMMENT ON COLUMN tb_advisor_signal_weight.weight_set_id IS '세트 식별자';
 COMMENT ON COLUMN tb_advisor_signal_weight.signal_code   IS '시그널 코드 (SignalCode enum, code==상수명)';
-COMMENT ON COLUMN tb_advisor_signal_weight.base_weight   IS '사전 가중치 (설계값, 합 1.0)';
-COMMENT ON COLUMN tb_advisor_signal_weight.multiplier    IS 'IC 축소 추정 배수 clip[0.5, 2.0]. 시드·밸류 시그널은 1.0';
-COMMENT ON COLUMN tb_advisor_signal_weight.weight        IS '실제 적용 가중치 = base × multiplier 를 Σbase 로 재정규화한 값';
+COMMENT ON COLUMN tb_advisor_signal_weight.base_weight   IS '사전 가중치 (설계값, SignalCode.baseWeight 와 같다. 점수는 Σw 정규화라 합 1 불필요 — 2026-10-16 RS_INDEX 제외 뒤 활성 합 1.02)';
+COMMENT ON COLUMN tb_advisor_signal_weight.multiplier    IS 'IC 축소 추정 배수 clip[ic.multiplier-min, 2.0]. 2026-10-16 이후 세트는 하한 0(음의 IC 는 가중치 0 까지, 부호 반전 없음), 이전 세트는 0.5. 비학습(VALUE_RANK)·IC 없음·비활성 행은 1.0';
+COMMENT ON COLUMN tb_advisor_signal_weight.weight        IS '적용 가중치. 2026-10-16 이후 세트: IC 로 검증된 시그널은 base × multiplier 를 그들의 Σbase 로 재정규화, 비학습(VALUE_RANK)·IC 없음은 base 그대로, 표현식 없는 행(RS_INDEX)은 0·비활성. 이전 세트는 활성 전체 Σbase 재정규화';
 COMMENT ON COLUMN tb_advisor_signal_weight.enabled       IS '스크리닝 포함 여부 (false 면 점수에서 제외)';
 COMMENT ON COLUMN tb_advisor_signal_weight.ic_mean       IS '창 평균 rank-IC';
 COMMENT ON COLUMN tb_advisor_signal_weight.ic_se         IS '표준오차 = std / √n_eff';
 COMMENT ON COLUMN tb_advisor_signal_weight.t_stat        IS 'ic_mean / ic_se';
 COMMENT ON COLUMN tb_advisor_signal_weight.n_days        IS 'IC 를 계산한 영업일 수';
-COMMENT ON COLUMN tb_advisor_signal_weight.flagged       IS 'IC 가 음수(부호 반전 없이 하한 적용) 등 검토 필요 표시';
+COMMENT ON COLUMN tb_advisor_signal_weight.flagged       IS 'IC 음수(ĪC < 0 또는 t < −2) 등 검토 필요 표시. 부호는 뒤집지 않고 배수 하한까지만 내린다';
 COMMENT ON COLUMN tb_advisor_signal_weight.note          IS '비고';
 
 
@@ -193,7 +193,7 @@ COMMENT ON COLUMN tb_advisor_advice.trend_kospi        IS 'KOSPI 규칙 기반 �
 COMMENT ON COLUMN tb_advisor_advice.trend_kosdaq       IS 'KOSDAQ 규칙 기반 중기 추세';
 COMMENT ON COLUMN tb_advisor_advice.trend_json         IS '추세 상세 [{indexCode,code,score,components,since,days,ma20,ma60,ma120,breadth,base}]';
 COMMENT ON COLUMN tb_advisor_advice.outlook_json       IS 'LLM 추세 지속 전망 [{indexCode,persist,confidence,invalidation}] — h=20 패스에서 TREND·TREND_INV 로 채점';
-COMMENT ON COLUMN tb_advisor_advice.data_as_of_json    IS '입력 관측 기준일 {domestic,flow,sector,global,globalAgeTradingDays}';
+COMMENT ON COLUMN tb_advisor_advice.data_as_of_json    IS '입력 관측 기준일 {domestic,flow,flowProvisional,sector,global,globalAgeTradingDays,sectorIndex}. flowProvisional 은 2026-10-16 부터 계산값(flow 날짜보다 뒤 DAILY 가 시장 수급을 실패 없이 다시 받았으면 false), 그 전 행은 항상 true';
 COMMENT ON COLUMN tb_advisor_advice.entry_date         IS '적용 진입일(예정) = 기준일 다음 영업일 시가. 실제는 채점 시 캘린더로 재확정';
 COMMENT ON COLUMN tb_advisor_advice.exit_date          IS '적용 청산일(예정) = horizon 번째 영업일 종가';
 COMMENT ON COLUMN tb_advisor_advice.news_ids           IS '프롬프트에 실린 헤드라인 id 목록 ["N1",…] (advice-v4). 비어 있으면 뉴스 없이 판단';
@@ -209,7 +209,7 @@ COMMENT ON COLUMN tb_advisor_advice.published_at       IS 'Slack 발행 시각 (
 COMMENT ON COLUMN tb_advisor_advice.created_at         IS '생성일시';
 COMMENT ON COLUMN tb_advisor_advice.parent_advice_id   IS '아침 재판정(MORNING)이 다시 본 원 저녁 판단(DAILY LIVE) advice_id. 그 밖의 종류는 NULL (M4, 2026-09-25)';
 COMMENT ON COLUMN tb_advisor_advice.diff_json          IS '아침 재판정의 저녁 대비 조치 {parentAdviceId, keep:[{ticker,reason}], add:[…], drop:[{ticker,reason,direction,conviction}], triggers:{gap,sector,caution,any,…}, usDate}. 트리거는 호출 여부가 아니라 사후 분석(트리거일/비트리거일)용';
-COMMENT ON COLUMN tb_advisor_advice.regime_json        IS '합성 국면 스냅샷 (M6, 2026-09-25): {indexCode, tradeDate, trend, trendScore, vol LOW|NORMAL|HIGH|UNKNOWN, volPct(σ20 의 기준일 이전 최대 5년 분포 백분위), sigma20, volHistoryDays, policy{version,longMax,convictionCap}, themes[{code,members,rs5,rs20,rs60,breadth,strength,leaders}]}. policy.version 이 regime-policy-v1 인 행(2026-09-27 이전)은 policy.avoidMax 도 있다 — v2 는 매수 전용이라 없다. DAILY·ADHOC·H20 LIVE 와 LLM 섀도에 저장(H20 의 policy 는 advisor.h20 픽 상한으로 재계산), H60·H180 은 맥락 스냅샷(규칙 선택이라 policy NULL, M8), MORNING·QUANT 섀도·M6 이전 행은 NULL';
+COMMENT ON COLUMN tb_advisor_advice.regime_json        IS '합성 국면 스냅샷 (M6, 2026-09-25): {indexCode, tradeDate, trend, trendScore, vol LOW|NORMAL|HIGH|UNKNOWN, volPct(σ20 의 기준일 이전 최대 5년 분포 백분위), sigma20, volHistoryDays, policy{version,longMax,convictionCap}, themes[{code,name,members,rs5,rs20,rs60,rsEq5,rsEq20,rsEq60,breadth,strength,basis,leaders}]} — basis EQ(2026-10-16~, advice-v11)면 strength 는 rsEq20/rsEq60(동일가중 벤치) 기준, basis·name·rsEq 가 없는 행은 KOSPI 대비 rs20/rs60 기준. policy.version 이 regime-policy-v1 인 행(2026-09-27 이전)은 policy.avoidMax 도 있다 — v2 는 매수 전용이라 없다. DAILY·ADHOC·H20 LIVE 와 LLM 섀도에 저장(H20 의 policy 는 advisor.h20 픽 상한으로 재계산), H60·H180 은 맥락 스냅샷(규칙 선택이라 policy NULL, M8), MORNING·QUANT 섀도·M6 이전 행은 NULL';
 
 CREATE INDEX IF NOT EXISTS idx_advisor_advice_run ON tb_advisor_advice (run_id);
 
@@ -470,11 +470,11 @@ COMMENT ON COLUMN tb_advisor_intraday_check.check_id        IS '점검 식별자
 COMMENT ON COLUMN tb_advisor_intraday_check.advice_id       IS '점검 대상 판단 (전 영업일 LIVE)';
 COMMENT ON COLUMN tb_advisor_intraday_check.run_id          IS '점검 run';
 COMMENT ON COLUMN tb_advisor_intraday_check.checked_at      IS '점검 시각';
-COMMENT ON COLUMN tb_advisor_intraday_check.index_json      IS '지수 현재가 {"0001":{"price","changeRate","predicted","agree"}, ...}';
-COMMENT ON COLUMN tb_advisor_intraday_check.pick_json       IS '픽 현재가 [{"ticker","price","changeRate","direction","agree"}]';
-COMMENT ON COLUMN tb_advisor_intraday_check.agreement_ratio IS '예측 방향과 일치한 픽 비율';
-COMMENT ON COLUMN tb_advisor_intraday_check.verdict         IS 'ON_TRACK | MIXED | OFF_TRACK';
-COMMENT ON COLUMN tb_advisor_intraday_check.comment         IS '규칙 기반 요약';
+COMMENT ON COLUMN tb_advisor_intraday_check.index_json      IS '지수 현재가 {"0001":{"price","changeRate","open","predicted","agree"}, ...}. agree 는 지수 방향 예측 적중(UP 양·DOWN 음·NEUTRAL |등락| < 0.3%)';
+COMMENT ON COLUMN tb_advisor_intraday_check.pick_json       IS '픽 [{"ticker","direction","price","changeRate","agree","agreeBasis","open","sinceOpen","excess","z","class"}|{"ticker","direction","error"}]. agreeBasis(OPEN|PREV_CLOSE, 2026-10-16~)는 agree 를 정한 지수 대비 초과 기준 — 키가 없는 옛 행의 agree 는 전일 대비 절대 등락';
+COMMENT ON COLUMN tb_advisor_intraday_check.agreement_ratio IS '지수 대비 앞선 픽 비율(2026-10-16~): LONG 은 excess > 0, AVOID 는 ≤ 0 — excess 는 시가 기준(OPEN), 없으면 전일 종가 기준(PREV_CLOSE), 지수와 비교 불가한 픽은 분모 제외. 그 전 행은 전일 대비 상승 픽 비율';
+COMMENT ON COLUMN tb_advisor_intraday_check.verdict         IS 'ON_TRACK(agreement_ratio ≥ 0.6) | MIXED | OFF_TRACK(< 0.3). 지수 방향 적중은 index_json.*.agree';
+COMMENT ON COLUMN tb_advisor_intraday_check.comment         IS '규칙 기반 요약 — 픽의 지수 대비 판정 + 지수 방향 예측 적중 + 지수보다 약한 픽(2026-10-16~)';
 COMMENT ON COLUMN tb_advisor_intraday_check.created_at      IS '생성일시';
 
 CREATE TABLE IF NOT EXISTS tb_advisor_morning_check

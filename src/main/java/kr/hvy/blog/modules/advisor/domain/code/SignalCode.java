@@ -21,7 +21,11 @@ import lombok.Getter;
  * SECTOR_MOM_20D/60D(advice-v6, 2026-09-21)는 종목 소속 업종 지수(mv_stock_index_metric, tb_stock_sector_map.sector_code = 업종 코드)의
  * 20·60일 수익률에서 KOSPI(0001) 같은 창 수익률을 뺀 시장 대비 초과다. KOSPI 업종 지수는 KOSPI 종목만으로 구성된 시총가중 공식 지수라
  * 양시장 동일가중 MV(SECTOR_STRENGTH) 와 달리 KOSPI 후보의 구성과 어긋나지 않는다. 업종 지수가 없는 섹터는 NULL(점수 기여 0).
- * 사전 가중치 합은 1.10 이 되지만 점수는 Σw 로 정규화하므로 합 1.00 을 지킬 필요가 없다. 활성 세트에 행이 없으면(IC_BACKFILL 전) 점수에서 빠진다.
+ * 사전 가중치 합은 1.02 가 되지만 점수는 Σw 로 정규화하므로 합 1.00 을 지킬 필요가 없다. 활성 세트에 행이 없으면(IC_BACKFILL 전) 점수에서 빠진다.
+ * <p>
+ * RS_INDEX 는 2026-10-16 표현식을 지웠다(점수·IC 제외). 유니버스가 KOSPI 하나(advisor.markets)라 벤치마크 지수 수익률이 그날 모든 종목에 같은 상수이고,
+ * 순위 기반인 백분위·rank-IC 가 MOM_20D 와 완전히 같아 20일 모멘텀을 이중 가중했다. 옛 세트·IC·교훈 행이 코드를 참조하므로 상수는 남기고,
+ * 후보 표의 rsIdx 는 feat CTE 의 rs_idx_20d(feature rsIdx20d)에서 읽는다.
  */
 @Getter
 @AllArgsConstructor
@@ -37,7 +41,7 @@ public enum SignalCode implements EnumCode<String> {
   FOREIGN_FLOW("FOREIGN_FLOW", "외국인 5일 순매수 / 60일 평균 거래대금×5", "f.foreign_net_5d / NULLIF(f.tv_avg_60d * 5, 0)", true, 0.12, true),
   INST_FLOW("INST_FLOW", "기관 5일 순매수 / 60일 평균 거래대금×5", "f.institution_net_5d / NULLIF(f.tv_avg_60d * 5, 0)", true, 0.08, true),
   SECTOR_STRENGTH("SECTOR_STRENGTH", "섹터 5일 동일가중 등락 합", "f.sector_cw_5d", true, 0.10, true),
-  RS_INDEX("RS_INDEX", "지수 대비 20일 상대강도", "f.ret_20d - f.index_ret_20d", true, 0.08, true),
+  RS_INDEX("RS_INDEX", "지수 대비 20일 상대강도 (점수·IC 제외 — 단일 시장 유니버스에서 MOM_20D 와 순위 동일, 2026-10-16)", null, true, 0.00, false),
   VALUE_RANK("VALUE_RANK", "PBR (낮을수록)", "f.pbr", false, 0.05, false),
   VOL_20D("VOL_20D", "20일 변동성 (낮을수록)", "f.vol_20d", false, 0.03, true),
   SECTOR_MOM_20D("SECTOR_MOM_20D", "섹터(업종 지수) 20일 시장 대비 초과", "f.sector_rs_20d", true, 0.05, true),
@@ -70,12 +74,22 @@ public enum SignalCode implements EnumCode<String> {
 
   /** 종목 점수에 쓸 수 있는 시그널 (표현식 있음) */
   public static List<SignalCode> scorable() {
-    return Arrays.stream(values()).filter(s -> s.expression != null).toList();
+    return Arrays.stream(values()).filter(SignalCode::isScorable).toList();
   }
 
   /** IC 를 계산하는 시그널 (표현식 있고 학습 대상) */
   public static List<SignalCode> learnable() {
-    return Arrays.stream(values()).filter(s -> s.expression != null && s.icLearnable).toList();
+    return Arrays.stream(values()).filter(SignalCode::isLearnable).toList();
+  }
+
+  /** 이 시그널이 종목 점수에 들어가는지 (표현식 있음). 옛 세트에 행이 남은 RS_INDEX 처럼 표현식이 없으면 false */
+  public boolean isScorable() {
+    return expression != null;
+  }
+
+  /** 이 시그널의 배수를 IC 로 학습하는지 (점수 대상이면서 학습 대상) */
+  public boolean isLearnable() {
+    return isScorable() && icLearnable;
   }
 
   /** 장기 팩터 목록(M8, 선언 순) */

@@ -263,6 +263,12 @@ class AdviceScoringPgTest {
     assertThat(live.seExcess()).isPositive();
     assertThat(live.poolMeanExcess()).isNotNull();
     assertThat(live.valueAdd()).isCloseTo(live.meanExcess() - live.poolMeanExcess(), within(1e-12));
+    assertThat(live.byWeightSet()).as("세트 하나(픽스처 판단은 세트 없음)면 합계와 같은 1행").singleElement()
+        .satisfies(s -> {
+          assertThat(s.weightSetId()).isNull();
+          assertThat(s.picks()).isEqualTo(2);
+          assertThat(s.meanExcess()).isCloseTo(live.meanExcess(), within(1e-12));
+        });
 
     AdvisorKpiService.VariantSummary quant = kpi.variantSummary(AdviceVariant.QUANT_TOPN, D.getFirst(), D.getLast());
     assertThat(quant.picks()).isEqualTo(2);
@@ -550,7 +556,7 @@ class AdviceScoringPgTest {
     assertThat(scoring.morningScores(advice, 1, ScoreStage.PROVISIONAL)).as("점검 행 없음").isEmpty();
 
     Map<String, Object> detail = Map.of("index", Map.of(
-        "0001", Map.of("symbol", "SPX", "beta", 0.6, "usR1", 0.02, "gapEst", 0.012, "threshold", 0.01, "sigmaBasis", "GAP", "predicted", "UP", "verdict", "REINFORCE"),
+        "0001", Map.of("symbol", "SPX", "beta", 0.6, "usR1", 0.02, "gapEst", 0.012, "threshold", 0.01, "sigma", 0.01, "sigmaBasis", "GAP", "predicted", "UP", "verdict", "REINFORCE"),
         "1001", new java.util.HashMap<>(Map.of("symbol", "COMP", "threshold", 0.01, "verdict", "HOLD"))));
     long checkId = morningChecks.insert(kr.hvy.blog.modules.advisor.domain.model.MorningCheckRow.builder().adviceId(adviceId).runId(runId)
         .baseDate(D.get(10)).usDate(D.get(10)).gapKospi(0.012).verdict(kr.hvy.blog.modules.advisor.domain.code.MorningVerdict.REINFORCE).detailJson(detail).build());
@@ -578,6 +584,24 @@ class AdviceScoringPgTest {
 
     scoreWriter.upsertCallScores(rows);
     assertThat(kpi.morningSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast()).calls()).isEqualTo(1);
+    assertThat(kpi.morningSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast()).byBasis())
+        .extracting(AdvisorKpiService.MorningBasisRow::basis, AdvisorKpiService.MorningBasisRow::calls).containsExactly(org.assertj.core.groups.Tuple.tuple("GAP", 1));
+
+    // 2026-10-16: sigmaBasis 키가 없는 옛 행은 CLOSE, sigmaBasis 는 있는데 sigma 가 없으면(고정 임계 0.5%) FALLBACK 으로 따로 센다
+    scoreMorning(D.get(11), Map.of("symbol", "SPX", "gapEst", 0.012, "threshold", 0.04, "predicted", "UP", "verdict", "REINFORCE"));
+    scoreMorning(D.get(12), Map.of("symbol", "SPX", "gapEst", 0.012, "threshold", 0.005, "sigmaBasis", "GAP", "predicted", "UP", "verdict", "REINFORCE"));
+    AdvisorKpiService.MorningSummary summary = kpi.morningSummary(AdviceVariant.LIVE, D.getFirst(), D.getLast());
+    assertThat(summary.calls()).isEqualTo(3);
+    assertThat(summary.byBasis()).extracting(AdvisorKpiService.MorningBasisRow::basis).containsExactly("CLOSE", "FALLBACK", "GAP");
+    assertThat(summary.byBasis().getFirst().meanThreshold()).as("CLOSE 행의 임계").isEqualTo(0.04);
+  }
+
+  /** 기준일 date 에 LIVE 판단 1건 + KOSPI(0001) 아침 점검 detail 1행을 넣고 h=1 콜을 채점·저장한다 */
+  private void scoreMorning(LocalDate date, Map<String, Object> kospiDetail) {
+    long id = insertAdvice(date, AdviceVariant.LIVE, List.of(1), Map.of(1, PickDirection.LONG));
+    morningChecks.insert(kr.hvy.blog.modules.advisor.domain.model.MorningCheckRow.builder().adviceId(id).runId(runId).baseDate(date).usDate(date)
+        .gapKospi(0.012).verdict(kr.hvy.blog.modules.advisor.domain.code.MorningVerdict.REINFORCE).detailJson(Map.of("index", Map.of("0001", kospiDetail))).build());
+    scoreWriter.upsertCallScores(scoring.morningScores(adviceWriter.findById(id).orElseThrow(), 1, ScoreStage.PROVISIONAL));
   }
 
   @Test

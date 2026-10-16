@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.stock.domain.model.MarketClock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -21,10 +22,25 @@ import tools.jackson.databind.ObjectMapper;
 public class McpReadService {
   private final NamedParameterJdbcTemplate jdbc;
   private final ObjectMapper mapper;
-  public McpReadService(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper) {
+  private final Environment env;
+  public McpReadService(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper, Environment env) {
     this.jdbc = jdbc;
     this.mapper = mapper;
+    this.env = env;
   }
+
+  /** 수집·입력 스위치 1개: 설정 키, 꺼졌을 때 날짜가 멈추는 dataFreshness 키, 의미. defaultValue 는 키가 없을 때의 값(@ConditionalOnProperty 와 같게) */
+  record Switch(String flag, boolean defaultValue, List<String> sources, String effect) {
+  }
+
+  /**
+   * dataFreshness 가 함께 보여 주는 설정 스위치(2026-10-16, MCP 2차 점검). MACRO 9/18·NEWS 9/11·EVENT null 이 장애로 읽혔지만 실제로는 수집이 설정으로 꺼져 있었다.
+   */
+  static final List<Switch> FRESHNESS_SWITCHES = List.of(
+      new Switch("scheduler.stock-macro.enabled", false, List.of("MACRO"), "거시 지표 수집 꺼짐 — 날짜가 멈춘 것은 장애가 아니다"),
+      new Switch("scheduler.stock-eventfeed.enabled", false, List.of("EVENT", "NEWS"), "사건 피드(GDELT) 수집 꺼짐 — 날짜가 멈춘 것은 장애가 아니다"),
+      new Switch("advisor.news.enabled", false, List.of("NEWS"), "판단 입력에 뉴스를 쓰지 않는다"),
+      new Switch("kis.stats.enabled", true, List.of("MARKET_STAT"), "DAILY 시장 통계(공매도·신용·프로그램) 단계 꺼짐"));
   /** 조회 소스. projection 은 McpFields.COLUMNS 의 키(기본 table, 요약 투영은 "table:summary") */
   public record Source(String table, String code, String date, String key, String projection) {
     public Source(String table, String code, String date, String key) {
@@ -270,8 +286,26 @@ public class McpReadService {
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("today", MarketClock.today().toString());
     result.put("dataAsOf", dates);
+    result.put("disabled", disabledSwitches());
     result.put("latestAdviceByKind", advice);
     return result;
+  }
+
+  /**
+   * 꺼진 스위치 목록 [{flag, sources, effect}]. MCP 를 서빙하는 이 프로세스의 설정 기준이다 — 수집기를 다른 프로세스로 띄우면 그쪽 값과 다를 수 있다.
+   */
+  List<Map<String, Object>> disabledSwitches() {
+    List<Map<String, Object>> off = new ArrayList<>();
+    for (Switch s : FRESHNESS_SWITCHES) {
+      if (!Boolean.TRUE.equals(env.getProperty(s.flag(), Boolean.class, s.defaultValue()))) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("flag", s.flag());
+        m.put("sources", s.sources());
+        m.put("effect", s.effect());
+        off.add(m);
+      }
+    }
+    return off;
   }
 
   /** 소스 1개의 최신 날짜 스칼라 서브쿼리(::text). NEWS 는 KST 익일 자정 미만의 마지막 published_at 을 KST 날짜로 */

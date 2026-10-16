@@ -29,6 +29,8 @@ import org.springframework.stereotype.Component;
  * advice-v6: sectors 에 업종 지수 rs5/rs20/rs60·mom·consistent·overheated, candidates 에 소속 섹터의 secRs60·secCons(LLM 이 두 표를 조인하지 않게).
  * advice-v8(M6): 루트에 regime(합성 국면·정책 표 한도, dataQuality 뒤)·theme(KOSPI200 섹터 대분류 강약, sectors 뒤) 블록, candidates 맨 뒤에 theme 열.
  * advice-v10(2026-10-16): market.flow 의 frgn/inst/indi 1·5 와 sectors.frgn5 는 억원 정수(AdvisorMath.eok) — 입력 키·열 위치는 v9 와 같다.
+ * advice-v11(2026-10-16, 2차 점검): theme 블록 맨 뒤에 rsEq20·rsEq60 열(동일가중 벤치 대비) — strength 가 이 두 값으로 정해진다. 후보 rsIdx 열은
+ * feature rsIdx20d 에서 읽는다(RS_INDEX 시그널 점수 제외, 값은 같다). weights 의 0 은 최근 IC 가 음이라 점수에서 빠진 시그널이다.
  */
 @Component
 @RequiredArgsConstructor
@@ -38,7 +40,7 @@ public class AdvicePromptBuilder {
       "instFlow", "rsIdx", "per", "pbr", "vol20", "secRs60", "secCons", "theme");
   static final List<String> SECTOR_COLUMNS = List.of("code", "name", "cw5", "rising", "nearHigh", "frgn5", "members",
       "rs5", "rs20", "rs60", "mom", "consistent", "overheated");
-  static final List<String> THEME_COLUMNS = List.of("code", "members", "rs5", "rs20", "rs60", "breadth", "strength", "leaders");
+  static final List<String> THEME_COLUMNS = List.of("code", "members", "rs5", "rs20", "rs60", "breadth", "strength", "leaders", "rsEq20", "rsEq60");
 
   private final AdvisorProperties properties;
 
@@ -305,9 +307,9 @@ public class AdvicePromptBuilder {
   }
 
   /**
-   * 테마 1행(THEME_COLUMNS 순). rs·breadth 는 소수, leaders 는 대표 종목명 목록.
+   * 테마 1행(THEME_COLUMNS 순). rs·rsEq·breadth 는 소수, leaders 는 대표 종목명 목록. 장기 판단(LongTermAdviseJob)도 같은 행을 쓴다.
    */
-  private static List<Object> themeRow(MarketRegime.Theme t) {
+  static List<Object> themeRow(MarketRegime.Theme t) {
     List<Object> row = new ArrayList<>();
     row.add(t.code());
     row.add(t.members());
@@ -317,6 +319,8 @@ public class AdvicePromptBuilder {
     row.add(round(t.breadth(), 3));
     row.add(t.strength() == null ? null : t.strength().getCode());
     row.add(t.leaders() == null ? List.of() : t.leaders());
+    row.add(round(t.rsEq20()));
+    row.add(round(t.rsEq60()));
     return row;
   }
 
@@ -399,7 +403,7 @@ public class AdvicePromptBuilder {
     row.add(round(num(f.get("tvRatio"))));
     row.add(round(c.signals().containsKey("FOREIGN_FLOW") ? c.signals().get("FOREIGN_FLOW").raw() : null));
     row.add(round(c.signals().containsKey("INST_FLOW") ? c.signals().get("INST_FLOW").raw() : null));
-    row.add(round(c.signals().containsKey("RS_INDEX") ? c.signals().get("RS_INDEX").raw() : null));
+    row.add(round(num(f.get("rsIdx20d"))));   // 2026-10-16: RS_INDEX 시그널 제외 뒤에도 같은 식(종목 − 지수 20일)을 feature 에서 읽는다
     row.add(round(num(f.get("per")), 2));
     row.add(round(num(f.get("pbr")), 2));
     row.add(round(num(f.get("vol20d"))));

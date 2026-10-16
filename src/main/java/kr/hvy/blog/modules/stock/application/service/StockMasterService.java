@@ -31,7 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 종목 마스터 갱신(MASTER 잡): 마스터 파일 3종(kospi/kosdaq/idxcode) → tb_stock_master 덮어쓰기,
- * SCD2 이력, 섹터 매핑(KRX), 테마 매핑(theme_code.mst → THEME, N:M), 신규상장 체크포인트 생성. 상폐 종목은 비활성 처리만 하고 삭제하지 않는다.
+ * SCD2 이력, 섹터 매핑(KRX — 지수업종 중분류, 없으면 비집계 대분류), 테마 매핑(theme_code.mst → THEME, N:M), 신규상장 체크포인트 생성. 상폐 종목은 비활성 처리만 하고 삭제하지 않는다.
  * 테마 파일 실패는 마스터 갱신을 막지 않고 THEME 동기화만 건너뛴다(빈 목록으로 동기화하면 전 테마가 닫히므로).
  * <p>
  * 다운로드(네트워크)는 트랜잭션 밖에서 하고 DB 반영만 한 트랜잭션으로 묶는다.
@@ -44,6 +44,12 @@ public class StockMasterService implements CollectJob {
   static final int MIN_EXPECTED_RECORDS = 1_000;
   static final String INDEX_CODE_FILE = "idxcode";
   public static final String THEME_FILE = "theme_code";
+  /**
+   * 하위 업종을 묶는 상위 집계 지수 — 대분류가 이 코드면 업종이 아니라 섹터로 쓰지 않는다.
+   * 시장 집계(KOSPI 0001 종합·0002~0004 대·중·소형, KOSDAQ 1001~1004)와 제조 집계(KOSPI 0027·KOSDAQ 1009).
+   */
+  static final Set<String> AGGREGATE_SECTOR_CODES = Set.of("0001", "0002", "0003", "0004", "0027",
+      "1001", "1002", "1003", "1004", "1009");
 
   private final MasterFileDownloader downloader;
   private final MasterFileParser parser;
@@ -247,17 +253,37 @@ public class StockMasterService implements CollectJob {
   }
 
   /**
-   * 활성 종목의 지수업종 중분류 → KRX 섹터 매핑 목표 상태.
+   * 활성 종목의 유효 지수업종({@link #effectiveSectorCode}) → KRX 섹터 매핑 목표 상태.
    */
   static List<SectorMapRow> desiredSectorRows(List<StockMaster> masters, LocalDate today, Map<String, String> indexNames) {
     List<SectorMapRow> rows = new ArrayList<>();
     for (StockMaster m : masters) {
-      // "0000"(미분류)은 MasterRecord 가 null 로 정규화하지만, 2026-10-16 이전에 저장된 행이 남아 있을 수 있어 여기서도 거른다
-      if (m.isActive() && m.getSectorMidCode() != null && !m.getSectorMidCode().chars().allMatch(c -> c == '0')) {
-        rows.add(new SectorMapRow(m.getTicker(), m.getSectorMidCode(), today,
-            indexNames.getOrDefault(m.getSectorMidCode(), m.getSectorMidCode()), SectorMapRow.SOURCE_KRX));
+      String code = m.isActive() ? effectiveSectorCode(m) : null;
+      if (code != null) {
+        rows.add(new SectorMapRow(m.getTicker(), code, today, indexNames.getOrDefault(code, code), SectorMapRow.SOURCE_KRX));
       }
     }
     return rows;
+  }
+
+  /**
+   * 종목의 유효 지수업종 코드: 중분류가 있으면 중분류, 없으면 집계가 아닌 대분류, 둘 다 아니면 null(미분류).
+   * KRX 마스터는 제조업만 대분류 0027(제조 집계) 아래 중분류(0013 전기·전자 등)를 두고, 비제조업은 대분류 자체가 업종이다
+   * (HMM 0019 운송·창고, KB금융 0021 금융 — 중분류 null). 중분류만 보던 2026-10-16 이전에는 비제조업 전체가 미분류였다.
+   */
+  static String effectiveSectorCode(StockMaster m) {
+    String mid = validSectorCode(m.getSectorMidCode());
+    if (mid != null) {
+      return mid;
+    }
+    String large = validSectorCode(m.getSectorLargeCode());
+    return large == null || AGGREGATE_SECTOR_CODES.contains(large) ? null : large;
+  }
+
+  /**
+   * 업종 코드 정규화: null·전부 0("0000" — MasterRecord 가 null 로 정규화하지만 2026-10-16 이전 저장 행이 남을 수 있다)은 null.
+   */
+  private static String validSectorCode(String code) {
+    return code == null || code.isBlank() || code.chars().allMatch(c -> c == '0') ? null : code;
   }
 }

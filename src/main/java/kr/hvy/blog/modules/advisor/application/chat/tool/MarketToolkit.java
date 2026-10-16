@@ -107,8 +107,10 @@ public class MarketToolkit {
     });
   }
 
-  @Tool(name = "marketTrend", description = "KOSPI(0001)·KOSDAQ(1001)의 규칙 기반 중기 추세 라벨(BULL 강세 / SIDEWAYS 보합 / BEAR 약세)과 성분 5개 점수(ma20, ma60, ma120, "
-      + "ret60, breadth), 전환 이후 경과 거래일, 기저율(같은 라벨에서 전방 5일·20일 상승 확률과 평균 수익률, 에피소드 평균 길이)을 돌려준다. "
+  @Tool(name = "marketTrend", description = "KOSPI(0001)·KOSDAQ(1001)의 규칙 기반 중기 추세 라벨(BULL 강세 / SIDEWAYS 보합 / BEAR 약세)과 성분 5개 점수(각 −1/0/+1: "
+      + "components.ma20 = 종가 vs MA20, components.ma60 = MA20 vs MA60 배열(종가 vs MA60 이 아니다), components.ma120 = MA60 vs MA120 배열, ret60 = 60일 수익률, "
+      + "breadth = MA20 상회 종목 비율), 전환 이후 경과 거래일, 기저율(같은 라벨에서 전방 5일·20일 상승 확률과 평균 수익률, 에피소드 평균 길이)을 돌려준다. "
+      + "같은 응답의 ma20/ma60/ma120 숫자는 이동평균 값 자체다. "
       + "'강세장이야?', '추세가 얼마나 갈까?' 류 질문에 쓴다. 라벨은 LLM 이 아니라 규칙이 정한다.")
   public Map<String, Object> marketTrend(@ToolParam(required = false, description = AS_OF_DESC) String asOf, ToolContext context) {
     return support.run("marketTrend", context, () -> {
@@ -124,7 +126,11 @@ public class MarketToolkit {
       Map<String, Object> m = ToolJson.obj();
       m.put("asOf", date.get().toString());
       AdvisorProperties.Trend cfg = advisor.getTrend();
-      m.put("rule", String.format("성분 합 ≥%d BULL, ≤%d BEAR, 그 사이 SIDEWAYS. 전환은 %d거래일 연속 확인 후", cfg.getBullThreshold(), cfg.getBearThreshold(), cfg.getConfirmDays()));
+      // 2026-10-16(MCP 2차 점검): 성분 ma60 이 "종가 vs MA60" 으로 읽혀 종가가 MA60 아래인데 +1 인 것을 결함으로 본 사례 — 성분 정의를 함께 싣는다(TrendSql)
+      m.put("rule", String.format("성분 합 ≥%d BULL, ≤%d BEAR, 그 사이 SIDEWAYS. 전환은 %d거래일 연속 확인 후. 성분(각 −1/0/+1): ma20 = 종가 vs MA20, "
+              + "ma60 = MA20 vs MA60 배열, ma120 = MA60 vs MA120 배열, ret60 = 60일 수익률 ≥ +%.2f 이면 +1·≤ −%.2f 이면 −1, breadth = MA20 상회 종목 비율 ≥ %.2f 이면 +1·≤ %.2f 이면 −1",
+          cfg.getBullThreshold(), cfg.getBearThreshold(), cfg.getConfirmDays(), cfg.getRet60Threshold(), cfg.getRet60Threshold(), cfg.getBreadthHigh(),
+          cfg.getBreadthLow()));
       m.put("items", trends.stream().map(t -> {
         Map<String, Object> x = trendBrief(t);
         ToolJson.put(x, "rawCode", t.rawCode() == null ? null : t.rawCode().getCode());
@@ -149,8 +155,9 @@ public class MarketToolkit {
   }
 
   @Tool(name = "marketRegime", description = "규칙이 정한 합성 국면(M6): KOSPI 추세(BULL/SIDEWAYS/BEAR) × 변동성 국면(20일 변동성의 과거 5년 백분위로 LOW/NORMAL/HIGH), "
-      + "그 국면에 사전 등록된 정책 표의 오늘 한도(LONG 픽 최대 수·LONG 확신 상한·AVOID 최대 수 — 판단 가드가 강제), KOSPI200 섹터 대분류(테마)별 강약"
-      + "(구성 종목 중앙값 수익률의 KOSPI 대비 초과 rs5/20/60, 20일선 위 비율, STRONG/NEUTRAL/WEAK, 대표 종목). '지금 약세장이야?', '변동성 높아?', "
+      + "그 국면에 사전 등록된 정책 표의 오늘 한도(LONG 픽 최대 수·LONG 확신 상한 — 판단 가드가 강제), KOSPI200 섹터 대분류(테마)별 강약"
+      + "(구성 종목 중앙값 수익률의 KOSPI 대비 초과 rs5/20/60, 동일가중 벤치 대비 초과 rsEq5/20/60, 20일선 위 비율, 대표 종목, "
+      + "STRONG/NEUTRAL/WEAK — basis EQ 면 rsEq20/rsEq60 기준). '지금 약세장이야?', '변동성 높아?', "
       + "'어떤 테마가 강해?', '왜 픽이 적어?' 에 쓴다. 전부 규칙 계산이며 LLM 판단이 아니다.")
   public Map<String, Object> marketRegime(@ToolParam(required = false, description = AS_OF_DESC) String asOf, ToolContext context) {
     return support.run("marketRegime", context, () -> {
@@ -170,7 +177,8 @@ public class MarketToolkit {
       m.put("rule", String.format("변동성 국면 = %s %d일 σ 의 직전 최대 %d년 분포 백분위: < %.2f LOW, ≥ %.2f HIGH, 표본 < %d 이면 UNKNOWN. 정책 표 %s 는 사전 등록 — 수치 변경 시 새 버전",
           cfg.getIndexCode(), cfg.getVolWindowDays(), cfg.getVolLookbackYears(), cfg.getVolLowPct(), cfg.getVolHighPct(), cfg.getVolMinHistoryDays(),
           cfg.getPolicy().getVersion()));
-      m.put("note", "rs 는 소수(0.021 = 2.1%p), KOSPI 대비. rsEq 는 KOSPI200 전 구성 종목 중앙값 대비(동일가중, 시장 전체가 눌릴 때 상대 강도). strength 는 rs20/rs60 기준. "
+      m.put("note", "rs 는 소수(0.021 = 2.1%p), KOSPI 대비. rsEq 는 KOSPI200 전 구성 종목 중앙값 대비(동일가중, 시장 전체가 눌릴 때 상대 강도). "
+          + "strength 는 basis 기준 — EQ 면 rsEq20 ≥ ±0.02·rsEq60 부호(2026-10-16~), basis 가 없는 과거 저장분은 KOSPI 대비 rs20/rs60. "
           + "테마 code 는 KOSPI200 섹터 대분류 코드이며 name 은 설정 매핑(없으면 leaders 대표 종목으로 성격을 읽는다). 구성은 그날 기준(PIT)");
       return m;
     });
@@ -205,12 +213,13 @@ public class MarketToolkit {
         ToolJson.put(x, "rs5", ToolJson.r4(t.rs5()));
         ToolJson.put(x, "rs20", ToolJson.r4(t.rs20()));
         ToolJson.put(x, "rs60", ToolJson.r4(t.rs60()));
-        // 2026-10-16: 동일가중 벤치(전 구성 종목 중앙값) 대비 — KOSPI 가 반도체 대형주에 끌려 눌릴 때 테마 대부분이 STRONG 으로 보이는 편향의 대조용. strength 는 rs20/rs60 기준 그대로
+        // 2026-10-16: 동일가중 벤치(전 구성 종목 중앙값) 대비 — KOSPI 가 반도체 대형주에 끌려 눌릴 때 테마 대부분이 STRONG 으로 보이던 편향 때문에 strength 를 이 기준(basis EQ)으로 바꿨다
         ToolJson.put(x, "rsEq5", ToolJson.r4(t.rsEq5()));
         ToolJson.put(x, "rsEq20", ToolJson.r4(t.rsEq20()));
         ToolJson.put(x, "rsEq60", ToolJson.r4(t.rsEq60()));
         ToolJson.put(x, "breadth", ToolJson.r4(t.breadth()));
         ToolJson.put(x, "strength", t.strength() == null ? null : t.strength().getCode());
+        ToolJson.put(x, "basis", t.basis());
         ToolJson.put(x, "leaders", t.leaders());
         return x;
       }).toList());

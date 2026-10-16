@@ -25,6 +25,7 @@ public final class FeatureSql {
    * <p>
    * sector_rs_5d/20d/60d(advice-v6) 는 소속 업종 지수(six, index_code = sector_code)의 같은 창 수익률에서 벤치 지수(ix)의 수익률을 뺀
    * 시장 대비 초과다. 업종 지수 행이 없거나 창이 짧으면 NULL 로 남는다(SECTOR_MOM_20D/60D 시그널·후보 secRs5/20/60·secCons 특징의 원천).
+ * rs_idx_20d(종목 − 벤치 지수 20일)는 후보 feature rsIdx20d·프롬프트 rsIdx 열 전용이다 — RS_INDEX 시그널은 2026-10-16 점수·IC 에서 빠졌다(SignalCode).
    * <p>
    * is_kospi200(advice-v7) 는 그 거래일에 유효한 마스터 SCD2 이력 행([valid_from, valid_to) 반열림, 겹치지 않아 행이 늘지 않는다)의 구성 여부다 — PIT.
    * 라이브 기준일에는 현재 행(valid_to IS NULL)이 곧 당일 스냅샷이다. 이력 시작 전 날짜는 NULL(모름)이며 tb_stock_master 의 현재 값으로 채우지 않는다

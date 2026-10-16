@@ -36,10 +36,18 @@ public class AdvisorKpiService {
    * 매수 전용(2026-09-27): poolMeanExcess 는 LONG 픽이 있는 판단의 후보군만 — 픽과 같은 날끼리 비교해야 부가가치(valueAdd)가 선택의 가치다.
    * 관망 판단(LONG 픽 0개)은 abstainDays(채점된 관망 판단 수)와 abstainPoolMeanExcess(그날들의 후보군 평균)로 따로 본다 — 음수면 관망이 맞았다.
    * avoidMeanExcess·avoidPicks 는 v9 이전 AVOID 행용으로 남긴다. 컴포넌트는 맨 뒤에 추가했다.
+   * byWeightSet(2026-10-16): 판단이 쓴 가중치 세트(weight_set_id)별 LONG 픽 KPI — 세트가 바뀐 기간의 합계가 서로 다른 점수 규칙을 섞기 때문이다.
    */
   public record VariantSummary(AdviceVariant variant, int advices, int picks, Double hitRate, Double meanExcess, Double seExcess, Double meanCostAdj,
                                Double poolMeanExcess, Double valueAdd, Double avoidMeanExcess, int avoidPicks, String verdictLabel, int abstainDays,
-                               Double abstainPoolMeanExcess) {
+                               Double abstainPoolMeanExcess, List<WeightSetSlice> byWeightSet) {
+
+    /** 세트별 분해 이전 모양 — 기존 호출·테스트 호환용 */
+    public VariantSummary(AdviceVariant variant, int advices, int picks, Double hitRate, Double meanExcess, Double seExcess, Double meanCostAdj,
+        Double poolMeanExcess, Double valueAdd, Double avoidMeanExcess, int avoidPicks, String verdictLabel, int abstainDays, Double abstainPoolMeanExcess) {
+      this(variant, advices, picks, hitRate, meanExcess, seExcess, meanCostAdj, poolMeanExcess, valueAdd, avoidMeanExcess, avoidPicks, verdictLabel,
+          abstainDays, abstainPoolMeanExcess, List.of());
+    }
 
     /** 관망 지표 이전 모양 — 기존 호출·테스트 호환용 */
     public VariantSummary(AdviceVariant variant, int advices, int picks, Double hitRate, Double meanExcess, Double seExcess, Double meanCostAdj,
@@ -52,6 +60,10 @@ public class AdvisorKpiService {
         Double poolMeanExcess, Double valueAdd, Double avoidMeanExcess, int avoidPicks) {
       this(variant, advices, picks, hitRate, meanExcess, seExcess, meanCostAdj, poolMeanExcess, valueAdd, avoidMeanExcess, avoidPicks, null);
     }
+  }
+
+  /** 가중치 세트 1개의 LONG 픽 KPI. weightSetId 가 null 이면 세트 없이 판단한 행(시드 전·수동) */
+  public record WeightSetSlice(Long weightSetId, int advices, int picks, Double hitRate, Double meanExcess) {
   }
 
   /** 국면 콜 요약 */
@@ -130,6 +142,18 @@ public class AdvisorKpiService {
         WHERE a.advice_kind = :kind AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
           AND s.horizon_days = :h AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
         """, p);
+    // 세트별 분해: 위 LONG 픽 집계와 같은 조건을 판단의 weight_set_id 로 나눈다
+    List<WeightSetSlice> bySet = jdbc.query("""
+        SELECT a.weight_set_id, COUNT(DISTINCT a.advice_id) AS advices, COUNT(*) AS n,
+               AVG(CASE WHEN s.excess_ret > 0 THEN 1.0 ELSE 0.0 END) AS hit_rate, AVG(s.excess_ret) AS mean_excess
+        FROM tb_advisor_pick pk
+                 JOIN tb_advisor_advice a ON a.advice_id = pk.advice_id
+                 JOIN tb_advisor_candidate_score s ON s.advice_id = pk.advice_id AND s.ticker = pk.ticker AND s.horizon_days = :h
+        WHERE a.advice_kind = :kind AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND a.data_quality = 'OK'
+          AND pk.direction = 'LONG' AND s.status <> 'MISSING' AND s.excess_ret IS NOT NULL
+        GROUP BY a.weight_set_id ORDER BY a.weight_set_id NULLS FIRST
+        """, p, (rs, i) -> new WeightSetSlice(rs.getObject("weight_set_id") == null ? null : rs.getLong("weight_set_id"), rs.getInt("advices"),
+        rs.getInt("n"), d(rs.getObject("hit_rate")), d(rs.getObject("mean_excess"))));
     int n = ((Number) pick.get("n")).intValue();
     Double mean = d(pick.get("mean_excess"));
     Double sd = d(pick.get("sd_excess"));
@@ -137,7 +161,7 @@ public class AdvisorKpiService {
     Double poolMean = d(pool.get("mean_excess"));
     return new VariantSummary(variant, ((Number) pick.get("advices")).intValue(), n, d(pick.get("hit_rate")), mean, se, d(pick.get("mean_cost_adj")),
         poolMean, mean == null || poolMean == null ? null : mean - poolMean, d(avoid.get("mean_excess")), ((Number) avoid.get("n")).intValue(),
-        verdictLabel(kind), ((Number) pool.get("abstain_days")).intValue(), d(pool.get("abstain_mean_excess")));
+        verdictLabel(kind), ((Number) pool.get("abstain_days")).intValue(), d(pool.get("abstain_mean_excess")), bySet);
   }
 
   /**
@@ -196,12 +220,28 @@ public class AdvisorKpiService {
         ((Number) row.get("inv_n")).intValue(), d(row.get("inv_hit_rate")));
   }
 
-  /** 아침 점검 갭 판정 요약 (h=1): n·적중률·CAUTION 비율 */
-  public record MorningSummary(int calls, Double hitRate, Double cautionRate) {
+  /**
+   * 아침 점검 갭 판정 요약 (h=1): n·적중률·CAUTION 비율, 임계 σ 기준별 분해(byBasis).
+   * HOLD 는 |실제 갭| &lt; 임계면 적중이라 임계가 큰 CLOSE 기준(종가 σ ≈ 갭 σ 의 2배)에서는 자동 적중에 가깝다 — 전체 적중률만 보면 기준 전환 전후가 섞인다.
+   */
+  public record MorningSummary(int calls, Double hitRate, Double cautionRate, List<MorningBasisRow> byBasis) {
+
+    /** byBasis 없는 생성(과거 호출부·테스트 호환) */
+    public MorningSummary(int calls, Double hitRate, Double cautionRate) {
+      this(calls, hitRate, cautionRate, List.of());
+    }
   }
 
   /**
-   * 아침 점검(MORNING) 콜 요약 — 예상 갭 부호·크기 판정이 D+1 시가 갭과 맞은 비율.
+   * 아침 점검 임계 기준별 요약. basis = GAP(밤사이 갭 σ) | CLOSE(종가 σ — detail_json 에 sigmaBasis 가 없는 2026-10-16 이전 행) |
+   * FALLBACK(σ 를 못 구해 고정 임계 0.5% 를 쓴 행). meanThreshold 평균 임계, meanAbsGap 평균 |실제 갭|.
+   */
+  public record MorningBasisRow(String basis, int calls, Double hitRate, Double cautionRate, Double meanThreshold, Double meanAbsGap) {
+  }
+
+  /**
+   * 아침 점검(MORNING) 콜 요약 — 예상 갭 부호·크기 판정이 D+1 시가 갭과 맞은 비율. 기준별 분해는 점검 행(tb_advisor_morning_check, 판단당 1행)의
+   * detail_json.index.&lt;지수코드&gt; 에서 읽는다(콜 subject_code 가 지수 코드).
    */
   public MorningSummary morningSummary(AdviceVariant variant, LocalDate from, LocalDate to) {
     Map<String, Object> p = params(from, to);
@@ -212,7 +252,21 @@ public class AdvisorKpiService {
         FROM tb_advisor_call_score c JOIN tb_advisor_advice a ON a.advice_id = c.advice_id
         WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type = 'MORNING' AND c.horizon_days = 1 AND c.status = 'SCORED'
         """, p);
-    return new MorningSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), d(row.get("caution_rate")));
+    // jsonb ? 연산자는 명명 파라미터 파서와 충돌하므로 ->> IS NULL 로 키 유무를 본다. sigma 키는 null 이면 저장되지 않는다(AdvisorJson NON_NULL)
+    List<MorningBasisRow> byBasis = jdbc.query("""
+        SELECT CASE WHEN mc.detail_json -> 'index' -> c.subject_code ->> 'sigmaBasis' IS NULL THEN 'CLOSE'
+                    WHEN COALESCE((mc.detail_json -> 'index' -> c.subject_code ->> 'sigma')::double precision, 0) <= 0 THEN 'FALLBACK'
+                    ELSE mc.detail_json -> 'index' -> c.subject_code ->> 'sigmaBasis' END AS basis,
+               COUNT(*) AS n, AVG(CASE WHEN c.hit THEN 1.0 ELSE 0.0 END) AS hit_rate,
+               AVG(CASE WHEN c.predicted = 'CAUTION' THEN 1.0 ELSE 0.0 END) AS caution_rate,
+               AVG(c.band) AS mean_threshold, AVG(ABS(c.actual_ret)) AS mean_abs_gap
+        FROM tb_advisor_call_score c JOIN tb_advisor_advice a ON a.advice_id = c.advice_id
+                 LEFT JOIN tb_advisor_morning_check mc ON mc.advice_id = a.advice_id
+        WHERE a.advice_kind = 'DAILY' AND a.variant = :variant AND a.base_date BETWEEN :from AND :to AND c.subject_type = 'MORNING' AND c.horizon_days = 1 AND c.status = 'SCORED'
+        GROUP BY 1 ORDER BY 1
+        """, p, (rs, i) -> new MorningBasisRow(rs.getString("basis"), rs.getInt("n"), d(rs.getObject("hit_rate")), d(rs.getObject("caution_rate")),
+        d(rs.getObject("mean_threshold")), d(rs.getObject("mean_abs_gap"))));
+    return new MorningSummary(((Number) row.get("n")).intValue(), d(row.get("hit_rate")), d(row.get("caution_rate")), byBasis);
   }
 
   /**

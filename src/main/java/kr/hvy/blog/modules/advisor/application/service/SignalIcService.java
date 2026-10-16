@@ -9,6 +9,7 @@ import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.domain.code.SignalCode;
 import kr.hvy.blog.modules.advisor.domain.code.WeightSetSource;
 import kr.hvy.blog.modules.advisor.domain.model.SignalIcRow;
+import kr.hvy.blog.modules.advisor.domain.model.SignalWeightRow;
 import kr.hvy.blog.modules.advisor.domain.model.WeightSet;
 import kr.hvy.blog.modules.advisor.repository.jdbc.SignalIcWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.WeightSetRepository;
@@ -129,15 +130,22 @@ public class SignalIcService {
       return Optional.empty();
     }
     String horizonLabel = horizonDays == properties.getHorizonDays() ? "" : " h=" + horizonDays;
+    List<SignalWeightRow> weights = SignalWeightMath.apply(stats, current.weights(), ic);
+    String degenerate = "";
+    if (SignalWeightMath.learnedWeightsAllZero(weights)) {
+      // 하한 0(2026-10-16)에서 전 학습 시그널 ĪC ≤ −IC_ref 면 점수가 비학습 시그널(VALUE_RANK)만 남는다 — 저장은 하되 사유에 남긴다
+      log.warn("가중치 세트 퇴화: h={}, 학습 시그널 가중치가 모두 0 (asOf={})", horizonDays, asOf);
+      degenerate = " ⚠ 학습 시그널 가중치 전부 0";
+    }
     WeightSet proposed = WeightSet.builder()
         .asOf(asOf)
         .windowDays(windowDays)
         .nEff(minNEff)
         .source(source)
         .active(false)
-        .reason(source + horizonLabel + " IC 창 " + windowDays + "일, n_eff " + String.format("%.1f", minNEff))
+        .reason(source + horizonLabel + " IC 창 " + windowDays + "일, n_eff " + String.format("%.1f", minNEff) + degenerate)
         .runId(runId)
-        .weights(SignalWeightMath.apply(stats, current.weights(), ic))
+        .weights(weights)
         .horizonDays(horizonDays)
         .build();
     return Optional.of(proposed);

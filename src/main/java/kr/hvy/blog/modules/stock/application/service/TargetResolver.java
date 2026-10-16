@@ -68,4 +68,17 @@ public class TargetResolver {
     }
     return result;
   }
+
+  /**
+   * 종목별 결산월(tb_stock_master.settle_month — 재무 연간 행 필터용). 결산월이 없는 종목은 빠진다.
+   */
+  public Map<String, String> settleMonths(Collection<String> tickers) {
+    Map<String, String> result = new HashMap<>();
+    for (StockMaster master : masterRepository.findAllById(tickers)) {
+      if (master.getSettleMonth() != null) {
+        result.put(master.getTicker(), master.getSettleMonth());
+      }
+    }
+    return result;
+  }
 }

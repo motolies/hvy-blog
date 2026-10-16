@@ -122,6 +122,33 @@ class AdvisorGateServiceTest {
     assertThat(d.quality()).isEqualTo(DataQuality.OK);
   }
 
+  @Test
+  @DisplayName("H180 월간: 첫 5거래일 안이고 이번 달 LIVE H180 이 없으면 발행 대상 — 지난달 판단만 있으면 true, 이번 달 있으면 false, 6번째 거래일·판단 없음 첫 거래일")
+  void h180Due() {
+    // 2026-10: 01(목) 휴장 가정 없이 주말만 휴장 → 01(1)·02(2)·05(3)·06(4)·07(5)·08(6)
+    when(calendar.isTradingDay(any())).thenAnswer(inv -> {
+      LocalDate d = inv.getArgument(0);
+      return d.getDayOfWeek() != java.time.DayOfWeek.SATURDAY && d.getDayOfWeek() != java.time.DayOfWeek.SUNDAY;
+    });
+    LocalDate third = LocalDate.of(2026, 10, 5);
+    when(adviceWriter.findLatest(AdviceKind.H180, AdviceVariant.LIVE, third))
+        .thenReturn(Optional.of(AdviceHeader.builder().adviceId(9L).baseDate(LocalDate.of(2026, 9, 1)).build()));
+    assertThat(gate.h180Due(third)).as("9월 판단만 있음 → 10월 3번째 거래일 따라잡기").isTrue();
+
+    LocalDate fourth = LocalDate.of(2026, 10, 6);
+    when(adviceWriter.findLatest(AdviceKind.H180, AdviceVariant.LIVE, fourth))
+        .thenReturn(Optional.of(AdviceHeader.builder().adviceId(10L).baseDate(LocalDate.of(2026, 10, 5)).build()));
+    assertThat(gate.h180Due(fourth)).as("이번 달 이미 발행").isFalse();
+
+    LocalDate sixth = LocalDate.of(2026, 10, 8);
+    when(adviceWriter.findLatest(AdviceKind.H180, AdviceVariant.LIVE, sixth)).thenReturn(Optional.empty());
+    assertThat(gate.h180Due(sixth)).as("창(5) 밖").isFalse();
+
+    LocalDate first = LocalDate.of(2026, 10, 1);
+    when(adviceWriter.findLatest(AdviceKind.H180, AdviceVariant.LIVE, first)).thenReturn(Optional.empty());
+    assertThat(gate.h180Due(first)).as("판단 없음·첫 거래일").isTrue();
+  }
+
   private static StockCollectRun run(List<Map<String, Object>> steps) {
     return StockCollectRun.builder().runId(77L).jobType(CollectJobType.DAILY).triggerType(TriggerType.SCHEDULER).status(CollectStatus.SUCCESS)
         .metadataJson(Map.of("steps", steps)).build();

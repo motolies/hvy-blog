@@ -180,7 +180,7 @@ public class CandidateScreeningService {
     putFeature(features, "pbr", rs, "pbr");
     putFeature(features, "sectorCw5d", rs, "sector_cw_5d");
     putFeature(features, FEATURE_VOL20D, rs, "vol_20d");
-    // 2026-10-16: 지수 20일 수익률(index_ret_20d)을 그대로 넣어 전 후보가 같은 값이던 결함 → 종목 − 지수(RS_INDEX 시그널 식과 동일)
+    // 2026-10-16: 지수 20일 수익률(index_ret_20d)을 그대로 넣어 전 후보가 같은 값이던 결함 → 종목 − 지수. RS_INDEX 시그널은 점수에서 빠졌고 프롬프트 rsIdx 열은 이 값을 쓴다
     putFeature(features, "rsIdx20d", rs, "rs_idx_20d");
     // advice-v6: 소속 업종 지수의 시장 대비 초과(1주·1개월·3개월). 지수가 없으면 키 자체가 빠진다 → 프롬프트 secCons null
     putFeature(features, "secRs5", rs, "sector_rs_5d");

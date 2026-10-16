@@ -121,12 +121,12 @@ public class StockToolkit {
       ToolJson.put(m, "marketCapEok", s.marketCap() == null ? null : Math.round(s.marketCap() / 1e8));
       ToolJson.put(m, "per", ToolJson.r4(s.per()));
       ToolJson.put(m, "pbr", ToolJson.r4(s.pbr()));
-      ToolJson.put(m, "foreignHoldRate", ToolJson.r4(s.foreignHoldRate()));
+      ToolJson.put(m, "foreignHoldRatePct", ToolJson.r4(s.foreignHoldRate()));   // %(1=1%) — 2026-10-16 단위 접미(같은 응답의 비율 필드는 소수)
       ToolJson.put(m, "valuationAsOf", s.valuationDate() == null ? null : s.valuationDate().toString());
       // 2026-10-16: 섹터명이 없으면 코드("0000")를 이름 자리에 넣지 않는다 — sector 없음 = KRX 미분류. 코드는 sectorCode 로 따로
       ToolJson.put(m, "sector", s.sectorName());
       ToolJson.put(m, "sectorCode", s.sectorCode());
-      m.put("note", "수익률·이격은 비율(0.031 = 3.1%), 가격은 수정 종가(원). per/pbr 없음 = 결측·산출 불가, sector 없음 = KRX 미분류. σ·RSI 는 제공하지 않는다");
+      m.put("note", "수익률·이격은 비율(0.031 = 3.1%), 가격은 수정 종가(원), *Eok 은 억원, *Pct 는 %. per/pbr 없음 = 결측·산출 불가, sector 없음 = KRX 미분류. σ·RSI 는 제공하지 않는다");
       return m;
     });
   }

@@ -37,7 +37,8 @@ class McpReadPgTest {
   @BeforeEach void setup() {
     var ds = new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword());
     jdbc = new JdbcTemplate(ds);
-    reader = new McpReadService(new NamedParameterJdbcTemplate(ds), JsonMapper.builder().build());
+    reader = new McpReadService(new NamedParameterJdbcTemplate(ds), JsonMapper.builder().build(),
+        new org.springframework.mock.env.MockEnvironment().withProperty("scheduler.stock-macro.enabled", "false"));
     tx = McpConfig.readTransaction(new DataSourceTransactionManager(ds));
     jdbc.execute("TRUNCATE tb_stock_investor_daily, tb_stock_daily_price, tb_stock_adjust_event, tb_stock_financial, tb_stock_macro_daily, tb_stock_event_timeline, "
         + "tb_stock_news, tb_stock_global_market_daily, tb_stock_corporate_action, tb_stock_index_master, tb_stock_index_daily, tb_advisor_advice CASCADE");
@@ -50,9 +51,9 @@ class McpReadPgTest {
         + "('005930','2026-01-01',-1387781000000),('005930','2026-01-02',0)");
     var result = reader.series(true,"INVESTOR","005930","2026-01-01","2026-01-02",null,50,null);
     assertThat(items(result)).hasSize(2);
-    assertThat(items(result).getFirst().get("foreign_net_amt")).isEqualTo(-1_387_781_000_000L);
+    assertThat(items(result).getFirst().get("foreign_net_amt_won")).isEqualTo(-1_387_781_000_000L);
     assertThat(items(result).getFirst().get("institution_net_amt")).isNull();
-    assertThat(items(result).getLast().get("foreign_net_amt")).isEqualTo(0);
+    assertThat(items(result).getLast().get("foreign_net_amt_won")).isEqualTo(0);
     assertThat(items(result).getFirst()).doesNotContainKey("normalization_version");
     assertThat(result.get("dataAsOf")).isEqualTo("2026-01-02");
     assertThat(((Map<?, ?>) reader.freshness().get("dataAsOf")).get("INVESTOR")).isEqualTo("2026-01-02");
@@ -91,9 +92,9 @@ class McpReadPgTest {
     // 2026-10-16: 최신순 — 같은 available_from 이면 키(202512|Y) 가 202509|Q 보다 앞, 역방향 커서로 이어진다
     assertThat(first.get("order")).isEqualTo("desc");
     assertThat(items(first).getFirst().get("fiscal_period")).isEqualTo("202512");
-    assertThat(items(first).getFirst().get("revenue")).isNull();
+    assertThat(items(first).getFirst().get("revenue_eok")).isNull();
     assertThat(items(second).getFirst().get("fiscal_period")).isEqualTo("202509");
-    assertThat(items(second).getFirst().get("revenue")).isEqualTo(100);
+    assertThat(items(second).getFirst().get("revenue_eok")).isEqualTo(100);
     assertThat(second.get("nextCursor")).isNull();
   }
   @Test void listAdvicesSummaryByDefaultWithPickCount() {
@@ -210,6 +211,18 @@ class McpReadPgTest {
     assertThat(jdbc.queryForObject("SELECT count(*) FROM tb_stock_adjust_event WHERE ticker='WRITE'", Integer.class)).isZero();
   }
 
+  @Test void freshnessListsDisabledCollectors() {
+    // 2026-10-16: 설정으로 꺼진 수집(MACRO·EVENT·NEWS)은 disabled 로 함께 보인다 — 멈춘 날짜를 장애로 읽지 않게. kis.stats 는 기본 true 라 없다
+    @SuppressWarnings("unchecked") List<Map<String, Object>> disabled = (List<Map<String, Object>>) reader.freshness().get("disabled");
+    assertThat(disabled).extracting(m -> m.get("flag"))
+        .containsExactly("scheduler.stock-macro.enabled", "scheduler.stock-eventfeed.enabled", "advisor.news.enabled");
+    assertThat(disabled.getFirst()).containsEntry("sources", List.of("MACRO"));
+    var on = new McpReadService(new NamedParameterJdbcTemplate(jdbc.getDataSource()), JsonMapper.builder().build(),
+        new org.springframework.mock.env.MockEnvironment().withProperty("scheduler.stock-macro.enabled", "true").withProperty("scheduler.stock-eventfeed.enabled", "true")
+            .withProperty("advisor.news.enabled", "true").withProperty("kis.stats.enabled", "false"));
+    assertThat(on.disabledSwitches()).extracting(m -> m.get("flag")).containsExactly("kis.stats.enabled");
+  }
+
   @Test void freshnessShapeAndLatestDatePerSource() {
     // NEWS 는 KST 날짜: 01-02 23:30 과 01-03 00:10 (KST) → 최신은 01-03. 미래 가격 행은 제외돼 RAW_PRICE 는 01-05.
     jdbc.execute("INSERT INTO tb_stock_news(source,published_at,title,title_hash) VALUES ('GDELT','2026-01-02T23:30:00+09:00','a','\\x01'),('GDELT','2026-01-03T00:10:00+09:00','b','\\x02')");
@@ -218,7 +231,7 @@ class McpReadPgTest {
     jdbc.execute("INSERT INTO tb_stock_global_market_daily(symbol,trade_date,market_div,close_price) VALUES ('SPX','2026-01-06','N',100)");
     jdbc.execute("INSERT INTO tb_stock_financial(ticker,fiscal_period,period_type,revision_seq,available_from,available_rule) VALUES ('005930','202512','Y',0,'2026-01-07','TEST')");
     var result = reader.freshness();
-    assertThat(result.keySet()).containsExactly("today", "dataAsOf", "latestAdviceByKind");
+    assertThat(result.keySet()).containsExactly("today", "dataAsOf", "disabled", "latestAdviceByKind");
     @SuppressWarnings("unchecked") Map<String, Object> dataAsOf = (Map<String, Object>) result.get("dataAsOf");
     var expectedKeys = new java.util.HashSet<>(McpReadService.STOCK.keySet());
     expectedKeys.addAll(McpReadService.MARKET.keySet());

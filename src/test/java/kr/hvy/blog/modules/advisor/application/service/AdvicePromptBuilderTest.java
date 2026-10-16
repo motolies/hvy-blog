@@ -163,12 +163,13 @@ class AdvicePromptBuilderTest {
   }
 
   @Test
-  @DisplayName("advice-v8: regime(합성 국면·정책 한도)은 dataQuality 뒤, theme(대분류 강약 표)은 sectors 뒤, 후보 theme 열은 맨 뒤 — 국면이 없으면 두 블록 모두 없다")
+  @DisplayName("advice-v8: regime(합성 국면·정책 한도)은 dataQuality 뒤, theme(대분류 강약 표)은 sectors 뒤, 후보 theme 열은 맨 뒤 — 국면이 없으면 두 블록 모두 없다. advice-v11: theme 행 끝에 rsEq20·rsEq60, 이름은 넣지 않는다")
   void regimeAndThemeBlocks() {
     MarketFeatures base = market();
     MarketRegime regime = new MarketRegime("0001", LocalDate.of(2026, 9, 11), MarketTrendCode.BEAR, -3, VolRegimeCode.HIGH, 0.8712, 0.01834, 1180,
         new MarketRegime.Policy("regime-policy-v2", 8, 0.65),
-        List.of(new MarketRegime.Theme("5", 31, 0.012, 0.0311, 0.02, 0.645, ThemeStrength.STRONG, List.of("삼성전자", "SK하이닉스")),
+        List.of(new MarketRegime.Theme("5", 31, 0.012, 0.0311, 0.02, 0.645, ThemeStrength.STRONG, List.of("삼성전자", "SK하이닉스"),
+                "정보기술", 0.001, 0.0251, 0.012, "EQ"),
             new MarketRegime.Theme("6", 18, -0.01, -0.024, -0.03, 0.31, ThemeStrength.WEAK, List.of("KB금융"))));
     MarketFeatures withRegime = new MarketFeatures(base.asOf(), base.indices(), base.flows(), base.global(), base.topSectors(), base.bottomSectors(),
         base.sigma5d(), base.globalAsOf(), base.globalAgeTradingDays(), base.flowAsOf(), base.sectorAsOf(), base.entryDate(), base.exitDate(),
@@ -184,8 +185,8 @@ class AdvicePromptBuilderTest {
     assertThat(json).contains("\"dataQuality\":\"OK\",\"regime\":{\"index\":\"0001\",\"label\":\"BEAR·HIGH\",\"trend\":\"BEAR\",\"trendScore\":-3,"
         + "\"vol\":\"HIGH\",\"volPct\":0.871,\"sigma20\":0.0183,\"volHistoryDays\":1180,"
         + "\"policy\":{\"version\":\"regime-policy-v2\",\"longMax\":8,\"convictionCap\":0.65,\"enforced\":true}},\"sectors\":");
-    assertThat(json).contains("]},\"theme\":{\"columns\":[\"code\",\"members\",\"rs5\",\"rs20\",\"rs60\",\"breadth\",\"strength\",\"leaders\"],"
-        + "\"rows\":[[\"5\",31,0.012,0.0311,0.02,0.645,\"STRONG\",[\"삼성전자\",\"SK하이닉스\"]],[\"6\",18,-0.01,-0.024,-0.03,0.31,\"WEAK\",[\"KB금융\"]]]},"
+    assertThat(json).contains("]},\"theme\":{\"columns\":[\"code\",\"members\",\"rs5\",\"rs20\",\"rs60\",\"breadth\",\"strength\",\"leaders\",\"rsEq20\",\"rsEq60\"],"
+        + "\"rows\":[[\"5\",31,0.012,0.0311,0.02,0.645,\"STRONG\",[\"삼성전자\",\"SK하이닉스\"],0.0251,0.012],[\"6\",18,-0.01,-0.024,-0.03,0.31,\"WEAK\",[\"KB금융\"],null,null]]},"
         + "\"candidates\":");
     assertThat(json).as("T00 소속 테마 5, T01 없음(null) — 맨 뒤 열").contains(",0.0789,1,\"5\"]").contains(",-0.01,0,null]");
 
@@ -225,7 +226,7 @@ class AdvicePromptBuilderTest {
     List<CandidateRow> rows = new ArrayList<>();
     for (int i = 0; i < n; i++) {
       Map<String, Object> features = new java.util.LinkedHashMap<>(Map.of("r20", 0.012345, "r60", 0.17, "distHigh52w", -0.021, "tvRatio", 1.62,
-          "per", 14.234, "vol20d", 0.0182));
+          "per", 14.234, "vol20d", 0.0182, "rsIdx20d", 0.043));
       if (i <= 1) {
         features.put("secRs5", 0.0123);
         features.put("secRs20", 0.0456);
@@ -233,7 +234,7 @@ class AdvicePromptBuilderTest {
       }
       rows.add(CandidateRow.builder().ticker(String.format("T%02d", i)).quantRank(i + 1).quantScore(0.5 - i * 0.01).stockName("종목" + i)
           .marketType("KOSPI").benchIndexCode("0001").sectorCode("G2510").sectorName("반도체")
-          .signals(Map.of("FOREIGN_FLOW", new SignalValue(0.9, 0.12, 0.0031), "RS_INDEX", new SignalValue(0.8, 0.08, 0.043)))
+          .signals(Map.of("FOREIGN_FLOW", new SignalValue(0.9, 0.12, 0.0031)))   // rsIdx 열은 feature rsIdx20d 에서 온다(2026-10-16)
           .features(features)
           .appliedLessonIds(List.of()).build());
     }

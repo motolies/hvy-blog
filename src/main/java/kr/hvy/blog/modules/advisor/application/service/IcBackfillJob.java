@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
  * 호라이즌마다 끝이 다르다(캘린더 끝 − h) — h=180 은 약 9개월 전 기준일까지만 계산된다.
  * <p>
  * 유니버스 뷰가 현재 마스터 기준이라 과거 IC 는 생존편향이 있다 — 절대값이 아니라 시그널 간 상대 순위·부호 확인 용도이며 배수는 clip 으로 제한된다.
- * 부호가 음(flagged)인 시그널은 하한 배수만 받고 관리자 API(/weights) 에서 검토한다.
+ * 부호가 음(flagged)인 시그널은 배수가 하한(기본 0 — 점수에서 빠짐, 2026-10-16)까지 내려가고 관리자 API(/weights) 에서 검토한다.
  */
 @Slf4j
 @Component

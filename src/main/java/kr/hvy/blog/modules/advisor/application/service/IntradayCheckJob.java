@@ -50,8 +50,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * 장중 점검 (INTRADAY, 평일 12:00 KST). 직전 영업일 LIVE 판단의 지수 방향·픽 방향을 KIS 현재가(전일 대비율)와 대조해 일치율·판정을 보고하고(2026-09-13),
- * 픽마다 12:00 편차를 정량·분류·회고해 오답노트(tb_advisor_pick_note)로 남긴다(note-v1, 2026-09-21).
+ * 장중 점검 (INTRADAY, 평일 12:00 KST). 직전 영업일 LIVE 판단의 지수 방향을 KIS 현재가(전일 대비율)와, 픽을 벤치 지수 대비 초과와 대조해 일치율·판정을 보고하고
+ * (2026-09-13), 픽마다 12:00 편차를 정량·분류·회고해 오답노트(tb_advisor_pick_note)로 남긴다(note-v1, 2026-09-21).
+ * <p>
+ * 픽 일치(2026-10-16, MCP 2차 점검): 매수 전용 판단은 지수 대비로 채점되므로 노트와 같은 초과(OPEN 시가 기준, 없으면 PREV_CLOSE)가 양수인 픽을 "일치" 로 센다.
+ * 그 전에는 전일 대비 절대 등락으로 세어, 지수 하락 예측이 맞은 날 픽이 지수보다 덜 빠져도 "예측과 반대로" 로 표시됐다. 지수 방향 적중은 comment 에 따로 적는다.
  * <pre>
  * INDEX(격리: 지수 2 + 벤치, 코드별 실패는 삼킴) → PICKS(필수: KIS 조회·정량·PickDeviation 분류, 종목 1건 실패는 삼킴)
  * → REFLECT(격리: FLAT 아닌 픽만 assist 1회, 전부 FLAT 이거나 note.enabled=false 면 SKIPPED) → SAVE(필수: check 1행) → NOTES(격리: note N행) → PUBLISH(격리)
@@ -65,7 +68,9 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "advisor.enabled", havingValue = "true")
 public class IntradayCheckJob implements AdvisorJob {
 
+  /** 지수 대비 앞선 픽 비율이 이 값 이상이면 ON_TRACK */
   static final double ON_TRACK_RATIO = 0.6;
+  /** 지수 대비 앞선 픽 비율이 이 값 미만이면 OFF_TRACK */
   static final double OFF_TRACK_RATIO = 0.3;
   /** 지수 NEUTRAL 예측이 맞다고 볼 장중 등락률 절대값 상한(%) */
   static final double INDEX_NEUTRAL_BAND_PCT = 0.3;
@@ -242,7 +247,7 @@ public class IntradayCheckJob implements AdvisorJob {
     Double ratio = total == 0 ? null : (double) agreed / total;
     IntradayVerdict verdict = ratio == null ? IntradayVerdict.MIXED : ratio >= ON_TRACK_RATIO ? IntradayVerdict.ON_TRACK
         : ratio < OFF_TRACK_RATIO ? IntradayVerdict.OFF_TRACK : IntradayVerdict.MIXED;
-    String comment = comment(verdict, pickJson, candidates);
+    String comment = comment(verdict, pickJson, candidates, indexJson);
     String excessBasis = excessBasis(observations);
 
     // ③ 회고 (격리): FLAT 이 아닌 픽만 |z| 큰 순으로 상한까지 모아 assist 1회
@@ -324,7 +329,8 @@ public class IntradayCheckJob implements AdvisorJob {
       Double z = PickDeviation.z(excess, vol20);
       Double move = PickObs.move(excess, sinceOpen, rate);
       Double zMove = excess == null ? null : PickDeviation.zOf(move, excess.basis(), vol20);
-      Boolean agree = rate == null ? null : pick.direction() == PickDirection.LONG ? rate > 0 : rate <= 0;
+      // 매수 전용 봇은 지수 대비로 판정한다(2026-10-16) — 노트와 같은 초과(OPEN 우선, PREV_CLOSE 폴백). 지수와 비교할 수 없으면 null(분모 제외), 절대 등락으로 폴백하지 않는다
+      Boolean agree = excess == null ? null : pick.direction() == PickDirection.LONG ? excess.value() > 0 : excess.value() <= 0;
       PickNoteClass cls = price == null ? null
           : PickDeviation.classify(pick.direction(), move, excess == null ? null : excess.value(), z, zMove, zThreshold);
       return new PickObs(pick, candidate, price, open, rate, gap, sinceOpen, benchCode, benchRate, benchSinceOpen, excess, z, cls, agree, null);
@@ -499,6 +505,7 @@ public class IntradayCheckJob implements AdvisorJob {
 
   /**
    * 점검 저장 JSON 의 픽 1건: 기존 {ticker,direction,price,changeRate,agree|error} + 12:00 정량 {open,sinceOpen,excess,z,class}(있을 때만).
+   * agreeBasis(2026-10-16~) 는 agree 를 정한 초과 기준(OPEN|PREV_CLOSE) — 이 키가 없는 옛 행의 agree 는 전일 대비 절대 등락 기준이다.
    */
   static Map<String, Object> pickJson(PickObs o) {
     Map<String, Object> m = new LinkedHashMap<>();
@@ -512,6 +519,7 @@ public class IntradayCheckJob implements AdvisorJob {
     m.put("changeRate", o.changeRatePct());
     if (o.agree() != null) {
       m.put("agree", o.agree());
+      m.put("agreeBasis", o.excess().basis());
     }
     if (o.open() != null) {
       m.put("open", o.open());
@@ -560,26 +568,36 @@ public class IntradayCheckJob implements AdvisorJob {
   }
 
   /**
-   * 규칙 기반 한 줄 코멘트: 판정 + 가장 어긋난 픽 최대 2개.
+   * 규칙 기반 한 줄 코멘트: 픽의 지수 대비 판정 + 지수 방향 예측 적중(시장 지수별) + 지수보다 약한 픽 최대 2개(지수 대비 %p).
+   * 픽 판정과 지수 판정을 따로 적는다 — "지수 방향은 맞았고 픽만 지수보다 약했다" 를 한 문장 "예측과 반대로" 로 뭉개지 않게(2026-10-16).
    */
-  static String comment(IntradayVerdict verdict, List<Map<String, Object>> picks, Map<String, CandidateRow> candidates) {
+  static String comment(IntradayVerdict verdict, List<Map<String, Object>> picks, Map<String, CandidateRow> candidates, Map<String, Object> indexJson) {
     List<String> off = new ArrayList<>();
     for (Map<String, Object> p : picks) {
-      if (Boolean.FALSE.equals(p.get("agree")) && p.get("changeRate") instanceof Double rate) {
+      if (Boolean.FALSE.equals(p.get("agree")) && p.get("excess") instanceof Double excess) {
         CandidateRow c = candidates.get(String.valueOf(p.get("ticker")));
         String name = c == null || c.stockName() == null ? String.valueOf(p.get("ticker")) : c.stockName();
-        off.add(String.format("%s %+.1f%%", name, rate));
+        off.add(String.format("%s 지수대비 %+.1f%%p", name, excess * 100));
         if (off.size() == 2) {
           break;
         }
       }
     }
-    String base = switch (verdict) {
-      case ON_TRACK -> "판단 유지.";
-      case MIXED -> "혼조 — 장 마감 채점으로 확인.";
-      case OFF_TRACK -> "예측과 반대로 움직임 — 마감 후 채점 주시.";
-    };
-    return off.isEmpty() ? base : base + " 어긋난 픽: " + String.join(", ", off);
+    boolean comparable = picks.stream().anyMatch(p -> p.get("agree") != null);
+    String base = !comparable ? "지수 대비 비교 불가 — 판정 보류."
+        : switch (verdict) {
+          case ON_TRACK -> "픽 다수가 지수보다 강함 — 판단 유지.";
+          case MIXED -> "픽이 지수 대비 엇갈림 — 장 마감 채점으로 확인.";
+          case OFF_TRACK -> "픽 다수가 지수보다 약함 — 마감 후 채점 주시.";
+        };
+    List<String> index = new ArrayList<>();
+    indexJson.forEach((code, v) -> {
+      if (v instanceof Map<?, ?> m && m.get("agree") instanceof Boolean agree) {
+        index.add(indexName(code) + (agree ? " 적중" : " 빗나감"));
+      }
+    });
+    String indexText = index.isEmpty() ? "" : " 지수 방향 예측: " + String.join("·", index) + ".";
+    return base + indexText + (off.isEmpty() ? "" : " 지수보다 약한 픽: " + String.join(", ", off));
   }
 
   static String benchCode(CandidateRow candidate) {

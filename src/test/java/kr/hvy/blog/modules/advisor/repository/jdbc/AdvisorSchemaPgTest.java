@@ -123,12 +123,13 @@ class AdvisorSchemaPgTest {
   void seedActivatesWeightSet() {
     WeightSet active = weightSets.active(5).orElseThrow();
     assertThat(active.source()).isEqualTo(WeightSetSource.SEED);
+    assertThat(active.createdAt()).as("조회 시 created_at 을 채운다").isNotNull();
     assertThat(active.horizonDays()).as("시드는 DAILY 결정 호라이즌").isEqualTo(5);
-    // advice-v6: SECTOR_MOM_20D/60D 시드 2행 추가 → 14행·활성 13·사전 합 1.10 (점수는 Σw 정규화라 합 1.0 을 지킬 필요 없음)
+    // advice-v6: SECTOR_MOM_20D/60D 시드 2행 추가 → 14행. 2026-10-16 RS_INDEX base 0(비활성) → 활성 12·사전 합 1.02 (점수는 Σw 정규화라 합 1.0 을 지킬 필요 없음)
     assertThat(active.weights()).hasSize(14);
-    assertThat(active.enabledWeights()).hasSize(13).doesNotContainKey("GLOBAL_LINK").containsKeys("SECTOR_MOM_20D", "SECTOR_MOM_60D");
+    assertThat(active.enabledWeights()).hasSize(12).doesNotContainKeys("GLOBAL_LINK", "RS_INDEX").containsKeys("SECTOR_MOM_20D", "SECTOR_MOM_60D");
     double sum = active.enabledWeights().values().stream().mapToDouble(Double::doubleValue).sum();
-    assertThat(sum).isCloseTo(1.10, org.assertj.core.data.Offset.offset(1e-9));
+    assertThat(sum).isCloseTo(1.02, org.assertj.core.data.Offset.offset(1e-9));
 
     long id = weightSets.insert(active.toBuilder().source(WeightSetSource.WEEKLY).asOf(LocalDate.of(2026, 9, 12)).reason("test").build(), true);
     assertThat(weightSets.active(5).orElseThrow().weightSetId()).isEqualTo(id);

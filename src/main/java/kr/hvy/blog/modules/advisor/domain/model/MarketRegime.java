@@ -60,8 +60,9 @@ public record MarketRegime(
    * 테마(KOSPI200 섹터 대분류) 1개의 강약. rs = 구성 종목 수익률 중앙값 − KOSPI 같은 창 수익률(소수), breadth = 20일선 위 종목 비율.
    * <p>
    * 2026-10-16(P2): name(설정 advisor.theme.names 매핑, 없으면 null)과 rsEq(구성 종목 중앙값 − KOSPI200 전 구성 종목 중앙값, 동일가중 벤치)를 덧붙였다.
-   * strength 는 그대로 rs20/rs60(KOSPI 대비) 기준이라 판단 프롬프트·KPI 는 불변이고, rsEq 는 "시장 전체가 눌릴 때 9/11 이 STRONG" 을 상대 강도로 읽는 보조 지표다.
-   * 과거 regime_json 에는 두 필드가 없어 null 로 읽힌다.
+   * 같은 날(2차 점검, advice-v11) strength 를 rsEq20/rsEq60 기준으로 바꾸고 basis="EQ" 로 표시한다 — KOSPI 종합(시총가중)이 반도체 대형주에 끌려
+   * 눌리면 테마 11개 중 9개가 STRONG 이던 편향 때문이다. rs 는 KOSPI 대비 참고값으로 남긴다. 과거 regime_json 에는 name·rsEq·basis 가 없어 null 로 읽히고,
+   * basis 가 null 인 행의 strength 는 KOSPI 대비 rs20/rs60 기준이다.
    *
    * @param code     kospi200_sector 코드 (KIS 마스터 1자리)
    * @param members  기준일에 KOSPI200 구성(PIT)이고 지표가 있는 종목 수
@@ -69,13 +70,20 @@ public record MarketRegime(
    * @param strength 강약 라벨
    * @param name     테마 이름(설정 매핑, 미확인 코드는 null)
    * @param rsEq5    구성 종목 중앙값 − 전 구성 종목 중앙값(5일), rsEq20·rsEq60 도 같은 정의
+   * @param basis    strength 판정 기준. "EQ" = rsEq20/rsEq60(2026-10-16~), null = KOSPI 대비 rs20/rs60(그 전 저장분)
    */
   public record Theme(String code, int members, Double rs5, Double rs20, Double rs60, Double breadth, ThemeStrength strength, List<String> leaders,
-                      String name, Double rsEq5, Double rsEq20, Double rsEq60) {
+                      String name, Double rsEq5, Double rsEq20, Double rsEq60, String basis) {
 
     /** name·rsEq 없는 생성(과거 호출부·테스트 호환) */
     public Theme(String code, int members, Double rs5, Double rs20, Double rs60, Double breadth, ThemeStrength strength, List<String> leaders) {
-      this(code, members, rs5, rs20, rs60, breadth, strength, leaders, null, null, null, null);
+      this(code, members, rs5, rs20, rs60, breadth, strength, leaders, null, null, null, null, null);
+    }
+
+    /** basis 없는 생성(2026-10-16 이전 호출부·테스트 호환 — strength 가 KOSPI 대비 rs20/rs60 기준) */
+    public Theme(String code, int members, Double rs5, Double rs20, Double rs60, Double breadth, ThemeStrength strength, List<String> leaders,
+                 String name, Double rsEq5, Double rsEq20, Double rsEq60) {
+      this(code, members, rs5, rs20, rs60, breadth, strength, leaders, name, rsEq5, rsEq20, rsEq60, null);
     }
   }
 }

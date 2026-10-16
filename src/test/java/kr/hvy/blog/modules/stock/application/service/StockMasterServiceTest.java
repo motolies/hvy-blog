@@ -98,12 +98,46 @@ class StockMasterServiceTest {
   void zeroSectorCodeMakesNoKrxRow() {
     List<SectorMapRow> rows = StockMasterService.desiredSectorRows(List.of(
         StockMaster.builder().ticker("011200").stockName("HMM").marketType(MarketType.KOSPI).securityGroup("ST").sectorMidCode("0000").active(true).build(),
-        StockMaster.builder().ticker("005930").stockName("삼성전자").marketType(MarketType.KOSPI).securityGroup("ST").sectorMidCode("0021").active(true).build(),
-        StockMaster.builder().ticker("000660").stockName("SK하이닉스").marketType(MarketType.KOSPI).securityGroup("ST").sectorMidCode("0021").active(false).build(),
+        StockMaster.builder().ticker("005930").stockName("삼성전자").marketType(MarketType.KOSPI).securityGroup("ST").sectorMidCode("0013").active(true).build(),
+        StockMaster.builder().ticker("000660").stockName("SK하이닉스").marketType(MarketType.KOSPI).securityGroup("ST").sectorMidCode("0013").active(false).build(),
         StockMaster.builder().ticker("000020").stockName("동화약품").marketType(MarketType.KOSPI).securityGroup("ST").active(true).build()),
-        TODAY, Map.of("0021", "전기·전자"));
+        TODAY, Map.of("0013", "전기·전자"));
     assertThat(rows).extracting(SectorMapRow::ticker).containsExactly("005930");
     assertThat(rows.getFirst().sectorName()).isEqualTo("전기·전자");
+  }
+
+  @Test
+  @DisplayName("KRX 섹터 매핑: 비제조업은 중분류가 없어 대분류(0019 운송·창고·0021 금융·KOSDAQ 1013)를 쓰고, 제조·시장 집계(0027·1009)와 \"0000\" 대분류는 매핑하지 않는다")
+  void nonManufacturingFallsBackToLargeCode() {
+    List<SectorMapRow> rows = StockMasterService.desiredSectorRows(List.of(
+        withSector("011200", "0019", null),
+        withSector("105560", "0021", null),
+        withSector("900001", "0027", null),
+        withSector("900002", "1009", null),
+        withSector("900003", "1013", null),
+        withSector("900004", "0000", null),
+        withSector("900005", null, null),
+        withSector("900006", "0026", null)),
+        TODAY, Map.of("0019", "운송·창고", "0021", "금융", "1013", "운송·창고"));
+    assertThat(rows).extracting(SectorMapRow::ticker, SectorMapRow::sectorCode, SectorMapRow::sectorName)
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple("011200", "0019", "운송·창고"),
+            org.assertj.core.groups.Tuple.tuple("105560", "0021", "금융"),
+            org.assertj.core.groups.Tuple.tuple("900003", "1013", "운송·창고"),
+            org.assertj.core.groups.Tuple.tuple("900006", "0026", "0026"));
+  }
+
+  @Test
+  @DisplayName("유효 업종 코드는 중분류가 있으면 대분류보다 우선한다(제조업 0027 + 0013 → 0013)")
+  void effectiveSectorPrefersMid() {
+    assertThat(StockMasterService.effectiveSectorCode(withSector("005930", "0027", "0013"))).isEqualTo("0013");
+    assertThat(StockMasterService.effectiveSectorCode(withSector("011200", "0019", "0000"))).isEqualTo("0019");
+    assertThat(StockMasterService.effectiveSectorCode(withSector("900001", "0027", null))).isNull();
+  }
+
+  private static StockMaster withSector(String ticker, String large, String mid) {
+    return StockMaster.builder().ticker(ticker).stockName(ticker).marketType(MarketType.KOSPI).securityGroup("ST")
+        .sectorLargeCode(large).sectorMidCode(mid).active(true).build();
   }
 
   private static StockMaster master(String ticker) {

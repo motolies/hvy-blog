@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.advisor.application.service;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Service;
  * <p>
  * 스케줄러는 run 을 만들기 전에 이 판정으로 조용히 돌아가고(5분 간격 폴링이 run 을 쌓지 않게), 잡은 같은 판정을 다시 해 SKIPPED 로 닫는다.
  * 결손일(VALUATION·INVESTOR 등 다른 단계 실패)은 막지 않되 DEGRADED 로 표시해 학습에서 제외한다.
+ * H180 월간 주기(따라잡기 포함) 판정도 스케줄러가 run 없이 돌아가도록 여기서 한다({@link #h180Due}).
  */
 @Service
 @RequiredArgsConstructor
@@ -84,6 +86,19 @@ public class AdvisorGateService {
       return new Decision(true, false, false, pastDeadline, DataQuality.DEGRADED, "DAILY 의 PRICE·DERIVED 단계가 실패했습니다: run=" + run.get().getRunId());
     }
     return new Decision(true, false, true, pastDeadline, qualityOf(run), "DAILY 완료");
+  }
+
+  /**
+   * H180 월간 발행 대상인지: 그 달 h180-catch-up-days 번째 거래일 안이면서 그 달 LIVE H180 판단이 아직 없다.
+   * SUCCESS run 은 LIVE 판단을 남기므로 판단 존재로 충분하다. FAILED·SKIPPED(입력 미준비)는 다음 거래일에 다시 시도한다(창 안에서 최대 N회).
+   */
+  public boolean h180Due(LocalDate today) {
+    if (!LongTermCadence.isWithinFirstTradingDays(today, calendar, properties.getLongTerm().getH180CatchUpDays())) {
+      return false;
+    }
+    return adviceWriter.findLatest(AdviceKind.H180, AdviceVariant.LIVE, today)
+        .map(h -> !YearMonth.from(h.baseDate()).equals(YearMonth.from(today)))
+        .orElse(true);
   }
 
   private Optional<StockCollectRun> dailyRun(LocalDate date) {

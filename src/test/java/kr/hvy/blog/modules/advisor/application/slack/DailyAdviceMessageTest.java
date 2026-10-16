@@ -216,6 +216,17 @@ class DailyAdviceMessageTest {
   }
 
   @Test
+  @DisplayName("advice-v11: 테마 줄은 코드 뒤에 이름을 붙이고, strength 가 동일가중 기준(basis EQ)이면 숫자도 rsEq20 을 보인다 — basis 없는 과거 저장분은 rs20")
+  void themeBriefUsesNameAndEqualWeightValue() {
+    MarketRegime.Theme eq = new MarketRegime.Theme("5", 16, -0.018, 0.029, 0.142, 0.06, ThemeStrength.WEAK, List.of("SK하이닉스"),
+        "정보기술", -0.095, -0.0291, -0.0217, "EQ");
+    assertThat(DailyAdviceMessage.themeBrief(eq)).isEqualTo("5 정보기술[SK하이닉스] -2.9%p");
+    MarketRegime.Theme legacy = new MarketRegime.Theme("5", 16, -0.018, 0.029, 0.142, 0.06, ThemeStrength.STRONG, List.of("SK하이닉스"),
+        null, -0.095, -0.0291, -0.0217);
+    assertThat(DailyAdviceMessage.themeBrief(legacy)).as("basis 없음 → KOSPI 대비 rs20").isEqualTo("5[SK하이닉스] +2.9%p");
+  }
+
+  @Test
   @DisplayName("M6: 국면 줄 '국면(규칙)  BEAR · 변동성 HIGH(87%) · 정책: 매수≤8, 확신≤0.65' 와 테마 강·약 줄이 국면(5일) 앞에 실린다 — 국면이 없으면 두 줄 모두 없다")
   void regimeAndThemeLines() {
     MarketRegime regime = new MarketRegime("0001", LocalDate.of(2026, 9, 11), MarketTrendCode.BEAR, -3, VolRegimeCode.HIGH, 0.8712, 0.0183, 1180,

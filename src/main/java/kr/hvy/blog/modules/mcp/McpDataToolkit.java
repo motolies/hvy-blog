@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.MetricColumn;
 import kr.hvy.blog.modules.advisor.domain.code.ScreenOp;
 import kr.hvy.blog.modules.advisor.application.service.SignalWeightMath;
@@ -160,14 +161,23 @@ public class McpDataToolkit {
     return Map.of("requestedAsOf", McpReadService.end(asOf).toString(), "horizonDays", h, "window", w,
         "statistics", SignalWeightMath.aggregate(ic.window(h, McpReadService.end(asOf), w), h));
   }
-  @Tool(description = "호라이즌별 가중치 세트와 시그널 가중치 이력. 기본 최근 90일, limit 50 최대 250.")
+  @Tool(description = "호라이즌별 가중치 세트와 시그널 가중치 이력. 기간 필터는 as_of(IC 창 마지막 실현 기준일, 생성일 아님 — 생성 시각은 created_at) 기준 최근 90일, "
+      + "limit 50 최대 250.")
   public Map<String, Object> adviceWeights(@ToolParam(required = false) String from, @ToolParam(required = false) String to,
       @ToolParam(required = false) Integer horizon, @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor) {
     return reader.weights(from, to, horizon == null ? properties.getHorizonDays() : requireHorizon(horizon), limit, cursor);
   }
-  @Tool(description = "교훈 이력. 생성일 기간 기본 최근 90일, limit 50 최대 250.")
+  @Tool(description = "교훈 이력. 생성일 기간 기본 최근 90일, limit 50 최대 250. gate 는 교훈 생성 게이트(누적 DAILY LIVE 픽 livePicks ≥ minPicks) — "
+      + "active=false 면 교훈이 아직 만들어지지 않는 단계라 items 가 비는 것이 정상이다.")
   public Map<String, Object> adviceLessons(@ToolParam(required = false) String from, @ToolParam(required = false) String to,
-      @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor) { return reader.lessons(from, to, limit, cursor); }
+      @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor) {
+    Map<String, Object> result = new java.util.LinkedHashMap<>(reader.lessons(from, to, limit, cursor));
+    // 2026-10-16(MCP 2차 점검): "교훈 90일간 0건" 이 파이프라인 고장으로 읽혔다 — 실제로는 WeeklyReviewJob 의 누적 픽 게이트 미달. 같은 식을 함께 싣는다
+    int live = advices.countLivePicks(AdviceKind.DAILY);
+    int min = properties.getLesson().getMinPicks();
+    result.put("gate", Map.of("kind", AdviceKind.DAILY.getCode(), "livePicks", live, "minPicks", min, "active", live >= min));
+    return result;
+  }
   @Tool(description = "픽 노트 이력. 기준일 기간 기본 최근 90일, limit 50 최대 250. 원가격 필드 단위 원.")
   public Map<String, Object> adviceNotes(@ToolParam(required = false) String from, @ToolParam(required = false) String to,
       @ToolParam(required = false) Integer limit, @ToolParam(required = false) String cursor) { return reader.notes(from, to, limit, cursor); }
@@ -182,7 +192,8 @@ public class McpDataToolkit {
     };
   }
 
-  @Tool(description = "지표 유무와 무관하게 데이터별·판단 종류별 최신 기준일을 확인. 다른 조회 전에 호출.")
+  @Tool(description = "지표 유무와 무관하게 데이터별·판단 종류별 최신 기준일을 확인. 다른 조회 전에 호출. disabled 는 설정으로 꺼진 수집·입력(flag·sources) — "
+      + "그 sources 의 날짜가 멈췄거나 null 이어도 장애가 아니다.")
   public Map<String, Object> dataFreshness() { return reader.freshness(); }
 
   @Tool(description = "판단 성과·표본 수·보정표·최근 픽. 기본 최근 90일, DAILY, 해당 종류의 설정 호라이즌. 미채점·판단 없음은 정상 빈 결과.")
@@ -209,7 +220,8 @@ public class McpDataToolkit {
     return kpi.morningVsDaily(start(from, end), end);
   }
 
-  @Tool(description = "현재 활성 가중치. 이력 기간과 무관. horizon 기본 DAILY 설정. 없으면 active=null.")
+  @Tool(description = "현재 활성 가중치. 이력 기간과 무관. horizon 기본 DAILY 설정. 없으면 active=null. asOf 는 IC 창의 마지막 실현 기준일 d(d+h 거래일 수익률까지 "
+      + "확정된 마지막 날)로 생성 시각(createdAt)보다 h 거래일 이상 이르다. weight 0 = 음의 IC 로 점수에서 빠짐(2026-10-16~ 하한 0), enabled=false = 점수 제외 시그널.")
   public Map<String, Object> activeAdviceWeights(@ToolParam(required = false) Integer horizon) {
     int h = horizon == null ? properties.getHorizonDays() : requireHorizon(horizon);
     Map<String, Object> result = new java.util.LinkedHashMap<>();

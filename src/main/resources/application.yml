@@ -304,7 +304,7 @@ advisor:
     non-consistent-conviction-cap: 0.70   # advice-v6: secCons=0(세 구간 초과 미충족)·overheated 섹터 LONG 픽의 확신 상한 — 가드가 기계 클램프(stats capNonConsistent/capOverheated)
     overheated-sigma: 2.0         # 섹터 과열 = 업종 지수 5일 수익률 > 배수 × σ_5d(KOSPI)
   prompt:
-    version: advice-v9            # v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문, v6 섹터 기간 모멘텀(업종 지수 rs5/20/60·consistent·overheated, 2026-09-21), v7 KOSPI200 후보, v8 합성 국면·정책 표·테마(M6, 2026-09-25), v9 매수 전용·0픽 관망(2026-09-27). 파일을 고치면 PromptResources.ADVICE_VERSION 과 같이 올린다
+    version: advice-v11           # 표기용 — 코드는 읽지 않고 실제 기록 버전은 PromptResources.ADVICE_VERSION 이다. v2 시간축·추세 국면·전망, v3 미국 연동(β·상관), v4 뉴스, v5 KOSPI 후보·근거 300/150 전문, v6 섹터 기간 모멘텀(업종 지수 rs5/20/60·consistent·overheated, 2026-09-21), v7 KOSPI200 후보, v8 합성 국면·정책 표·테마(M6, 2026-09-25), v9 매수 전용·0픽 관망(2026-09-27), v10 수급 억원 정수, v11 테마 동일가중 strength·rsEq 열(2026-10-16)
     max-input-chars: 26000        # ≈8k 토큰. 초과 시 후보를 뒤에서 잘라냄
   news:                           # 뉴스 입력(advice-v4). tb_stock_news(scheduler.stock-eventfeed, GDELT 헤드라인) 가 쌓여 있어야 한다. 주입 시점은 계획 Phase 1d(구조화 사건)에서 결정
     enabled: ${NEWS_ENABLED:false}
@@ -319,7 +319,7 @@ advisor:
     link-pairs: ["0001:SPX", "0001:SOX", "1001:COMP", "1001:SOX"]   # 지수별 첫 쌍이 예상 갭의 주 심볼
     link-window-days: 60
     sigma-multiple: 1.0           # 판정 임계 = 배수 × σ(sigma-basis). |β × 미국 1일 수익률| 이 미만이면 HOLD
-    sigma-basis: GAP              # GAP(2026-10-16 기본): 밤사이 갭(시가/전일 종가) σ — 예상 갭과 같은 척도. CLOSE: 종가 σ_1d(이전 동작, 갭 σ 의 ≈2배라 HOLD 자동 적중) 롤백용
+    sigma-basis: GAP              # GAP(2026-10-16 기본): 밤사이 갭(시가/전일 종가) σ — 예상 갭과 같은 척도. CLOSE: 종가 σ_1d(이전 동작, 갭 σ 의 ≈2배라 HOLD 자동 적중) 롤백용 — CLOSE 로 되돌리면 morning-v3 문구(평소 범위 = sigmaGap)와 트리거 기준이 어긋난다
     max-us-lag-days: 4            # 미국 데이터가 기준일보다 이만큼 오래됐으면(휴장·수집 실패) SKIPPED
     advise-deadline: "08:50"      # 07:40 아침 재판정(MORNING_ADVISE, M4) 발행 마감(KST). 이후 실행은 SKIPPED — 개장 후 발행은 D+1 시가 진입과 모순
     sector-sigma-multiple: 2.0    # 아침 재판정 트리거 플래그: 섹터 연동 심볼 |r1| ≥ 배수 × 자기 σ. 플래그는 호출 여부가 아니라 diff_json 기록용
@@ -341,7 +341,7 @@ advisor:
     reference-ic: 0.03
     prior-n-eff: 24               # 축소 추정 prior
     min-n-eff: 24                 # 미만이면 가중치 세트 미갱신
-    multiplier-min: 0.5
+    multiplier-min: 0.0           # 2026-10-16: 0.5 → 0. n_eff=prior 면 m = (1+ĪC/0.03)/2 라 ĪC ≤ −0.03 이면 가중치 0 (부호 반전 없음)
     multiplier-max: 2.0
     backfill-from: "2020-01-01"   # IC 사전 추정 시작일 (유니버스 뷰가 현재 마스터 기준이라 생존편향 — 부호·순위만 신뢰)
     incremental-max-days: 45      # 증분(ADVISE·WEEKLY_REVIEW)이 감당할 최대 공백(캘린더일). 초과분은 경고만 남기고 IC_BACKFILL?baseDate= 로 채운다
@@ -402,14 +402,27 @@ advisor:
     pick-count: 10                # 규칙 상위 N
     pick-min: 3
     max-per-sector: 3
+    h180-catch-up-days: 5         # H180 따라잡기: 그 달 첫 거래일~5번째 거래일 안에서 그 달 LIVE H180 이 없으면 발행(2026-10-16, 1 = 첫 거래일만)
   theme:                          # 테마 블록(M6): KOSPI200 구성(PIT) 종목을 kospi200_sector 대분류별로 집계. CUSTOM 매핑 보류
-    strong-rs20: 0.02             # rs20 ≥ +0.02 & rs60 > 0 → STRONG, rs20 ≤ −0.02 & rs60 < 0 → WEAK
+    strong-rs20: 0.02             # rsEq20 ≥ +0.02 & rsEq60 > 0 → STRONG, rsEq20 ≤ −0.02 & rsEq60 < 0 → WEAK (동일가중 벤치, 2026-10-16 advice-v11 — 그 전엔 KOSPI 대비 rs20/rs60)
     min-members: 3                # 지표 있는 구성 종목이 이보다 적은 대분류는 제외
     leaders: 3                    # 대표 종목명(60일 거래대금 상위) 수 — 코드 의미 단서
-    names: {}                     # kospi200_sector 코드 → 이름(MCP 응답 name, 프롬프트 입력 아님). 코드표가 없어 운영 SQL 로 확인한 코드만 적는다 (2026-10-16):
-                                  #   SELECT kospi200_sector, COUNT(*), STRING_AGG(stock_name, ',' ORDER BY listed_shares DESC NULLS LAST) FROM tb_stock_master WHERE is_kospi200 AND is_active GROUP BY 1 ORDER BY 1;
-                                  #   2026-10-15 대표 종목으로 본 잠정 후보(검증 전): 1 건설, 2 중공업, 3 철강·소재, 4 에너지·화학, 5 정보기술, 6 금융, 7 생활소비재, 8 경기소비재, 9 산업재, A 헬스케어, B 커뮤니케이션서비스
-                                  #   확인되면 예: names: {"5": "정보기술", "6": "금융"}
+    # kospi200_sector 코드 → 이름(MCP 응답·Slack 테마 줄 name, 프롬프트 입력 아님). 2026-10-14·15 marketRegime 대표 종목으로 확인 (2026-10-16):
+    #   1 삼성물산·대우건설, 2 두산에너빌리티·HD현대중공업, 3 POSCO홀딩스·고려아연, 4 SK이노베이션·한화솔루션, 5 SK하이닉스·삼성전자, 6 KB금융·신한지주,
+    #   7 에이피알·삼양식품, 8 현대차·기아, 9 한화에어로스페이스·LS ELECTRIC, A 셀트리온·삼성바이오로직스, B NAVER·SK텔레콤
+    #   재확인: SELECT kospi200_sector, COUNT(*), STRING_AGG(stock_name, ',' ORDER BY listed_shares DESC NULLS LAST) FROM tb_stock_master WHERE is_kospi200 AND is_active GROUP BY 1 ORDER BY 1;
+    names:
+      "1": 건설
+      "2": 중공업
+      "3": 철강·소재
+      "4": 에너지·화학
+      "5": 정보기술
+      "6": 금융
+      "7": 생활소비재
+      "8": 경기소비재
+      "9": 산업재
+      "A": 헬스케어
+      "B": 커뮤니케이션서비스
   retention-days: 180             # 프롬프트 입력 스냅샷 보존
   # Slack #hvy-advisor 채팅 봇 (chat-v1, 2026-09-13). Socket Mode 수신 — 공개 URL·서명 검증 없음, app-level 토큰 1개.
   # 토큰·채널·허용 사용자 중 하나라도 비면 WARN 만 남기고 연결하지 않는다(기동은 됨). bot 토큰은 slack.token(SLACK_BOT_TOKEN) 재사용

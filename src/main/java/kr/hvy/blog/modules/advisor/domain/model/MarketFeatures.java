@@ -19,6 +19,8 @@ import java.util.Map;
  * @param sectorIndexAsOf      업종 지수(mv_stock_index_metric, 섹터 코드 = 업종 코드) 마지막 날 (advice-v6). 0001 과 날짜가 다르면 섹터 rs 는 null 이 되고
  *                             이 값이 지연을 드러낸다. 업종 지수가 하나도 없으면 null
  * @param regime               합성 국면(추세 × 변동성 → 정책 표 한도)과 테마 강약 (M6, advice-v8). 계산 전 호출·테스트는 null
+ * @param flowProvisional      flowAsOf 수급이 아직 잠정치인지 (2026-10-16). 그 날짜보다 뒤 target_date 의 DAILY 수집이 시장 수급 단계를 실패 없이
+ *                             다시 받았으면 false(확정치), 아니면 true. null 은 모름 → true 로 표기
  */
 public record MarketFeatures(
     LocalDate asOf,
@@ -37,7 +39,19 @@ public record MarketFeatures(
     List<MarketTrend> trends,
     List<GlobalLink> links,
     LocalDate sectorIndexAsOf,
-    MarketRegime regime) {
+    MarketRegime regime,
+    Boolean flowProvisional) {
+
+  /**
+   * flowProvisional 이전 모양 — 기존 호출·테스트 호환용(잠정 여부 모름 → true 로 표기).
+   */
+  public MarketFeatures(LocalDate asOf, List<IndexFeature> indices, List<FlowFeature> flows, List<GlobalFeature> global, List<SectorFeature> topSectors,
+      List<SectorFeature> bottomSectors, Map<String, Double> sigma5d, LocalDate globalAsOf, Integer globalAgeTradingDays, LocalDate flowAsOf,
+      LocalDate sectorAsOf, LocalDate entryDate, LocalDate exitDate, List<MarketTrend> trends, List<GlobalLink> links, LocalDate sectorIndexAsOf,
+      MarketRegime regime) {
+    this(asOf, indices, flows, global, topSectors, bottomSectors, sigma5d, globalAsOf, globalAgeTradingDays, flowAsOf, sectorAsOf, entryDate, exitDate,
+        trends, links, sectorIndexAsOf, regime, null);
+  }
 
   /**
    * M6 이전 모양(합성 국면 없음) — 기존 호출·테스트 호환용.
@@ -61,7 +75,7 @@ public record MarketFeatures(
    */
   public MarketFeatures withRegime(MarketRegime newRegime) {
     return new MarketFeatures(asOf, indices, flows, global, topSectors, bottomSectors, sigma5d, globalAsOf, globalAgeTradingDays, flowAsOf, sectorAsOf,
-        entryDate, exitDate, trends, links, sectorIndexAsOf, newRegime);
+        entryDate, exitDate, trends, links, sectorIndexAsOf, newRegime, flowProvisional);
   }
 
   public record IndexFeature(String code, String name, double close, Double r1, Double r5, Double r20, Double r60, Double distMa20, Double distMa60) {
@@ -116,13 +130,14 @@ public record MarketFeatures(
   }
 
   /**
-   * 관측 기준일 블록 — 프롬프트 dataAsOf 와 tb_advisor_advice.data_as_of_json 이 같은 모양을 쓴다. 수급은 당일 잠정치라 flowProvisional 을 고정 표기.
+   * 관측 기준일 블록 — 프롬프트 dataAsOf 와 tb_advisor_advice.data_as_of_json 이 같은 모양을 쓴다. flowProvisional 은 계산값(2026-10-16 — 그 전 저장분은
+   * 항상 true 고정 표기였다). 라이브 판단 시점에는 그날 수급이 아직 다음 DAILY 를 거치지 않아 보통 true 다.
    */
   public Map<String, Object> dataAsOf() {
     Map<String, Object> block = new java.util.LinkedHashMap<>();
     block.put("domestic", asOf == null ? null : asOf.toString());
     block.put("flow", flowAsOf == null ? null : flowAsOf.toString());
-    block.put("flowProvisional", true);
+    block.put("flowProvisional", flowProvisional == null || flowProvisional);
     block.put("sector", sectorAsOf == null ? null : sectorAsOf.toString());
     block.put("global", globalAsOf == null ? null : globalAsOf.toString());
     block.put("globalAgeTradingDays", globalAgeTradingDays);

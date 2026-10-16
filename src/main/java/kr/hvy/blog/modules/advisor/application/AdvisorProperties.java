@@ -562,8 +562,11 @@ public class AdvisorProperties {
     /** 이보다 n_eff 가 작으면 가중치 세트를 갱신하지 않는다 */
     private int minNEff = 24;
 
-    /** 배수 하한·상한 */
-    private double multiplierMin = 0.5;
+    /**
+     * 배수 하한·상한. 하한 0(2026-10-16~)은 음의 IC 시그널을 가중치 0(점수에서 빠짐)까지 내리되 부호는 뒤집지 않는다.
+     * 그 전 0.5 는 n_eff = prior 라 ĪC ≤ 0 이면 t 와 무관하게 하한에 붙었다
+     */
+    private double multiplierMin = 0.0;
     private double multiplierMax = 2.0;
 
     /** 사전 추정(IC_BACKFILL) 시작일 */
@@ -754,15 +757,18 @@ public class AdvisorProperties {
   @Data
   public static class Theme {
 
-    /** 강약 판정 임계: rs20(중앙값 수익률 − KOSPI) 이 +이 값 이상이고 rs60 &gt; 0 이면 STRONG, −이 값 이하이고 rs60 &lt; 0 이면 WEAK */
+    /**
+     * 강약 판정 임계: rsEq20(중앙값 수익률 − KOSPI200 전 구성 종목 중앙값) 이 +이 값 이상이고 rsEq60 &gt; 0 이면 STRONG, −이 값 이하이고 rsEq60 &lt; 0 이면 WEAK.
+     * 2026-10-16 전에는 KOSPI 종합 대비 rs20/rs60 에 같은 임계를 썼다
+     */
     private double strongRs20 = 0.02;
 
     /** 지표가 있는 구성 종목이 이보다 적은 대분류는 뺀다(중앙값이 한두 종목에 좌우) */
     private int minMembers = 3;
 
     /**
-     * kospi200_sector 코드 → 테마 이름(MCP marketRegime·adviceDetail 응답의 name). 코드표가 코드베이스에 없어 운영 데이터(대표 종목)로 확인한 코드만 적는다 —
-     * 비어 있으면 name 은 null 이고 leaders 로 성격을 읽는다. 판단 프롬프트 입력(THEME_COLUMNS)에는 들어가지 않는다 (2026-10-16)
+     * kospi200_sector 코드 → 테마 이름(MCP marketRegime·adviceDetail 응답과 Slack 테마 줄의 name). 코드표가 코드베이스에 없어 운영 데이터(대표 종목)로 확인한 코드만 적는다 —
+     * 없는 코드는 name 이 null 이고 leaders 로 성격을 읽는다. 판단 프롬프트 입력(THEME_COLUMNS)에는 들어가지 않는다 (2026-10-16)
      */
     private java.util.Map<String, String> names = new java.util.LinkedHashMap<>();
 
@@ -833,6 +839,12 @@ public class AdvisorProperties {
 
     /** 후보 안 섹터당 최대 종목 수 */
     private int maxPerSector = 3;
+
+    /**
+     * H180 따라잡기 창(거래일): 그 달 첫 거래일부터 이 거래일까지, 그 달 LIVE H180 판단이 아직 없으면 스케줄러가 발행한다(2026-10-16).
+     * 1 이면 첫 거래일만(이전 동작)
+     */
+    private int h180CatchUpDays = 5;
 
     /** 기본 가중치: MOM_12_1 0.30, QUALITY_ROE 0.20, QUALITY_DEBT 0.15, OP_GROWTH 0.15, LOW_VOL_60 0.20 */
     static Map<String, Double> defaultLongTermWeights() {

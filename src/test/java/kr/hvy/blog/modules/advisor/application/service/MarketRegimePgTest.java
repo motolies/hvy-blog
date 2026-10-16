@@ -170,7 +170,10 @@ class MarketRegimePgTest {
     assertThat(one.rs60()).isCloseTo(18 / 40.0, within(1e-9));
     assertThat(one.rs5()).as("합성 데이터에 ret_5d 없음").isNull();
     assertThat(one.breadth()).as("종가 ≥ 100 > ma20 90").isEqualTo(1.0);
-    assertThat(one.strength()).isEqualTo(ThemeStrength.STRONG);
+    // 2026-10-16(advice-v11): strength 는 동일가중 기준(rsEq20/rsEq60) — KOSPI 대비 rs20 0.45 는 크지만 전 구성 종목 중앙값과 같아 NEUTRAL
+    assertThat(one.rsEq20()).isCloseTo(0.0, within(1e-9));
+    assertThat(one.strength()).isEqualTo(ThemeStrength.NEUTRAL);
+    assertThat(one.basis()).isEqualTo("EQ");
     assertThat(one.leaders()).hasSize(3);
     // 2026-10-16: rsEq = 테마 중앙값 − 전 구성 종목 중앙값. KOSPI 수익률이 0 이라 rs − rsEq 가 전체 중앙값으로 모든 테마에서 같다. name 은 설정 매핑, 없으면 null
     MarketRegime.Theme three = atBase.get("3");
@@ -178,6 +181,8 @@ class MarketRegimePgTest {
     assertThat(one.rs20() - one.rsEq20()).as("전 구성 종목 ret_20d 중앙값").isCloseTo(three.rs20() - three.rsEq20(), within(1e-9));
     assertThat(one.rs60() - one.rsEq60()).isCloseTo(three.rs60() - three.rsEq60(), within(1e-9));
     assertThat(one.rsEq5()).as("ret_5d 없음").isNull();
+    assertThat(three.rsEq20()).as("중앙값 20/40 − 전체 18/40").isCloseTo(2 / 40.0, within(1e-9));
+    assertThat(three.strength()).as("rsEq20 0.05 ≥ 0.02 이고 rsEq60 > 0").isEqualTo(ThemeStrength.STRONG);
     assertThat(one.name()).isNull();
     properties.getTheme().getNames().put("1", "테스트테마");
     assertThat(new ThemeStrengthService(named, properties).themes(BASE).stream().filter(t -> t.code().equals("1")).findFirst().orElseThrow().name())

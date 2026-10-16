@@ -103,6 +103,21 @@ class IntradayCheckJobTest {
   }
 
   @Test
+  @DisplayName("comment: 픽의 지수 대비 판정과 지수 방향 적중을 따로 쓴다 — 지수 DOWN 이 맞고 픽이 지수보다 약하면 '예측과 반대로' 가 아니라 픽 열위 + 지수 적중")
+  void commentSeparatesPickVersusIndexFromIndexDirection() {
+    Map<String, CandidateRow> candidates = Map.of("005930", CandidateRow.builder().ticker("005930").stockName("삼성전자").build());
+    List<Map<String, Object>> picks = List.of(new java.util.LinkedHashMap<>(Map.of("ticker", "005930", "agree", false, "agreeBasis", "OPEN", "excess", -0.012)));
+    Map<String, Object> index = new java.util.LinkedHashMap<>();
+    index.put("0001", Map.of("predicted", "DOWN", "agree", true));
+    index.put("1001", Map.of("predicted", "UP", "agree", false));
+    assertThat(IntradayCheckJob.comment(IntradayVerdict.OFF_TRACK, picks, candidates, index))
+        .isEqualTo("픽 다수가 지수보다 약함 — 마감 후 채점 주시. 지수 방향 예측: KOSPI 적중·KOSDAQ 빗나감. 지수보다 약한 픽: 삼성전자 지수대비 -1.2%p")
+        .doesNotContain("예측과 반대로");
+    List<Map<String, Object>> noBench = List.of(Map.of("ticker", "005930", "changeRate", -1.0));
+    assertThat(IntradayCheckJob.comment(IntradayVerdict.MIXED, noBench, candidates, Map.of())).as("지수와 비교한 픽이 없으면 판정 보류").isEqualTo("지수 대비 비교 불가 — 판정 보류.");
+  }
+
+  @Test
   @DisplayName("지수·픽을 대조해 일치율·판정을 저장·발행하고 종목 1건 실패는 삼킨다. FLAT 아닌 픽만 회고해 노트를 저장하고 티커를 언급한 가설은 null")
   void checksReflectsAndPublishes() {
     stubAdvice842();
@@ -126,9 +141,11 @@ class IntradayCheckJobTest {
     IntradayCheckRow row = saved.getValue();
     assertThat(row.adviceId()).isEqualTo(842L);
     assertThat(row.checkedAt()).isEqualTo(NOON_KST);
-    assertThat(row.agreementRatio()).isCloseTo(2.0 / 3, org.assertj.core.data.Offset.offset(1e-9)); // 005930 ✓, 000660 ✗, 035420(AVOID, 음수) ✓
+    // 2026-10-16: 픽 일치는 지수 대비 초과(OPEN) 기준 — 005930 초과 +, 000660 초과 −, 035420(AVOID) 초과 − ✓
+    assertThat(row.agreementRatio()).isCloseTo(2.0 / 3, org.assertj.core.data.Offset.offset(1e-9));
     assertThat(row.verdict()).isEqualTo(IntradayVerdict.ON_TRACK);
-    assertThat(row.comment()).contains("판단 유지").contains("SK하이닉스 -2.1%");
+    assertThat(row.comment()).contains("픽 다수가 지수보다 강함").contains("지수 방향 예측: KOSPI 적중·KOSDAQ 적중").contains("SK하이닉스 지수대비 -2.5%p");
+    assertThat(row.pickJson().get(0)).as("일치 기준 기록").containsEntry("agreeBasis", "OPEN");
     @SuppressWarnings("unchecked")
     Map<String, Object> kospi = (Map<String, Object>) row.indexJson().get("0001");
     assertThat(kospi).containsEntry("agree", true).containsEntry("changeRate", 0.31).containsEntry("open", 2730.0);

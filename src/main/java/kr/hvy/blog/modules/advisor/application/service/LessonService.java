@@ -8,11 +8,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.client.llm.LessonProposalResponse;
 import kr.hvy.blog.modules.advisor.domain.code.LessonScope;
 import kr.hvy.blog.modules.advisor.domain.code.LessonStatus;
+import kr.hvy.blog.modules.advisor.domain.code.SignalCode;
 import kr.hvy.blog.modules.advisor.domain.model.LessonRow;
 import kr.hvy.blog.modules.advisor.repository.jdbc.LessonRepository;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +40,9 @@ public class LessonService {
 
   static final Pattern TICKER_MENTION = Pattern.compile("(?<![0-9A-Za-z])\\d{6}(?![0-9])");
   static final double HIGH_PCT = 0.8;
+
+  /** 셀을 만드는 시그널 코드 — 지금 점수에 들어가는 것만(LessonSchemaFactory 출력 enum 과 같은 집합) */
+  private static final Set<String> SCORABLE_CODES = SignalCode.scorable().stream().map(SignalCode::getCode).collect(Collectors.toUnmodifiableSet());
   static final double LOW_PCT = 0.2;
 
   /**
@@ -79,6 +85,10 @@ public class LessonService {
       add(groups, ranges, key(regime, null, null, null), excess, date);
       add(groups, ranges, key(regime, null, null, sector), excess, date);
       for (Map.Entry<String, Object> e : signals.entrySet()) {
+        // 지금 점수에 없는 시그널(2026-10-16 이전 후보의 RS_INDEX)은 교훈 출력 스키마 enum 에도 없으므로 셀로 만들지 않는다
+        if (!SCORABLE_CODES.contains(e.getKey())) {
+          continue;
+        }
         if (e.getValue() instanceof Map<?, ?> v && v.get("pct") instanceof Number pct) {
           String bucket = pct.doubleValue() >= HIGH_PCT ? "HIGH" : pct.doubleValue() <= LOW_PCT ? "LOW" : null;
           if (bucket != null) {

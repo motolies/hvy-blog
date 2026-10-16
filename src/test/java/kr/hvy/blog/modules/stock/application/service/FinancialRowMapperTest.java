@@ -93,6 +93,57 @@ class FinancialRowMapperTest {
     assertThat(d.sameExtendedValues(e)).isFalse();
   }
 
+  @Test
+  @DisplayName("연간: 12월 결산이면 KIS 가 끝에 붙여 주는 진행 중 회계연도 중간기간(202606)을 버린다")
+  void annualDropsTrailingInterimPeriod() {
+    List<FinancialRow> rows = FinancialRowMapper.merge("005930", false, "12", List.of(List.of(
+        Map.of("stac_yymm", "202412", "sale_account", "3000"),
+        Map.of("stac_yymm", "202512", "sale_account", "3300"),
+        Map.of("stac_yymm", "202606", "sale_account", "3050"))));
+    assertThat(rows).extracting(FinancialRow::fiscalPeriod).containsExactly("202412", "202512");
+    assertThat(rows).allMatch(r -> FinancialRow.PERIOD_ANNUAL.equals(r.periodType()));
+  }
+
+  @Test
+  @DisplayName("연간: 결산월을 바꾸기 전 옛 회계연도(뒤에 결산월 행이 있는 비결산월 행)는 남긴다")
+  void annualKeepsPreChangeFiscalYear() {
+    List<FinancialRow> rows = FinancialRowMapper.merge("900001", false, "12", List.of(List.of(
+        Map.of("stac_yymm", "202303", "sale_account", "10"),
+        Map.of("stac_yymm", "202312", "sale_account", "12"),
+        Map.of("stac_yymm", "202506", "sale_account", "6"))));
+    assertThat(rows).extracting(FinancialRow::fiscalPeriod).containsExactly("202303", "202312");
+    // 3월 결산 한 자리 표기("3")도 같은 규칙
+    assertThat(FinancialRowMapper.merge("900002", false, "3", List.of(List.of(
+        Map.of("stac_yymm", "202503", "sale_account", "1"),
+        Map.of("stac_yymm", "202512", "sale_account", "1")))))
+        .extracting(FinancialRow::fiscalPeriod).containsExactly("202503");
+  }
+
+  @Test
+  @DisplayName("분기와 결산월 미상(null·\"00\")은 거르지 않는다")
+  void quarterlyAndUnknownSettleMonthKeepAll() {
+    List<List<Map<String, String>>> sources = List.of(List.of(
+        Map.of("stac_yymm", "202512", "sale_account", "1"),
+        Map.of("stac_yymm", "202606", "sale_account", "2")));
+    assertThat(FinancialRowMapper.merge("005930", true, "12", sources)).hasSize(2);
+    assertThat(FinancialRowMapper.merge("005930", false, null, sources)).hasSize(2);
+    assertThat(FinancialRowMapper.merge("005930", false, "00", sources)).hasSize(2);
+    assertThat(FinancialRowMapper.merge("005930", false, sources)).hasSize(2);
+  }
+
+  @Test
+  @DisplayName("비율 0.00(KIS 공란)은 NULL 로 읽되 차입금 의존도와 금액의 0 은 유지한다")
+  void zeroRatiosAreNullExceptBorrowingDependency() {
+    FinancialRow row = single(Map.of("stac_yymm", "202312", "sale_account", "0", "roe_val", "0", "quck_rate", "0.00",
+        "crnt_rate", "150.5", "bram_depn", "0.00", "grs", "-0.00"));
+    assertThat(row.quickRatio()).isNull();
+    assertThat(row.roe()).isNull();
+    assertThat(row.revenueGrowth()).isNull();
+    assertThat(row.currentRatio()).isEqualByComparingTo("150.5");
+    assertThat(row.borrowingDependency()).isEqualByComparingTo("0");
+    assertThat(row.revenue()).isZero();
+  }
+
   private static FinancialRow single(Map<String, String> row) {
     return FinancialRowMapper.merge("005930", false, List.of(List.of(row))).get(0);
   }

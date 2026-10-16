@@ -61,7 +61,7 @@ public class IntradayCheckMessage implements SlackMessage {
   @Override
   public List<LayoutBlock> toBlocks() {
     String ratio = total == 0 ? "-" : String.format("%d/%d (%.0f%%)", agreed, total, agreed * 100.0 / total);
-    String text = String.format("🕛 *%s 중간 점검%s* · %s 판단%n%s · 픽 일치 %s → *%s*%n%s", checkedAt, offHours ? " (장외 점검)" : "", baseDate, indexLine,
+    String text = String.format("🕛 *%s 중간 점검%s* · %s 판단%n%s · 지수 대비 앞선 픽 %s → *%s*%n%s", checkedAt, offHours ? " (장외 점검)" : "", baseDate, indexLine,
         ratio, verdict.getDesc(), comment == null ? "" : comment);
     List<LayoutBlock> blocks = new ArrayList<>();
     blocks.add(section(s -> s.text(markdownText(text))));

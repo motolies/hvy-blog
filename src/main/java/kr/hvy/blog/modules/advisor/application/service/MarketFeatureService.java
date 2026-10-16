@@ -45,6 +45,20 @@ public class MarketFeatureService {
       .thenComparing(SectorFeature::code);
 
   /**
+   * 수급일(:flow) 수급이 확정치인지: 그보다 뒤 target_date 의 DAILY 수집(SUCCESS·PARTIAL)이 MARKET_INVESTOR 단계를 실패 없이 끝냈으면 true.
+   * 시장 수급 수집(collectRecent)은 매일 최근 페이지를 다시 받아 덮으므로 다음 영업일 DAILY 가 성공하면 전날 수급은 확정치다. 실패 수는 단계 메타의
+   * failures 로 본다(시장별 예외를 삼켜 단계 status 가 OK 로 남을 수 있다). 기준일로 상한을 두지 않는다 — 사후 재실행·과거 조회는 "지금 읽는 값" 을 드러낸다.
+   */
+  static final String FLOW_FINAL_SQL = """
+      SELECT EXISTS (
+          SELECT 1 FROM tb_stock_collect_run r
+                   CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.metadata_json -> 'steps') = 'array'
+                                                                THEN r.metadata_json -> 'steps' ELSE '[]'::jsonb END) s
+          WHERE r.job_type = 'DAILY' AND r.status IN ('SUCCESS', 'PARTIAL') AND r.target_date > :flow
+            AND s ->> 'step' = 'MARKET_INVESTOR' AND s ->> 'status' = 'OK' AND COALESCE((s ->> 'failures')::int, 0) = 0)
+      """;
+
+  /**
    * 섹터 SQL: mv(MV 5행 집계, members 게이트) ← k(0001 최신 행) ← idx(업종 지수 최신 행, 0001 과 같은 날짜만 — 지수 수집이 지연되면 rs 는 null).
    * idx 창은 10 캘린더일 — 연휴를 넘기되 오래된 지수를 당일 값으로 오해하지 않게 짧게 둔다.
    * mom 은 세 rs 가 전부 있는 섹터끼리 PERCENT_RANK 를 매겨 평균한다(NULL 창 분리는 FeatureSql.percentRankColumns 와 같은 관례). consistent 는 세 구간
@@ -144,6 +158,7 @@ public class MarketFeatureService {
         .min(Comparator.naturalOrder()).orElse(null);
     Integer globalAge = globalAsOf == null ? null : tradingCalendar.tradingDaysBetween(globalAsOf, asOf);
     LocalDate flowAsOf = jdbc.queryForObject("SELECT MAX(trade_date) FROM tb_stock_market_investor_daily WHERE trade_date <= :d", p, LocalDate.class);
+    boolean flowProvisional = flowAsOf == null || !Boolean.TRUE.equals(jdbc.queryForObject(FLOW_FINAL_SQL, Map.of("flow", flowAsOf), Boolean.class));
     LocalDate sectorAsOf = jdbc.queryForObject("SELECT MAX(trade_date) FROM mv_stock_sector_daily WHERE trade_date <= :d", p, LocalDate.class);
     // advice-v6: 업종 지수(섹터 코드 = 업종 코드) 마지막 날 — 0001 보다 오래되면 섹터 rs 가 null 이 되므로 dataAsOf.sectorIndex 로 드러낸다
     LocalDate sectorIndexAsOf = jdbc.queryForObject("SELECT MAX(i.trade_date) FROM mv_stock_index_metric i WHERE i.trade_date <= :d "
@@ -168,7 +183,7 @@ public class MarketFeatureService {
     TradingCalendar.Window window = tradingCalendar.window(asOf, horizonDays);
     List<kr.hvy.blog.modules.advisor.domain.model.MarketTrend> trends = trendService.trends(asOf);
     return new MarketFeatures(asOf, indices, flows, global, top, bottom, sigma, globalAsOf, globalAge, flowAsOf, sectorAsOf,
-        window.entry(), window.exit(), trends, globalLinks.links(asOf), sectorIndexAsOf, regimeService.regime(asOf, trends));
+        window.entry(), window.exit(), trends, globalLinks.links(asOf), sectorIndexAsOf, regimeService.regime(asOf, trends), flowProvisional);
   }
 
   /**

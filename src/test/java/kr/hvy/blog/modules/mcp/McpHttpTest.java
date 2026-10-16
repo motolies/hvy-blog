@@ -87,8 +87,11 @@ class McpHttpTest {
         }
         for (String tool : java.util.List.of("dataFreshness", "advicePerformance", "morningPerformanceComparison", "activeAdviceWeights"))
           assertThat(client.callTool(new McpSchema.CallToolRequest(tool, Map.of())).isError()).as(tool).isFalse();
-        assertThat(client.callTool(new McpSchema.CallToolRequest("activeAdviceWeights", Map.of())).structuredContent().toString()).contains("2020-01-01");
-        assertThat(client.callTool(new McpSchema.CallToolRequest("dataFreshness", Map.of())).structuredContent().toString()).contains("DAILY", "2026-01-02");
+        assertThat(client.callTool(new McpSchema.CallToolRequest("activeAdviceWeights", Map.of())).structuredContent().toString()).contains("2020-01-01")
+            .as("세트 생성 시각(as_of 는 IC 창 끝이라 생성일과 다르다)").contains("createdAt");
+        assertThat(client.callTool(new McpSchema.CallToolRequest("adviceLessons", Map.of())).structuredContent().toString())
+            .as("교훈 게이트(누적 픽 < min-picks 면 0건이 정상)").contains("gate", "minPicks=300", "active=false");
+        assertThat(client.callTool(new McpSchema.CallToolRequest("dataFreshness", Map.of())).structuredContent().toString()).contains("DAILY", "2026-01-02", "disabled");
         for (String topic : java.util.List.of("stock", "advice", "catalog"))
           assertThat(client.callTool(new McpSchema.CallToolRequest("dataGuide", Map.of("topic", topic))).isError()).isFalse();
         for (String tool : java.util.List.of("stockSnapshot", "stockSeries")) {

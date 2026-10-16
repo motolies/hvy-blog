@@ -287,6 +287,39 @@ class MarketFeaturePgTest {
     }
   }
 
+  @Test
+  @DisplayName("flowProvisional: 수급일보다 뒤 target_date 의 DAILY 가 시장 수급 단계를 실패 없이 끝냈으면 확정(false), run 없음·실패 수 있음·FAILED 면 잠정(true)")
+  void flowProvisionalFollowsLaterDailyRun() {
+    LocalDate prev = DATES.get(DATES.size() - 2);
+    jdbc.update("INSERT INTO tb_stock_market_investor_daily (market_type, trade_date, foreign_net_amt, collected_at) VALUES ('KOSPI', ?, 1, NOW()), ('KOSPI', ?, 2, NOW()) "
+        + "ON CONFLICT DO NOTHING", prev, BASE);
+    try {
+      assertThat(features.features(BASE).dataAsOf()).containsEntry("flow", BASE.toString()).containsEntry("flowProvisional", true);
+      assertThat(features.features(prev).flowProvisional()).as("뒤 DAILY run 없음").isTrue();
+
+      insertDailyRun(BASE, "SUCCESS", 0);
+      assertThat(features.features(prev).dataAsOf()).as("BASE DAILY 가 prev 수급을 다시 받았다").containsEntry("flowProvisional", false);
+      assertThat(features.features(BASE).flowProvisional()).as("BASE 수급은 아직 다음 DAILY 전").isTrue();
+
+      jdbc.update("DELETE FROM tb_stock_collect_run WHERE job_type = 'DAILY'");
+      insertDailyRun(BASE, "SUCCESS", 1);
+      assertThat(features.features(prev).flowProvisional()).as("시장 수급 단계 실패 1건").isTrue();
+      jdbc.update("DELETE FROM tb_stock_collect_run WHERE job_type = 'DAILY'");
+      insertDailyRun(BASE, "FAILED", 0);
+      assertThat(features.features(prev).flowProvisional()).as("run FAILED").isTrue();
+    } finally {
+      jdbc.update("DELETE FROM tb_stock_collect_run WHERE job_type = 'DAILY'");
+      jdbc.update("DELETE FROM tb_stock_market_investor_daily WHERE trade_date IN (?, ?)", prev, BASE);
+    }
+  }
+
+  /** DAILY 수집 run 1행 — steps 에 MARKET_INVESTOR(OK, failures) 단계만 둔다 */
+  private void insertDailyRun(LocalDate target, String status, int failures) {
+    jdbc.update("INSERT INTO tb_stock_collect_run (job_type, trigger_type, target_date, status, metadata_json, created_at, updated_at) "
+            + "VALUES ('DAILY', 'SCHEDULER', ?, ?, CAST(? AS jsonb), NOW(), NOW())", target, status,
+        "{\"steps\":[{\"step\":\"PRICE\",\"status\":\"OK\",\"failures\":0},{\"step\":\"MARKET_INVESTOR\",\"status\":\"OK\",\"failures\":" + failures + "}]}");
+  }
+
   private void insertIndex(String code, LocalDate date, double close) {
     java.math.BigDecimal price = java.math.BigDecimal.valueOf(close).setScale(4, java.math.RoundingMode.HALF_UP);
     jdbc.update("INSERT INTO tb_stock_index_daily (index_code, trade_date, open_price, high_price, low_price, close_price) VALUES (?, ?, ?, ?, ?, ?)",

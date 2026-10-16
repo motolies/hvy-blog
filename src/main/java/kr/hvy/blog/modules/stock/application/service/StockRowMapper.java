@@ -141,13 +141,8 @@ public final class StockRowMapper {
       marketCap = capHundredMillion.multiply(HUNDRED_MILLION).setScale(0, RoundingMode.HALF_UP).longValue();
     }
     return new ValuationRow(ticker, tradeDate, marketCap, KisValues.longValue(o.listedShares()),
-        nonZero(KisValues.decimal(o.per())), nonZero(KisValues.decimal(o.pbr())), nonZero(KisValues.decimal(o.eps())), nonZero(KisValues.decimal(o.bps())),
+        KisValues.decimalNonZero(o.per()), KisValues.decimalNonZero(o.pbr()), KisValues.decimalNonZero(o.eps()), KisValues.decimalNonZero(o.bps()),
         KisValues.decimal(o.week52High()), KisValues.decimal(o.week52Low()), KisValues.decimal(o.foreignHoldRate()));
-  }
-
-  /** 0 은 결측(KIS "0.00")으로 보고 null */
-  private static BigDecimal nonZero(BigDecimal value) {
-    return value == null || value.signum() == 0 ? null : value;
   }
 
   /**

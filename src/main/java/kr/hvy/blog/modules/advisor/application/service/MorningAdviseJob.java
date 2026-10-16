@@ -303,7 +303,7 @@ public class MorningAdviseJob implements AdvisorJob {
       Double gapEst = beta == null || usR1 == null ? null : beta * usR1;
       Double sigma1d = links.sigma1d(code, base);
       Double sigmaGap = links.sigmaGap(code, base);
-      // 트리거 임계는 아침 점검과 같은 σ(sigma-basis, 기본 GAP — 2026-10-16). payload 는 morning-v2 문구대로 sigma1d 를 유지하고 sigmaGap 을 덧붙인다
+      // 트리거 임계는 아침 점검과 같은 σ(sigma-basis, 기본 GAP — 2026-10-16). payload 는 sigma1d·sigmaGap 둘 다 싣고 morning-v3 는 sigmaGap 으로 평소 범위를 읽는다
       Double sigma = properties.getMorning().getSigmaBasis() == AdvisorProperties.Morning.SigmaBasis.CLOSE ? sigma1d : sigmaGap;
       Map<String, Object> m = new LinkedHashMap<>();
       m.put("index", code);

@@ -34,6 +34,7 @@ import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
 import kr.hvy.common.infrastructure.notification.slack.message.SlackColor;
 import kr.hvy.common.infrastructure.notification.slack.message.SlackMessage;
 import lombok.Builder;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * 일일 판단 Block Kit 메시지 (#hvy-advisor, 멘션 없음).
@@ -245,7 +246,8 @@ public class DailyAdviceMessage implements SlackMessage {
   static final int THEME_BRIEF = 2;
 
   /**
-   * 테마 강약 한 줄(M6): "*테마*  강: 5[삼성전자] +3.1%p · 2[HD현대] +2.0%p / 약: 6[KB금융] −2.4%p". rs20(시장 대비 1개월 초과) 기준 상위·하위 각 2개,
+   * 테마 강약 한 줄(M6): "*테마*  강: 4 에너지·화학[SK이노베이션] +4.1%p · 7 생활소비재[에이피알] +3.6%p / 약: 2 중공업[두산에너빌리티] −8.8%p".
+   * 1개월 초과(basis EQ 면 rsEq20, 그 전 저장분은 rs20 — 순서는 같다) 기준 상위·하위 각 2개,
    * 테마가 4개 미만이면 겹치지 않게 나눈다. 테마가 없으면 null.
    */
   String themeText() {
@@ -263,11 +265,16 @@ public class DailyAdviceMessage implements SlackMessage {
     return "*테마*  강: " + strong + (weak.isEmpty() ? "" : " / 약: " + weak);
   }
 
-  /** 테마 1개: 코드[대표 종목] rs20(%p) */
+  /**
+   * 테마 1개: 코드 이름[대표 종목] 1개월 초과(%p). strength 가 동일가중 기준(basis EQ)이면 rsEq20, 아니면(과거 저장분) KOSPI 대비 rs20 을 보인다 —
+   * 라벨과 숫자가 같은 기준이어야 "rs 가 양수인데 약세" 같은 모순이 안 보인다.
+   */
   static String themeBrief(MarketRegime.Theme t) {
+    String name = StringUtils.isBlank(t.name()) ? "" : " " + t.name();
     String leader = t.leaders() == null || t.leaders().isEmpty() ? "" : "[" + t.leaders().getFirst() + "]";
-    String rs20 = t.rs20() == null ? "-" : String.format("%+.1f%%p", t.rs20() * 100);
-    return t.code() + leader + " " + rs20;
+    Double value = t.basis() != null && t.rsEq20() != null ? t.rsEq20() : t.rs20();
+    String rs20 = value == null ? "-" : String.format("%+.1f%%p", value * 100);
+    return t.code() + name + leader + " " + rs20;
   }
 
   String regimeText() {

@@ -38,6 +38,17 @@ class KisValuesTest {
   }
 
   @Test
+  @DisplayName("decimalNonZero: 0·0.00 과 결측은 null, 그 밖은 그대로")
+  void decimalNonZero() {
+    assertThat(KisValues.decimalNonZero("0")).isNull();
+    assertThat(KisValues.decimalNonZero("0.00")).isNull();
+    assertThat(KisValues.decimalNonZero("-")).isNull();
+    assertThat(KisValues.decimalNonZero("")).isNull();
+    assertThat(KisValues.decimalNonZero("1.5")).isEqualByComparingTo(new BigDecimal("1.5"));
+    assertThat(KisValues.decimalNonZero("-0.01")).isEqualByComparingTo(new BigDecimal("-0.01"));
+  }
+
+  @Test
   @DisplayName("yyyyMMdd 를 LocalDate 로 상호 변환한다")
   void dateRoundTrip() {
     LocalDate date = LocalDate.of(2026, 9, 3);

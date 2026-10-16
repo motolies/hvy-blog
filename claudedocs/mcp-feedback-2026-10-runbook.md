@@ -65,7 +65,7 @@ curl -X POST https://<host>/api/advisor/admin/jobs/IC_BACKFILL          # h=5·2
 SELECT horizon_days, COUNT(DISTINCT trade_date) ic_days, MIN(trade_date), MAX(trade_date) FROM tb_advisor_signal_ic_daily GROUP BY 1;   -- h=5 ≥120, h=20 ≥480
 SELECT weight_set_id, horizon_days, source, as_of, window_days, n_eff, is_active FROM tb_advisor_weight_set ORDER BY 1;                  -- BACKFILL is_active, n_eff ≥ 24
 SELECT w.signal_code, w.multiplier, w.ic_mean, w.t_stat, w.flagged FROM tb_advisor_signal_weight w JOIN tb_advisor_weight_set s USING (weight_set_id)
-WHERE s.is_active AND s.horizon_days = 5 ORDER BY 1;   -- MOM_20D·RS_INDEX·TREND_MA flagged=true, multiplier 0.5
+WHERE s.is_active AND s.horizon_days = 5 ORDER BY 1;   -- MOM_20D·RS_INDEX·TREND_MA flagged=true, multiplier 0.5 (2026-10-16 2차 대응 뒤 새 세트는 하한 0·RS_INDEX 비활성 — §9)
 ```
 MCP `activeAdviceWeights` → source BACKFILL. 금요일 20:10 H20 발행. 주간 보고(일 08:00)가 "n_eff x.x < 24 … IC_BACKFILL" 을 적으면 아직 미실행.
 
@@ -92,7 +92,9 @@ P0-5 확인: `SELECT p.trade_date, p.close_price, p.collected_at, m.adj_close, m
 
 ## 8. 후속 설계 메모 (이번에 구현하지 않은 것)
 
-### 8.1 테마 strength 를 동일가중 벤치(rsEq)로
+### 8.1 테마 strength 를 동일가중 벤치(rsEq)로 — ✅ 2026-10-16 2차 대응에서 구현(§9, advice-v11·h20-v4·longterm-v2)
+10/14 regime_json 으로 본 효과: KOSPI 대비 기준 STRONG 9 → 동일가중 기준 3(9 산업재·4 에너지화학·7 생활소비재), 반도체(5)는 rsEq20 −0.029 로 빠짐. 아래는 당시 설계 메모.
+
 현재 `strength` 는 rs20/rs60(KOSPI 종합 대비)이고 rsEq 는 병기만 한다. 전환하려면: (1) `ThemeStrengthService.strength(rsEq20, rsEq60, …)` + `Theme`/`regime_json` 에 `basis: "KOSPI"|"EQ"` 저장, (2) `advice-system-v10.md` 의 테마 정의 문장("중앙값 − KOSPI") 수정 → **advice-v11 + h20-v4** 동반 상향, (3) 착수 전 측정: 최근 60거래일 두 정의의 STRONG 수 비교
 `SELECT base_date, (SELECT COUNT(*) FROM jsonb_array_elements(regime_json->'themes') t WHERE t->>'strength'='STRONG') AS strong_kospi FROM tb_advisor_advice WHERE advice_kind='DAILY' AND variant='LIVE' AND regime_json IS NOT NULL ORDER BY 1 DESC LIMIT 60;` 와 `marketRegime` 의 rsEq20 ≥ 0.02 ∧ rsEq60 > 0 수를 날짜별로 대조. M0 측정 관례(`advisor-m0-measurements.md`)대로 결과가 나온 뒤 결정. Slack `themeBrief` 에 name 표기도 함께.
 
@@ -104,3 +106,67 @@ P0-5 확인: `SELECT p.trade_date, p.close_price, p.collected_at, m.adj_close, m
 
 ### 8.4 verify() KIS 대조 창
 `AdjustFactorService.verify` 는 420일을 요청해도 KIS 가 최신 100캔들만 줘서 효력일이 오래된 이벤트는 오차 0 → verified=true 로 오판할 수 있다. 표본을 "효력일 ≤ 오늘인 미검증 이벤트 보유 종목" 으로, 창을 [eff−60일, min(today, eff+80일)] 로. 효력일 검산(1.5배 밴드)이 1차 방어선이라 급하지 않다.
+
+## 9. 2차 점검(17건) 대응 — 2026-10-16
+
+계획: `~/.claude/plans/mcp-giggly-hearth.md`. 판정 요약: 1·4·8·10번은 배포 전 저장분(advice_id ≤ 78·10/16 12:00 노트)을 본 것이라 코드 변경 없이 가이드에만 적었다. 14번(가격 정정 이력)은 사용자 결정으로 보류.
+
+| 커밋 | 내용 |
+|---|---|
+| RS_INDEX·가중치 | RS_INDEX 점수·IC 제외, multiplier-min 0, IC 검증 시그널끼리 재정규화(VALUE_RANK 고정) |
+| 테마 | strength 동일가중(rsEq) 기준·names·advice-v11·h20-v4·longterm-v2 |
+| morning-v3 | 평소 범위 = sigmaGap, KEEP 은 기본값, usClosed 정의 |
+| KPI | morning.byBasis, variants[].byWeightSet |
+| 섹터·재무·H180 | 비제조업 대분류 대체, 재무 Y=결산월·비율 0→NULL·억원, H180 5거래일 따라잡기 |
+| 세트 혼합 | screeningTop 그날 세트 STORED·live=true, WeightSet.createdAt |
+| MCP | dataFreshness disabled, adviceLessons gate, 장중 지수 대비 판정, flowProvisional 계산, 단위 접미, marketTrend 성분 설명 |
+
+### 9.1 배포 전 (읽기 전용 측정)
+```sql
+-- 재무 삭제 대상·비율 0 빈도
+SELECT COUNT(*), COUNT(DISTINCT f.ticker) FROM tb_stock_financial f JOIN tb_stock_master m USING (ticker)
+ WHERE f.period_type = 'Y' AND m.settle_month IS NOT NULL AND right(f.fiscal_period, 2) <> lpad(m.settle_month, 2, '0');
+SELECT COUNT(*) FILTER (WHERE quick_ratio = 0) quick0, COUNT(*) FILTER (WHERE roe = 0) roe0, COUNT(*) FILTER (WHERE borrowing_dependency = 0) bram0, COUNT(*) FROM tb_stock_financial;
+-- 섹터: 비제조업은 mid_null = total
+SELECT market_type, sector_large_code, COUNT(*) FILTER (WHERE sector_mid_code IS NULL) mid_null, COUNT(*) total
+  FROM tb_stock_master WHERE is_active AND security_group = 'ST' GROUP BY 1, 2 ORDER BY 1, 2;
+-- RS_INDEX 조건 교훈(ACTIVE 면 POST /api/advisor/admin/lessons/{id}/retire)
+SELECT lesson_id, status FROM tb_advisor_lesson WHERE condition_json->>'signal' = 'RS_INDEX';
+-- H180 이력·RUNNING 수집 없음·시장 수급 백만원 잔존(market-investor-normalization.md §0 still_million)
+SELECT run_id, status, base_date, started_at FROM tb_advisor_run WHERE job_type = 'ADVISE_H180' ORDER BY started_at DESC LIMIT 5;
+SELECT run_id, job_type FROM tb_stock_collect_run WHERE status = 'RUNNING';
+```
+
+### 9.2 순서 (DAILY 가 없는 주말 낮 권장 — 평일이면 18:00 전에 ⑤까지)
+```bash
+cd src/main/resources/db/migrate
+psql "$DATABASE_URL" -1 -f 20261016_08_financial_interim_annual_ratio_zero.sql   # ⚠ 배포 직전. 이후 배포까지 FINANCIAL_BACKFILL·WEEKLY(일 03:00) 금지
+psql "$DATABASE_URL" -1 -f 20261016_09_financial_unit_comments.sql
+# ① 곧바로 배포(재기동 — multiplier-min·theme.names·h180-catch-up-days 반영)
+psql "$DATABASE_URL" -1 -f 20261016_10_sector_effective_comments.sql
+psql "$DATABASE_URL" -1 -f 20261016_11_intraday_agreement_basis_comments.sql
+psql "$DATABASE_URL" -1 -f 20261016_12_weight_policy_theme_basis_comments.sql
+psql "$DATABASE_URL" -1 -f 20261016_13_rs_index_ic_cleanup.sql                   # 머리 주석의 사전 확인 SQL 먼저(0 기대)
+B=https://<host>/api/stock/admin/collect; H='Content-Type: application/json'
+curl -X POST $B/MASTER -H "$H" -d '{}'               # ② 섹터 동기화 — run 메타 sectorChanged ≈ 비제조업 종목 수
+curl -X POST $B/DERIVED_REFRESH -H "$H" -d '{}'      # ③ mv_stock_sector_daily 등(과거 전 기간이 새 매핑으로)
+# ④ still_million > 0 이면: curl -X POST $B/MARKET_INVESTOR_BACKFILL -H "$H" -d '{"resetCheckpoint":true}'
+curl -X POST https://<host>/api/advisor/admin/jobs/IC_BACKFILL   # ⑤ baseDate 없이 전체(h=5·20 ≈40분). 섹터 IC 전 기간 재계산 + 새 정책 세트. 19:30~21:00 피함
+```
+⑤를 부분 `baseDate` 로 돌리면 h=20 은 계산할 날이 없어 세트가 생기지 않을 수 있다. ⑤가 끝나기 전에 DAILY 가 돌면 프롬프트 weights 에 옛 세트의 RS_INDEX 가 보이는데 점수에는 빠지는 불일치가 생긴다.
+
+### 9.3 확인
+- `activeAdviceWeights` h=5·20: 새 weightSetId·createdAt, RS_INDEX enabled=false·weight 0, VALUE_RANK 0.05, 학습 시그널 합 ≈ 0.97, 배수 0 인 시그널은 flagged
+- `marketRegime`: themes[].basis=EQ·name, STRONG 수 감소 / `stockSectors 011200` → KRX 0019 운송·창고 / `stockFinancials 005930` → 202606 Y 없음, `revenue_eok`·`roe_pct`
+- `dataFreshness.disabled`(MACRO·EVENT·NEWS) / `adviceLessons.gate`(active=false 면 0건 정상) / `stockMaster` `listed_shares_thou` / `marketOverview(asOf=과거일)` flowProvisional=false
+- `screeningTop baseDate=<세트 2 를 쓴 과거일>` → STORED + activeWeightSetId, `live=true` → LIVE
+- 첫 DAILY: `prompt_version='advice-v11'`, 새 세트 id, `regime_json->'themes'->0->>'basis'='EQ'`, `GET /advices/{id}/prompt` 의 rsIdx 값 있음·weights 에 RS_INDEX 없음·theme 열 끝 rsEq20·rsEq60
+- 다음 07:30 sigmaBasis GAP, 07:40 `morning-v3`, 12:00 `adviceChecks` intraday `agreementBasis: EXCESS`·새 comment, 금 H20 `advice-h20-v4`, 다음 H60/H180 `longterm-v2`
+- 며칠 뒤 `performanceSummary`: `morning.byBasis`(CLOSE·GAP 분리), `variants[].byWeightSet`
+- 일요일 WEEKLY 뒤: `SELECT COUNT(*) FROM tb_stock_financial WHERE revision_seq > 0 AND first_seen_at >= '<배포일>';` 가 폭증하지 않아야 한다(migrate 08 순서 확인)
+- 10월 H180 은 따라잡기 창(5거래일) 밖이다. 필요하면 거래일 20:40 이후 `POST /api/advisor/admin/jobs/ADVISE_H180`, 아니면 11/02 자동(11/06 까지 따라잡기)
+
+### 9.4 보류·범위 밖
+- 14번 가격 정정 이력: 10/14 디바이스 원주가가 그날 저녁 수집 13,660 → 다음 날 재수집 13,370(전일 대비 −1,650 과 일치)으로 덮어써졌다. 당일 저녁 수집 종가가 다음 날 정정되는 일이 체계적인지는 이력이 없어 측정할 수 없다(삼성전자·에스디바이오센서도 10/14 같은 현상). 하려면 `tb_stock_daily_price` 정정 이력 테이블 + AFTER UPDATE 트리거.
+- MACRO·NEWS·EVENT 수집 켜기는 운영 판단(`MacroSourceManualTest`·`GdeltDocManualTest` 실측 뒤).
+- KOSDAQ 일부(라온시큐어 등)는 마스터 분류 코드가 전무해 섹터 미분류.

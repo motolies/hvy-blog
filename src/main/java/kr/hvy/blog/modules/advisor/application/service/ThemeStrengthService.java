@@ -15,7 +15,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * 테마 강약(M6): 기준일에 KOSPI200 구성인 종목을 kospi200_sector 대분류별로 묶어 중앙값 수익률의 KOSPI 대비 초과(rs5/20/60)·20일선 위 비율·강약 라벨을 낸다.
+ * 테마 강약(M6): 기준일에 KOSPI200 구성인 종목을 kospi200_sector 대분류별로 묶어 중앙값 수익률의 KOSPI 대비 초과(rs5/20/60)·동일가중 벤치 대비 초과(rsEq5/20/60)·
+ * 20일선 위 비율·강약 라벨을 낸다. 라벨은 2026-10-16(advice-v11)부터 동일가중 기준(rsEq20/rsEq60, basis EQ)이다.
  * <p>
  * PIT: 구성 여부는 마스터 SCD2 이력(tb_stock_master_history, [valid_from, valid_to) 반열림)의 그날 행으로 판정한다 — 편입 전 종목은 들어오지 않는다(FeatureSql 의
  * is_kospi200 과 같은 조인). 대분류 코드는 이력 테이블에 없어 현재 마스터(tb_stock_master.kospi200_sector)에서 온다 — 섹터 재분류는 드물지만 과거 날짜 재실행에서는
@@ -63,11 +64,14 @@ public class ThemeStrengthService {
       ORDER BY rs20 DESC NULLS LAST, mem.theme
       """;
 
+  /** strength 판정 기준 표시: 동일가중 벤치(KOSPI200 전 구성 종목 중앙값) 대비 rsEq20/rsEq60 */
+  static final String BASIS_EQ = "EQ";
+
   private final NamedParameterJdbcTemplate jdbc;
   private final AdvisorProperties properties;
 
   /**
-   * 기준일 테마 강약 (rs20 내림차순). 지수·종목 지표가 없으면 빈 목록.
+   * 기준일 테마 강약 (rs20 내림차순 — rs 와 rsEq 의 차이는 그날 모든 테마에 같은 상수라 rsEq20 순서와 같다). 지수·종목 지표가 없으면 빈 목록.
    */
   public List<MarketRegime.Theme> themes(LocalDate asOf) {
     AdvisorProperties.Theme cfg = properties.getTheme();
@@ -76,16 +80,18 @@ public class ThemeStrengthService {
           Double rs5 = d(rs.getObject("rs5"));
           Double rs20 = d(rs.getObject("rs20"));
           Double rs60 = d(rs.getObject("rs60"));
+          Double rsEq20 = d(rs.getObject("rs_eq20"));
+          Double rsEq60 = d(rs.getObject("rs_eq60"));
           String code = rs.getString("theme");
           return new MarketRegime.Theme(code, rs.getInt("members"), rs5, rs20, rs60, d(rs.getObject("breadth")),
-              strength(rs20, rs60, cfg.getStrongRs20()), leaders(rs.getArray("names"), cfg.getLeaders()),
-              cfg.getNames().get(code), d(rs.getObject("rs_eq5")), d(rs.getObject("rs_eq20")), d(rs.getObject("rs_eq60")));
+              strength(rsEq20, rsEq60, cfg.getStrongRs20()), leaders(rs.getArray("names"), cfg.getLeaders()),
+              cfg.getNames().get(code), d(rs.getObject("rs_eq5")), rsEq20, rsEq60, BASIS_EQ);
         });
   }
 
   /**
-   * 강약 라벨: rs20 ≥ +임계 이고 rs60 &gt; 0 → STRONG, rs20 ≤ −임계 이고 rs60 &lt; 0 → WEAK, 그 외(값 없음 포함) NEUTRAL.
-   * 1개월 초과를 주 신호로, 3개월 초과를 방향 확인으로 쓴다 — 한 주 급등락만으로 라벨이 뒤집히지 않게.
+   * 강약 라벨: 1개월 초과 ≥ +임계 이고 3개월 초과 &gt; 0 → STRONG, 1개월 ≤ −임계 이고 3개월 &lt; 0 → WEAK, 그 외(값 없음 포함) NEUTRAL.
+   * 1개월 초과를 주 신호로, 3개월 초과를 방향 확인으로 쓴다 — 한 주 급등락만으로 라벨이 뒤집히지 않게. 호출자는 동일가중 초과(rsEq20, rsEq60)를 넘긴다.
    */
   static ThemeStrength strength(Double rs20, Double rs60, double threshold) {
     if (rs20 == null || rs60 == null) {

@@ -19,6 +19,10 @@ import org.springframework.stereotype.Component;
 public class PromptResources {
 
   /**
+   * advice-v11 (2026-10-16, MCP 2차 점검): theme.strength 를 동일가중 벤치(KOSPI200 전 구성 종목 중앙값) 대비 rsEq20/rsEq60 기준으로 바꾸고 theme 열 끝에
+   * rsEq20·rsEq60 을 넣었다 — KOSPI 종합이 반도체 대형주에 끌려 테마 11개 중 9개가 STRONG 이던 편향. 규칙 13 BEAR 의 "지수보다 약한" 을 rsIdx < 0 으로,
+   * 규칙 14 인용 이름을 theme.&lt;code&gt;.rsEq20 으로, rsIdx 는 r20 과 순서가 같다(KOSPI 단일 유니버스)는 설명, weights 0 의 뜻(음의 IC — 하한 0), sectors 의
+   * 비제조업 대분류 표기를 더했다. 출력 스키마는 v10 그대로.
    * advice-v10 (2026-10-16): market.flow(frgn/inst/indi 1·5)·sectors.frgn5 를 원 대신 **억원 정수**로 넣고 입력 설명을 "(억원, 정수)·인용 시 단위 표기" 로 바꿨다.
    * 10/14·15 투자자 수급이 원 단위로 바뀌면서 원 그대로 넣으면 10/13 판단의 "외국인 5일 순매도 -13048931" 처럼 단위 없는 큰 숫자가 근거에 섞인다.
    * 입력 키·규칙·출력 스키마는 v9 그대로. advice-v9 (2026-09-27, 매수 전용): 출력 스키마에서 픽 direction 을 없앴다 — picks 는 매수 추천만 0~pick-max 개, 확신 있는 근거가 없으면 빈 배열(관망)과 summary 이유.
@@ -32,7 +36,7 @@ public class PromptResources {
    * (advisor.markets)·thesis 300자/risk 150자 + 근거→해석→기대 흐름 구조(Slack 이 전문을 싣는다). v4 는 news 블록 입력 + citedNews 출력. v3 는 market.global
    * r20/r60 + market.link(β·상관) 입력. v2 는 dataAsOf·window·dataQuality·market.trend 입력, trendOutlook 출력. 옛 파일은 비교용으로 남긴다.
    */
-  public static final String ADVICE_VERSION = "advice-v10";
+  public static final String ADVICE_VERSION = "advice-v11";
   /** lesson-v2 (2026-09-13): condition 에 trend 키 */
   public static final String LESSON_VERSION = "lesson-v2";
   /**
@@ -44,24 +48,29 @@ public class PromptResources {
   /** note-v1 (2026-09-21): 12:00 장중 점검의 픽별 회고(오답노트) 시스템 프롬프트 — assist 모델, 티커 없는 일반화 가설 */
   public static final String NOTE_VERSION = "note-v1";
   /**
+   * morning-v3 (2026-10-16, MCP 2차 점검): 평소 범위 판정을 |gapEst| &lt; sigmaGap(밤사이 갭 σ, 07:30 점검 임계와 같은 기준)으로 바꿨다 — v2 는 sigma1d(종가 σ ≈ 갭 σ 의 2배)
+   * 기준이라 8거래일 동안 픽 변경이 0건(KEEP 1.0)이었다. "전부 KEEP 이 정답" 문구를 "픽별로 thesis·risk 를 확인, KEEP 은 기본값" 으로, usClosed 를
+   * "저녁 기준일 날짜의 미국 세션 없음(휴장·결측)" 으로 명확히 했다. payload 키·출력 스키마는 v2 그대로.
    * morning-v2 (2026-09-27, 매수 전용): ADD 에서 direction 을 없앴다(추가는 전부 매수), 최종 픽 하한(3)·AVOID 상한을 지워 전부 DROP(관망)을 허용하고,
    * 저녁이 관망(0픽)이어도 재판정해 ADD 할 수 있다.
    * morning-v1 (2026-09-25, M4): 07:40 아침 재판정 — 저녁 입력 스냅샷·저녁 픽·밤사이(미국 r1·β 갭·환율·섹터 연동 심볼·07:30 점검) 를 보고 저녁 픽마다 KEEP/DROP,
    * 저녁 후보 안에서만 ADD. 판단 모델(judge)을 쓰고 advice-v7 과 버전을 따로 센다
    */
-  public static final String MORNING_VERSION = "morning-v2";
+  public static final String MORNING_VERSION = "morning-v3";
   /**
+   * advice-h20-v4 (2026-10-16, MCP 2차 점검): advice-v11 과 같은 변경 — theme strength 동일가중(rsEq20/rsEq60) 기준·열 추가, rsIdx·weights 0·업종 대분류 설명.
    * advice-h20-v3 (2026-10-16): advice-v10 과 같은 변경 — market.flow·sectors.frgn5 억원 정수, 입력 설명 갱신. 나머지는 h20-v2 그대로.
    * advice-h20-v2 (2026-09-27, 매수 전용): advice-v9 와 같은 변경 — picks 는 20거래일 매수 추천만 0~h20.pick-max 개, 관망 허용, AVOID 규칙 제거, regime-policy-v2.
    * advice-h20-v1 (2026-09-25, M7): 금요일 주간 20거래일 판단 — advice-v8 과 같은 입력 모양·출력 스키마·정책 표에서 news·scoreboard·recentOutcomes·lessons 를 뺐고
    * thesis/risk·regime 을 20거래일 창으로 쓴다. 판단 모델(judge)을 쓰고 advice-v8 과 버전을 따로 센다
    */
-  public static final String H20_VERSION = "advice-h20-v3";
+  public static final String H20_VERSION = "advice-h20-v4";
   /**
+   * longterm-v2 (2026-10-16, MCP 2차 점검): theme 블록이 일일 판단과 같은 열(rsEq20·rsEq60 추가)·동일가중 strength 를 쓴다는 설명, 재무 결산기 = 결산월.
    * longterm-v1 (2026-09-25, M8): H60·H180 규칙 픽(사전 고정 가중치 장기 팩터 점수 상위 N)에 종목별 thesis/risk 서술만 붙인다 — 스키마 ticker enum 이 규칙 픽 N 개이고
    * 선택·순위는 LongTermNarrativeGuard 가 규칙 쪽으로 강제한다. 판단 모델(judge)
    */
-  public static final String LONGTERM_VERSION = "longterm-v1";
+  public static final String LONGTERM_VERSION = "longterm-v2";
   static final String BASE = "prompts/advisor/";
 
   private final String adviceSystem;
@@ -80,7 +89,7 @@ public class PromptResources {
   private final String longTermSha256;
 
   public PromptResources() {
-    this.adviceSystem = load(BASE + "advice-system-v10.md");
+    this.adviceSystem = load(BASE + "advice-system-v11.md");
     this.adviceSha256 = sha256(adviceSystem);
     this.lessonSystem = load(BASE + "lesson-system-v2.md");
     this.lessonSha256 = sha256(lessonSystem);
@@ -88,11 +97,11 @@ public class PromptResources {
     this.chatSha256 = sha256(chatSystem);
     this.noteSystem = load(BASE + "intraday-note-system-v1.md");
     this.noteSha256 = sha256(noteSystem);
-    this.morningSystem = load(BASE + "advice-morning-v2.md");
+    this.morningSystem = load(BASE + "advice-morning-v3.md");
     this.morningSha256 = sha256(morningSystem);
-    this.h20System = load(BASE + "advice-h20-v3.md");
+    this.h20System = load(BASE + "advice-h20-v4.md");
     this.h20Sha256 = sha256(h20System);
-    this.longTermSystem = load(BASE + "advice-longterm-v1.md");
+    this.longTermSystem = load(BASE + "advice-longterm-v2.md");
     this.longTermSha256 = sha256(longTermSystem);
   }
 

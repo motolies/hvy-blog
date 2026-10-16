@@ -7,7 +7,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * 180거래일 규칙 추천 잡(ADVISE_H180, M8 — 매월 첫 거래일 20:30 KST). 주기는 스케줄러가 {@link LongTermCadence#isFirstTradingDayOfMonth} 로 판정하고, 수동 트리거는 주기와 무관하게 돈다.
+ * 180거래일 규칙 추천 잡(ADVISE_H180, M8 — 매월 첫 거래일 20:30 KST, 실패·미발행이면 첫 5거래일 안에서 따라잡기).
+ * 주기는 스케줄러가 {@link AdvisorGateService#h180Due} 로 판정하고, 수동 트리거는 주기와 무관하게 돈다.
  * 파이프라인은 {@link LongTermAdviseJob} 이 공유한다.
  */
 @Component

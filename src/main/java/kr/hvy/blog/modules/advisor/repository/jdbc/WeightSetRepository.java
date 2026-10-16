@@ -21,7 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class WeightSetRepository {
 
-  private static final String SET_COLUMNS = "weight_set_id, as_of, window_days, n_eff, source, is_active, reason, run_id, horizon_days";
+  private static final String SET_COLUMNS = "weight_set_id, as_of, window_days, n_eff, source, is_active, reason, run_id, horizon_days, created_at";
 
   private final JdbcTemplate jdbc;
 
@@ -114,6 +114,7 @@ public class WeightSetRepository {
       .runId(AdvisorJdbc.nullableLong(rs, "run_id"))
       .weights(List.of())
       .horizonDays(rs.getInt("horizon_days"))
+      .createdAt(AdvisorJdbc.instant(rs, "created_at"))
       .build();
 
   static final RowMapper<SignalWeightRow> WEIGHT_MAPPER = (rs, i) -> SignalWeightRow.builder()

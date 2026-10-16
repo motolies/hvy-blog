@@ -28,6 +28,14 @@ public final class KisValues {
   }
 
   /**
+   * 숫자 문자열을 BigDecimal 로 변환하되 0 은 결측으로 본다(null). KIS 는 PER·PBR·재무비율의 미산출·공란을 "0.00" 으로 준다.
+   */
+  public static BigDecimal decimalNonZero(String raw) {
+    BigDecimal value = decimal(raw);
+    return value == null || value.signum() == 0 ? null : value;
+  }
+
+  /**
    * 숫자 문자열을 Long 으로 변환한다. 소수부가 있으면 버린다. 결측이면 null.
    */
   public static Long longValue(String raw) {

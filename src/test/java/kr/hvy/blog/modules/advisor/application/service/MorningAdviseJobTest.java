@@ -128,7 +128,7 @@ class MorningAdviseJobTest {
     assertThat(saved.exitDate()).isEqualTo(evening.exitDate());
     assertThat(saved.horizonDays()).isEqualTo(5);
     assertThat(saved.parentAdviceId()).isEqualTo(900L);
-    assertThat(saved.promptVersion()).isEqualTo(PromptResources.MORNING_VERSION);
+    assertThat(saved.promptVersion()).isEqualTo(PromptResources.MORNING_VERSION).isEqualTo("morning-v3");
     assertThat(saved.kospiDir()).as("아침은 국면을 다시 판단하지 않는다 — 국면 콜 채점이 중복되지 않게 비운다").isNull();
 
     @SuppressWarnings("unchecked")

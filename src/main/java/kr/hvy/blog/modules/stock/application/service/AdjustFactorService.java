@@ -32,6 +32,8 @@ import org.springframework.stereotype.Service;
  * <p>
  * 원주가 정본 + 계수 분리 모델의 핵심. 계수 단위 오해(배정율 %/주수)는 대조에서 오차로 드러나므로
  * verified=false 인 이벤트가 남아 있으면 소비자가 알 수 있게 run 메타데이터에 남긴다.
+ * KIS 대조(verify)는 최신 100캔들만 받아 효력일이 오래된 이벤트를 못 보므로, 효력일이 지난 이벤트는 효력일 전후 원주가 비율로도 검산한다
+ * (2026-10-16: 디바이스 187870 무상증자 계수 0.0099 가 54배 어긋난 채 verified=false 로 남아 있던 결함).
  * 효력일이 미래인 이벤트는 MV 술어(효력일 <= KST 오늘)가 걸러 현재 시세에 미리 적용되지 않는다.
  */
 @Slf4j
@@ -41,6 +43,8 @@ public class AdjustFactorService implements CollectJob {
 
   /** 대조 허용 상대 오차 0.5% */
   static final BigDecimal TOLERANCE = new BigDecimal("0.005");
+  /** 효력일 검산 허용 배수. KRX 가격제한 ±30% 안의 당일 등락은 1.3배 이내이므로 관측 비율/계수가 1.5배를 넘으면 단위·효력일 오해로 본다 */
+  static final double PLAUSIBLE_BAND = 1.5;
   static final int DEFAULT_VERIFY_SAMPLE = 20;
 
   private final CorporateActionWriter actionWriter;
@@ -65,6 +69,10 @@ public class AdjustFactorService implements CollectJob {
     execution.addRows(derived.upserted());
     execution.putMetadata("eventsUpserted", derived.upserted());
     execution.putMetadata("eventsDeferred", derived.deferred());
+    execution.putMetadata("eventsImplausible", derived.implausible().size());
+    if (!derived.implausible().isEmpty()) {
+      execution.putMetadata("implausible", derived.implausible());
+    }
     execution.putMetadata("eventsTotal", eventWriter.count());
 
     boolean refreshed = refreshFactorView();
@@ -101,8 +109,8 @@ public class AdjustFactorService implements CollectJob {
     execution.flush();
   }
 
-  /** 계수 이벤트 산출 결과: upsert 된 행, 보류(미래 유상증자), 해석 불가로 건너뛴 행 */
-  public record DeriveResult(int upserted, int deferred, int skipped) {
+  /** 계수 이벤트 산출 결과: upsert 된 행, 보류(미래 유상증자), 해석 불가로 건너뛴 행, 효력일 검산 실패(종목/효력일 → 사유) */
+  public record DeriveResult(int upserted, int deferred, int skipped, Map<String, String> implausible) {
   }
 
   /**
@@ -118,6 +126,7 @@ public class AdjustFactorService implements CollectJob {
     }
     List<CorporateActionRow> actions = actionWriter.find(CorporateActionSource.KSD, types);
     List<AdjustEventRow> events = new ArrayList<>();
+    Map<String, String> implausible = new LinkedHashMap<>();
     int skipped = 0;
     int deferred = 0;
     for (CorporateActionRow action : actions) {
@@ -128,16 +137,52 @@ public class AdjustFactorService implements CollectJob {
       BigDecimal previousClose = action.actionType() == CorporateActionType.RIGHTS_ISSUE
           ? previousClose(action.ticker(), action.effectiveDate()) : null;
       Optional<AdjustEventRow> event = AdjustFactorCalculator.toEvent(action, previousClose);
-      if (event.isPresent()) {
-        events.add(event.get());
-      } else {
+      if (event.isEmpty()) {
         skipped++;
+        continue;
       }
+      String reason = implausibleReason(event.get(), asOf);
+      if (reason != null) {
+        // 잘못된 계수를 저장하지 않고, 예전 실행이 미리 만들어 둔 행도 지운다 — MV 가 효력일 이전 전 구간에 곱하므로 남겨두면 지표 전체가 오염된다
+        eventWriter.delete(event.get().ticker(), event.get().effectiveDate(), event.get().actionType());
+        implausible.put(event.get().ticker() + "/" + event.get().effectiveDate(), reason);
+        log.warn("수정계수 효력일 검산 실패: {} {}", event.get().ticker(), reason);
+        continue;
+      }
+      events.add(event.get());
     }
     int upserted = eventWriter.upsert(events);
-    log.info("수정계수 이벤트 산출: actions={}, events={}, upserted={}, deferred={}, skipped={}",
-        actions.size(), events.size(), upserted, deferred, skipped);
-    return new DeriveResult(upserted, deferred, skipped);
+    log.info("수정계수 이벤트 산출: actions={}, events={}, upserted={}, deferred={}, skipped={}, implausible={}",
+        actions.size(), events.size(), upserted, deferred, skipped, implausible.size());
+    return new DeriveResult(upserted, deferred, skipped, implausible);
+  }
+
+  /**
+   * 효력일이 지난 이벤트를 효력일 직전 종가 → 효력일(이후 첫 거래일) 종가 비율로 검산한다. 관측 비율/계수가 PLAUSIBLE_BAND 배 밖이면 사유, 통과·검산 불가(가격 없음·미래)면 null.
+   */
+  String implausibleReason(AdjustEventRow event, LocalDate asOf) {
+    if (event.effectiveDate().isAfter(asOf)) {
+      return null;
+    }
+    BigDecimal before = previousClose(event.ticker(), event.effectiveDate());
+    BigDecimal after = firstCloseOnOrAfter(event.ticker(), event.effectiveDate());
+    if (!plausible(event.priceFactor(), before, after)) {
+      return String.format("%s %s factor=%s observed=%s", event.actionType(), event.effectiveDate(),
+          event.priceFactor().stripTrailingZeros().toPlainString(), after.divide(before, 4, RoundingMode.HALF_UP).toPlainString());
+    }
+    return null;
+  }
+
+  /**
+   * 관측 비율(효력일 종가/직전 종가)이 계수의 1/PLAUSIBLE_BAND ~ PLAUSIBLE_BAND 배 안이면 true. 가격이 없거나 0 이면 검산 불가로 true.
+   */
+  static boolean plausible(BigDecimal priceFactor, BigDecimal closeBefore, BigDecimal closeAfter) {
+    if (priceFactor == null || priceFactor.signum() <= 0 || closeBefore == null || closeBefore.signum() <= 0
+        || closeAfter == null || closeAfter.signum() <= 0) {
+      return true;
+    }
+    double ratio = closeAfter.doubleValue() / closeBefore.doubleValue() / priceFactor.doubleValue();
+    return ratio >= 1 / PLAUSIBLE_BAND && ratio <= PLAUSIBLE_BAND;
   }
 
   /**
@@ -196,6 +241,13 @@ public class AdjustFactorService implements CollectJob {
     log.info("수정계수 대조: ticker={}, compared={}, maxPriceError={}, maxVolumeError={}, passed={}",
         ticker, compared, maxPriceError, maxVolumeError, passed);
     return new VerifyResult(ticker, compared, maxPriceError, maxVolumeError, passed);
+  }
+
+  private BigDecimal firstCloseOnOrAfter(String ticker, LocalDate effectiveDate) {
+    List<BigDecimal> rows = jdbcTemplate.query(
+        "SELECT close_price FROM tb_stock_daily_price WHERE ticker = ? AND trade_date >= ? ORDER BY trade_date LIMIT 1",
+        (rs, i) -> rs.getBigDecimal(1), ticker, effectiveDate);
+    return rows.isEmpty() ? null : rows.get(0);
   }
 
   private BigDecimal previousClose(String ticker, LocalDate effectiveDate) {

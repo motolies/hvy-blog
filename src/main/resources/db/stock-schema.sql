@@ -374,7 +374,7 @@ COMMENT ON COLUMN tb_stock_corporate_action.ticker         IS '단축 종목코�
 COMMENT ON COLUMN tb_stock_corporate_action.effective_date IS '효력(권리락) 기준일';
 COMMENT ON COLUMN tb_stock_corporate_action.action_type    IS '행사 유형: SPLIT | REVERSE_SPLIT | BONUS_ISSUE | RIGHTS_ISSUE | CAPITAL_REDUCTION | MERGER_SPLIT | LISTING | DIVIDEND | CHART_HINT';
 COMMENT ON COLUMN tb_stock_corporate_action.ratio_before   IS '행사 전 비율(구주)';
-COMMENT ON COLUMN tb_stock_corporate_action.ratio_after    IS '행사 후 비율(신주)';
+COMMENT ON COLUMN tb_stock_corporate_action.ratio_after    IS '행사 후 비율(신주). BONUS_ISSUE·RIGHTS_ISSUE 는 주당 신주 배정 주수(예탁원 fix_rate % ÷ 100, 2026-10-16). CAPITAL_REDUCTION 은 reduce_cap_rate 원값(단위 미확정)';
 COMMENT ON COLUMN tb_stock_corporate_action.cash_amount    IS '현금 금액 (배당금 등, 원)';
 COMMENT ON COLUMN tb_stock_corporate_action.source         IS '출처: KSD 예탁원 | CHART_HINT 일봉 힌트 | MANUAL 수기';
 COMMENT ON COLUMN tb_stock_corporate_action.raw_json       IS 'API 원본 응답 (소량·스키마 불안정 도메인만 보관)';

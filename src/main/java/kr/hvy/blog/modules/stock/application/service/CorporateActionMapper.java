@@ -19,6 +19,9 @@ import org.apache.commons.lang3.StringUtils;
  * 예탁원정보 응답(맵) → 기업행사 행. 유형마다 "효력일"을 다르게 잡는다:
  * 액면교체·감자·합병은 변경상장일(list_dt, 없으면 기준일), 무상·유상증자는 권리락일(right_dt), 배당은 기준일.
  * 수정주가 계수는 효력일 "이전" 거래일에 적용되므로 효력일 선택이 틀리면 하루가 어긋난다 — 검증 단계에서 잡는다.
+ * <p>
+ * 예탁원 확정배정율(fix_rate)은 **%** 다 — 2026-10-16 실측: 디바이스 187870 무상증자 fix_rate=100(1주당 1주), 권리락일 04-28 원주가 38,300 → 20,600.
+ * 주당 100주로 읽어 계수 1/101=0.0099 가 저장되던 결함을 {@link #percentToRatio} 로 바로잡는다(무상·유상). 감자 reduce_cap_rate 는 단위 미확정(§10 실측 항목).
  */
 @Slf4j
 public final class CorporateActionMapper {
@@ -63,14 +66,14 @@ public final class CorporateActionMapper {
       }
       case BONUS_ISSUE -> {
         LocalDate effective = firstNonNull(rightDate, recordDate);
-        BigDecimal rate = KisValues.decimal(row.get("fix_rate"));
+        BigDecimal rate = percentToRatio(KisValues.decimal(row.get("fix_rate")));
         return effective == null ? null
             : new CorporateActionRow(ticker, effective, CorporateActionType.BONUS_ISSUE, null, rate, null,
                 CorporateActionSource.KSD, rawJson);
       }
       case PAIDIN_CAPIN -> {
         LocalDate effective = firstNonNull(rightDate, recordDate);
-        BigDecimal rate = KisValues.decimal(row.get("fix_rate"));
+        BigDecimal rate = percentToRatio(KisValues.decimal(row.get("fix_rate")));
         BigDecimal price = KisValues.decimal(row.get("fix_price"));
         return effective == null ? null
             : new CorporateActionRow(ticker, effective, CorporateActionType.RIGHTS_ISSUE, null, rate, price,
@@ -151,6 +154,13 @@ public final class CorporateActionMapper {
       return null;
     }
     return KisValues.date(digits.substring(0, 8));
+  }
+
+  /**
+   * 예탁원 배정율(%) → 주당 신주 수. 100(%) = 1주당 1주 = 1. null 은 null.
+   */
+  static BigDecimal percentToRatio(BigDecimal percent) {
+    return percent == null ? null : percent.movePointLeft(2);
   }
 
   private static String firstNonBlank(String a, String b) {

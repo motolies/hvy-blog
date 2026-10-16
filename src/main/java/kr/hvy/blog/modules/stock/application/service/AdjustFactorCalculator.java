@@ -11,11 +11,12 @@ import kr.hvy.blog.modules.stock.domain.model.CorporateActionRow;
  * 기업행사 → 수정주가 계수. 효력일 이전 가격 × price_factor, 거래량 × volume_factor 가 현재 기준 가격이 된다.
  * <ul>
  *   <li>액면교체: price = 변경후/변경전 액면가, volume = 역수 (5000→500 분할이면 0.1 / 10)</li>
- *   <li>무상증자 배정율 r(주당 주수): price = 1/(1+r), volume = 1+r</li>
+ *   <li>무상증자 배정율 r(주당 신주 수 — 매퍼가 예탁원 % 를 ÷100 한 값): price = 1/(1+r), volume = 1+r</li>
  *   <li>유상증자 배정율 r·발행가 P·권리락 전일 종가 C: price = (C + P·r) / ((1+r)·C), volume = 1+r (KRX 권리락 기준가 방식)</li>
  *   <li>감자 배정율 r: r&lt;1 이면 잔존 비율로 보아 price = 1/r, volume = r; r&gt;1 이면 병합 비율로 보아 price = r, volume = 1/r</li>
  * </ul>
- * 배정율 단위(주당 주수 vs %)는 예탁원 응답 실측으로 확정해야 하며, 결과는 KIS 수정주가(FID_ORG_ADJ_PRC=0)와 대조해 verified 로 표시한다.
+ * 무상·유상 배정율은 2026-10-16 실측으로 % 로 확정됐다(CorporateActionMapper.percentToRatio). 감자 배정율 단위는 미확정이다.
+ * 결과는 KIS 수정주가(FID_ORG_ADJ_PRC=0)와 대조해 verified 로 표시하고, AdjustFactorService 가 효력일 전후 원주가 비율로도 검산한다.
  */
 public final class AdjustFactorCalculator {
 
@@ -24,6 +25,8 @@ public final class AdjustFactorCalculator {
   /** 이 범위를 벗어나는 계수는 단위 오해로 보고 만들지 않는다 */
   private static final BigDecimal MIN_FACTOR = new BigDecimal("0.0001");
   private static final BigDecimal MAX_FACTOR = new BigDecimal("10000");
+  /** 무상·유상 배정 주당 신주 수 상한. 이를 넘는 값(예: % 를 주수로 읽은 100)은 단위 오해다 */
+  static final BigDecimal MAX_ISSUE_RATIO = new BigDecimal("20");
 
   private AdjustFactorCalculator() {
   }
@@ -46,7 +49,7 @@ public final class AdjustFactorCalculator {
         volume = action.ratioBefore().divide(action.ratioAfter(), MC);
       }
       case BONUS_ISSUE -> {
-        if (!positive(action.ratioAfter())) {
+        if (!positive(action.ratioAfter()) || action.ratioAfter().compareTo(MAX_ISSUE_RATIO) > 0) {
           return Optional.empty();
         }
         BigDecimal onePlusR = BigDecimal.ONE.add(action.ratioAfter());
@@ -54,7 +57,8 @@ public final class AdjustFactorCalculator {
         volume = onePlusR;
       }
       case RIGHTS_ISSUE -> {
-        if (!positive(action.ratioAfter()) || !positive(action.cashAmount()) || !positive(previousClose)) {
+        if (!positive(action.ratioAfter()) || action.ratioAfter().compareTo(MAX_ISSUE_RATIO) > 0 || !positive(action.cashAmount())
+            || !positive(previousClose)) {
           return Optional.empty();
         }
         BigDecimal onePlusR = BigDecimal.ONE.add(action.ratioAfter());

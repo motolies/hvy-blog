@@ -34,11 +34,21 @@ class AdjustFactorCalculatorTest {
   }
 
   @Test
-  @DisplayName("무상증자 1주당 1주: 가격 1/2, 거래량 2배")
+  @DisplayName("무상증자 1주당 1주(r=1, 매퍼가 % 를 환산한 주당 신주 수): 가격 1/2, 거래량 2배")
   void bonusIssue() {
     AdjustEventRow event = AdjustFactorCalculator.toEvent(action(CorporateActionType.BONUS_ISSUE, null, "1", null), null).orElseThrow();
     assertThat(event.priceFactor()).isEqualByComparingTo("0.5");
     assertThat(event.volumeFactor()).isEqualByComparingTo("2");
+  }
+
+  @Test
+  @DisplayName("무상·유상 배정 주당 신주 수가 20 을 넘으면 단위 오해(% 를 주수로)로 보고 이벤트를 만들지 않는다 — 2026-10-16 디바이스 100 회귀")
+  void issueRatioCap() {
+    assertThat(AdjustFactorCalculator.toEvent(action(CorporateActionType.BONUS_ISSUE, null, "100", null), null)).isEmpty();
+    assertThat(AdjustFactorCalculator.toEvent(action(CorporateActionType.BONUS_ISSUE, null, "21", null), null)).isEmpty();
+    AdjustEventRow edge = AdjustFactorCalculator.toEvent(action(CorporateActionType.BONUS_ISSUE, null, "20", null), null).orElseThrow();
+    assertThat(edge.priceFactor()).isEqualByComparingTo("0.0476190476");
+    assertThat(AdjustFactorCalculator.toEvent(action(CorporateActionType.RIGHTS_ISSUE, null, "100", "8000"), new BigDecimal("10000"))).isEmpty();
   }
 
   @Test

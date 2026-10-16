@@ -46,6 +46,14 @@ public class AdjustEventWriter {
   }
 
   /**
+   * 이벤트 1건을 지운다(효력일 검산에 실패한 계수 제거). 지운 행 수.
+   */
+  public int delete(String ticker, LocalDate effectiveDate, CorporateActionType actionType) {
+    return jdbcTemplate.update("DELETE FROM tb_stock_adjust_event WHERE ticker = ? AND effective_date = ? AND action_type = ?",
+        ticker, effectiveDate, actionType.getCode());
+  }
+
+  /**
    * 종목의 모든 이벤트 검증 플래그를 바꾼다.
    */
   public int markVerified(String ticker, boolean verified) {

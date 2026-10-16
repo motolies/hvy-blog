@@ -41,17 +41,18 @@ class CorporateActionMapperTest {
   }
 
   @Test
-  @DisplayName("증자·감자·배당은 유형별 효력일과 비율·금액을 채운다")
+  @DisplayName("증자·감자·배당은 유형별 효력일과 비율·금액을 채운다. 무상·유상 fix_rate 는 %(50 → 주당 0.5주)")
   void otherKinds() {
     CorporateActionRow bonus = CorporateActionMapper.fromKsd(KsdInfoKind.BONUS_ISSUE, List.of(
-        Map.of("record_date", "20240102", "sht_cd", "035420", "fix_rate", "0.5", "right_dt", "20231229"))).get(0);
+        Map.of("record_date", "20240102", "sht_cd", "035420", "fix_rate", "50", "right_dt", "20231229"))).get(0);
     assertThat(bonus.actionType()).isEqualTo(CorporateActionType.BONUS_ISSUE);
     assertThat(bonus.effectiveDate()).isEqualTo(LocalDate.of(2023, 12, 29));
     assertThat(bonus.ratioAfter()).isEqualByComparingTo("0.5");
 
     CorporateActionRow rights = CorporateActionMapper.fromKsd(KsdInfoKind.PAIDIN_CAPIN, List.of(
-        Map.of("record_date", "20240102", "sht_cd", "035420", "fix_rate", "0.2", "fix_price", "8,000", "right_dt", "20231229"))).get(0);
+        Map.of("record_date", "20240102", "sht_cd", "035420", "fix_rate", "20", "fix_price", "8,000", "right_dt", "20231229"))).get(0);
     assertThat(rights.actionType()).isEqualTo(CorporateActionType.RIGHTS_ISSUE);
+    assertThat(rights.ratioAfter()).isEqualByComparingTo("0.2");
     assertThat(rights.cashAmount()).isEqualByComparingTo("8000");
 
     CorporateActionRow reduction = CorporateActionMapper.fromKsd(KsdInfoKind.CAP_DCRS, List.of(
@@ -64,6 +65,17 @@ class CorporateActionMapperTest {
     assertThat(dividend.actionType()).isEqualTo(CorporateActionType.DIVIDEND);
     assertThat(dividend.cashAmount()).isEqualByComparingTo("361");
     assertThat(dividend.ratioAfter()).isNull();
+  }
+
+  @Test
+  @DisplayName("회귀(2026-10-16): 디바이스 187870 무상증자 fix_rate=100(%) 은 주당 1주 — 100주로 읽어 계수 0.0099 가 되던 결함")
+  void bonusFixRateIsPercent() {
+    CorporateActionRow bonus = CorporateActionMapper.fromKsd(KsdInfoKind.BONUS_ISSUE, List.of(
+        Map.of("record_date", "20260424", "sht_cd", "187870", "fix_rate", "100", "right_dt", "20260428"))).get(0);
+    assertThat(bonus.effectiveDate()).isEqualTo(LocalDate.of(2026, 4, 28));
+    assertThat(bonus.ratioAfter()).isEqualByComparingTo("1");
+    assertThat(CorporateActionMapper.percentToRatio(null)).isNull();
+    assertThat(CorporateActionMapper.percentToRatio(new BigDecimal("12.5"))).isEqualByComparingTo("0.125");
   }
 
   @Test

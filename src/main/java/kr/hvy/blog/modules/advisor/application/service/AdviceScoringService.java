@@ -267,7 +267,8 @@ public class AdviceScoringService {
       Double mvRet = nullable(rs.getObject("mv_ret"));
       Double mktBase = nullable(rs.getObject("mkt_base"));
       Double mktExit = nullable(rs.getObject("mkt_exit"));
-      Double actual = idxBase != null && idxExit != null && idxBase > 0 ? idxExit / idxBase - 1 : mvRet;
+      // 두 갈래를 모두 Double 로 둔다 — double : Double 삼항은 결과가 double 이라 mvRet 이 null(업종 지수·MV 행 모두 없음, 예: 2026-10-16 정리된 '0000')이면 언박싱 NPE
+      Double actual = idxBase != null && idxExit != null && idxBase > 0 ? Double.valueOf(idxExit / idxBase - 1) : mvRet;
       Double bench = mktBase != null && mktExit != null && mktBase > 0 ? mktExit / mktBase - 1 : null;
       boolean scored = actual != null && bench != null;
       return CallScoreRow.builder().adviceId(advice.adviceId()).subjectType(CallSubject.SECTOR).subjectCode(code).horizonDays(h).stage(stage)

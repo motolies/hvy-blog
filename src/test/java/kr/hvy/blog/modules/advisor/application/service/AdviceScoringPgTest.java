@@ -190,6 +190,16 @@ class AdviceScoringPgTest {
           D.get(15), exitClose, exitClose, exitClose, exitClose);
     }
 
+    // 업종 지수도 MV 행도 없는 섹터(정리된 '0000' 같은 코드)는 NPE 없이 MISSING — 같은 판단의 나머지 섹터는 그대로 채점된다
+    AdviceHeader unknownSector = advice.toBuilder()
+        .leadingSectors(List.of(new SectorCall("0000", "0000", "r"), new SectorCall("S1", "섹터1", "r"))).build();
+    Map<String, CallScoreRow> bySector = new java.util.HashMap<>();
+    scoring.sectorScores(unknownSector, 5, ScoreStage.PROVISIONAL).forEach(r -> bySector.put(r.subjectCode(), r));
+    assertThat(bySector.get("0000").status()).isEqualTo(ScoreStatus.MISSING);
+    assertThat(bySector.get("0000").actualRet()).isNull();
+    assertThat(bySector.get("0000").hit()).isNull();
+    assertThat(bySector.get("S1").status()).isEqualTo(ScoreStatus.SCORED);
+
     // 확정 재채점은 같은 키를 덮어쓴다
     scoring.score(advice, 5, ScoreStage.CONFIRMED);
     assertThat(scoreWriter.candidateScores(adviceId)).allMatch(r -> r.stage() == ScoreStage.CONFIRMED);

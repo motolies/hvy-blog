@@ -15,8 +15,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class TradingCalendar {
 
-  /** 영업일 탐색 상한(캘린더일). 연휴·연말을 넉넉히 덮는다 */
-  private static final int MAX_SCAN_DAYS = 120;
+  /** 영업일 탐색 최소 상한(캘린더일). 요청 거래일 수의 두 배와 비교해 큰 값을 쓴다 */
+  private static final int MIN_SCAN_DAYS = 120;
 
   private final MarketCalendarService calendar;
 
@@ -36,16 +36,17 @@ public class TradingCalendar {
    * asOf 뒤의 영업일 n개(asOf 제외, 오름차순).
    */
   public List<LocalDate> nextTradingDays(LocalDate asOf, int n) {
+    long maxScanDays = Math.max(MIN_SCAN_DAYS, n * 2L);
     List<LocalDate> days = new ArrayList<>();
     LocalDate cursor = asOf;
-    for (int i = 0; i < MAX_SCAN_DAYS && days.size() < n; i++) {
+    for (long i = 0; i < maxScanDays && days.size() < n; i++) {
       cursor = cursor.plusDays(1);
       if (calendar.isTradingDay(cursor)) {
         days.add(cursor);
       }
     }
     if (days.size() < n) {
-      throw new IllegalStateException("영업일 " + n + "개를 " + MAX_SCAN_DAYS + "일 안에 찾지 못했습니다: asOf=" + asOf);
+      throw new IllegalStateException("영업일 " + n + "개를 " + maxScanDays + "일 안에 찾지 못했습니다: asOf=" + asOf);
     }
     return days;
   }
@@ -54,16 +55,17 @@ public class TradingCalendar {
    * asOf 앞의 영업일 n개(asOf 제외, 최근 순 내림차순). 마지막 원소가 창의 시작일이다 — recentOutcomes 의 "기준일 이전 N 거래일" 창(note-v1) 에 쓴다.
    */
   public List<LocalDate> previousTradingDays(LocalDate asOf, int n) {
+    long maxScanDays = Math.max(MIN_SCAN_DAYS, n * 2L);
     List<LocalDate> days = new ArrayList<>();
     LocalDate cursor = asOf;
-    for (int i = 0; i < MAX_SCAN_DAYS && days.size() < n; i++) {
+    for (long i = 0; i < maxScanDays && days.size() < n; i++) {
       cursor = cursor.minusDays(1);
       if (calendar.isTradingDay(cursor)) {
         days.add(cursor);
       }
     }
     if (days.size() < n) {
-      throw new IllegalStateException("영업일 " + n + "개를 " + MAX_SCAN_DAYS + "일 안에 찾지 못했습니다: asOf=" + asOf);
+      throw new IllegalStateException("영업일 " + n + "개를 " + maxScanDays + "일 안에 찾지 못했습니다: asOf=" + asOf);
     }
     return days;
   }
@@ -77,7 +79,7 @@ public class TradingCalendar {
     }
     int count = 0;
     LocalDate cursor = from;
-    for (int i = 0; i < MAX_SCAN_DAYS && cursor.isBefore(to); i++) {
+    while (cursor.isBefore(to)) {
       cursor = cursor.plusDays(1);
       if (calendar.isTradingDay(cursor)) {
         count++;

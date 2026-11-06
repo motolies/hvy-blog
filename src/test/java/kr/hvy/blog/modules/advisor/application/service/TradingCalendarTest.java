@@ -60,6 +60,39 @@ class TradingCalendarTest {
   }
 
   @Test
+  @DisplayName("180거래일 구간은 연도를 넘어 계산한다")
+  void longWindows() {
+    LocalDate base = LocalDate.of(2026, 11, 5);
+    assertThat(tradingCalendar.nextTradingDays(base, 180))
+        .hasSize(180).isSorted().doesNotHaveDuplicates()
+        .allMatch(d -> d.isAfter(base) && calendar.isTradingDay(d));
+    assertThat(tradingCalendar.window(base, 180))
+        .isEqualTo(new TradingCalendar.Window(LocalDate.of(2026, 11, 6), LocalDate.of(2027, 7, 15)));
+    assertThat(tradingCalendar.previousTradingDays(base, 180))
+        .hasSize(180).isSortedAccordingTo(java.util.Comparator.reverseOrder()).doesNotHaveDuplicates()
+        .startsWith(LocalDate.of(2026, 11, 4)).endsWith(LocalDate.of(2026, 2, 25))
+        .allMatch(d -> d.isBefore(base) && calendar.isTradingDay(d));
+  }
+
+  @Test
+  @DisplayName("120일을 넘는 구간도 전체 거래일을 계산한다")
+  void countsEntireLongInterval() {
+    assertThat(tradingCalendar.tradingDaysBetween(LocalDate.of(2026, 11, 5), LocalDate.of(2027, 7, 15)))
+        .isEqualTo(180);
+  }
+
+  @Test
+  @DisplayName("장기 탐색도 거래일이 없으면 계산된 상한에서 실패한다")
+  void longSearchRemainsBounded() {
+    when(calendar.isTradingDay(any())).thenReturn(false);
+    LocalDate base = LocalDate.of(2026, 11, 5);
+    assertThatThrownBy(() -> tradingCalendar.nextTradingDays(base, 180))
+        .isInstanceOf(IllegalStateException.class).hasMessageContaining("360일");
+    assertThatThrownBy(() -> tradingCalendar.previousTradingDays(base, 180))
+        .isInstanceOf(IllegalStateException.class).hasMessageContaining("360일");
+  }
+
+  @Test
   @DisplayName("영업일이 전혀 없으면(캘린더 오류) 예외로 드러낸다")
   void failsWhenNoTradingDays() {
     when(calendar.isTradingDay(any())).thenReturn(false);

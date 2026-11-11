@@ -282,7 +282,7 @@ public class MasterCodeService {
 
     // 3) 이 부모의 자식이 아닌 ID 를 두 부류로 가른다.
     //    · DB 에 아예 없다 → 그 사이 삭제된 것. 다른 탭에서 지우고 드래그하면 나는 평범한 레이스다.
-    //      이 프로젝트는 400/500 을 가리지 않고 모든 예외가 Slack #hvy-error 를 울리므로 던지지 않는다.
+    //      오류로 볼 일이 아니므로 던지지 않는다 (던지면 400 이라도 error 로그가 남는다).
     //    · DB 엔 있으나 부모가 다르다 → 클라이언트 버그이거나 조작된 요청. 거부한다.
     List<String> unknownIds = orderedIds.stream().filter(id -> !byId.containsKey(id)).toList();
     if (!unknownIds.isEmpty()) {

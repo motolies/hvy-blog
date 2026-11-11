@@ -35,7 +35,7 @@ public class PostViewController {
 
   /**
    * 조회 1건 기록. 미존재·비공개·중복·봇 무엇이든 조용히 204 를 반환한다 —
-   * 예외를 던지면 ResponseWrapperConfigure 를 거쳐 Slack 알림까지 발송된다.
+   * 예외를 던지면 전역 advice 가 error 로그를 남기고, 400 이 아닌 예외는 Slack 알림까지 발송된다.
    */
   @PostMapping("/{postId}/view")
   @ResponseStatus(HttpStatus.NO_CONTENT)

@@ -13,8 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
  * 조회수 계측 — 공개 beacon 이 호출한다.
  * <p>
  * <b>이 서비스는 어떤 경우에도 예외를 밖으로 던지지 않는다.</b>
- * {@code ResponseWrapperConfigure} 가 DataNotFoundException·IllegalArgumentException 까지
- * Slack 으로 발송하므로, 봇이 존재하지 않는 postId 를 긁으면 알림 채널이 도배된다.
+ * 전역 advice({@code ResponseWrapperConfig})는 DataNotFoundException·IllegalArgumentException 을
+ * 400 + error 로그로, 그 밖의 예외를 500 + Slack 알림으로 처리한다. 봇이 존재하지 않는 postId 를
+ * 긁을 때마다 error 로그나 알림이 쌓이면 안 된다.
  * 미존재·비공개·중복은 전부 조용한 no-op 이다.
  */
 @Slf4j

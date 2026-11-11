@@ -187,8 +187,8 @@ public class AdvisorAiConfig {
 
   /**
    * Claude 차단 게이트(3역할 공유). 차단 진입 알림은 AdvisorNotifier 로 — 키·모델 오류는 #hvy-error(멘션), 소진·장애는 #hvy-notify, 분류별 하루 1회.
-   * AdvisorNotifier.alert 가 전달 여부를 돌려주므로 Notify 빈이 없거나 전송이 예외로 끝난 날은 다음 실패 때 다시 알린다
-   * (Slack 호출의 예외와 ok=false 응답은 hvy-common SlackClient 에서 전송 성공으로 보인다 — 그 경우는 재시도되지 않는다).
+   * AdvisorNotifier.alert 가 Slack 이 메시지를 받았는지를 돌려주므로, 전달되지 않은 날(Notify 빈 없음·전송 실패·Slack 거부)은
+   * 다음 실패 때 다시 알린다.
    * 차단 시간이 음수로 설정돼도 기동은 되게 0 으로 묶는다(0 = 차단 없이 알림만).
    */
   @Bean

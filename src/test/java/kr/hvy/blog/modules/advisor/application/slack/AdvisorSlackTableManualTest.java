@@ -29,8 +29,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * 실채널 수동 확인 (SLACK_BOT_TOKEN·ADVISOR_SLACK_TEST_CHANNEL 환경변수가 있을 때만 — 없으면 스킵). table 블록(SlackTableBlock)은 SDK 모델에 없는 자작 블록이라
- * Slack 이 받아들이는지·데스크톱과 모바일에서 어떻게 보이는지를 사람이 확인해야 한다. hvy-common SlackClient 는 응답 ok 를 보지 않아 invalid_blocks 가
- * 조용히 사라지므로, 여기서는 SDK 로 직접 보내 ok·error 를 단언한다. 보내는 메시지는 4개(일일 매수 표·일일 관망·아침 재판정·장기)이고 전부 샘플 데이터다.
+ * Slack 이 받아들이는지·데스크톱과 모바일에서 어떻게 보이는지를 사람이 확인해야 한다. 운영 경로(hvy-common SlackClient)는 거부를 로그와
+ * 발행 실패로만 알리므로(0.4.1 부터 — 그 전에는 응답 ok 를 보지 않았다), 여기서는 SDK 로 직접 보내 ok·error 를 단언한다. 보내는 메시지는 4개(일일 매수 표·일일 관망·아침 재판정·장기)이고 전부 샘플 데이터다.
  * <pre>SLACK_BOT_TOKEN=xoxb-... ADVISOR_SLACK_TEST_CHANNEL=#test-channel ./gradlew test --tests "kr.hvy.blog.modules.advisor.application.slack.AdvisorSlackTableManualTest"</pre>
  */
 class AdvisorSlackTableManualTest {

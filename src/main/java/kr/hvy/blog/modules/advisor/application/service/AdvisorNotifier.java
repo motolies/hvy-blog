@@ -20,6 +20,9 @@ import org.springframework.stereotype.Component;
  *   <li>잡 예외·스케줄 트리거 거부·게이트 마감 초과: #hvy-error + 멘션 (run 당 1통)</li>
  * </ul>
  * 알림 실패가 잡을 죽이지 않도록 어떤 메서드도 예외를 던지지 않는다.
+ * <p>
+ * 결과를 돌려주는 메서드({@link #publish}·{@link #alert})는 <b>Slack 이 메시지를 받았는가</b>를 돌려준다 — {@code Notify} 가 전송 결과를
+ * 알려 주므로(hvy-common 0.4.1) 전송 예외뿐 아니라 Slack 의 거부(ok=false: 채널 없음·토큰 무효·블록 형식 오류)도 false 다.
  */
 @Slf4j
 @Component
@@ -63,16 +66,16 @@ public class AdvisorNotifier {
   /**
    * 잡 내부의 임의 경보 (게이트 마감 초과 등). error=true 면 #hvy-error + 멘션, 아니면 #hvy-notify.
    *
-   * @return 전송을 마쳤는가 — Notify 빈이 없거나 전송이 예외를 던지면 false(예외는 던지지 않는다). 다시 보낼지 정해야 하는 호출부(LlmProviderGate)가 본다.
-   *     true 가 Slack 도착을 보장하지는 않는다: {@code SlackClient}(hvy-common)가 Slack 호출의 예외(HTTP 오류·네트워크)를 로그만 남기고 삼키고,
-   *     {@code ok=false} 응답(channel_not_found 등)은 확인하지 않는다
+   * @return Slack 이 메시지를 받았는가 — Notify 빈이 없거나, 전송이 실패했거나(네트워크·HTTP 오류), Slack 이 거부했으면(ok=false) false.
+   *     예외는 던지지 않는다. 다시 보낼지 정해야 하는 호출부(LlmProviderGate)가 본다
    */
   public boolean alert(String text, boolean error) {
     return sendText(error ? SlackChannel.ERROR : SlackChannel.NOTIFY, text, error);
   }
 
   /**
-   * Block Kit 메시지를 발행한다. 성공 여부를 돌려주되 예외는 던지지 않는다.
+   * Block Kit 메시지를 발행한다. Slack 이 받았는지를 돌려주되 예외는 던지지 않는다 — 잡은 true 일 때만 "발행됨" 을 기록한다.
+   * Slack 이 블록을 거부하면(invalid_blocks 등, HTTP 200 의 ok=false) false 다.
    */
   public boolean publish(SlackMessage message) {
     if (notify.isEmpty()) {
@@ -80,8 +83,7 @@ public class AdvisorNotifier {
       return false;
     }
     try {
-      notify.get().sendMessage(message);
-      return true;
+      return notify.get().sendMessage(message);
     } catch (Exception e) {
       log.error("advisor Slack 발행 실패(무시): {}", e.getMessage());
       return false;
@@ -89,7 +91,7 @@ public class AdvisorNotifier {
   }
 
   /**
-   * 텍스트 알림을 보낸다. 성공 여부를 돌려주되 예외는 던지지 않는다(빈이 없으면 WARN 로그만).
+   * 텍스트 알림을 보낸다. Slack 이 받았는지를 돌려주되 예외는 던지지 않는다(빈이 없으면 WARN 로그만).
    */
   private boolean sendText(SlackChannel channel, String text, boolean mention) {
     if (notify.isEmpty()) {
@@ -97,12 +99,11 @@ public class AdvisorNotifier {
       return false;
     }
     try {
-      notify.get().sendMessage(NotifyRequest.builder()
+      return notify.get().sendMessage(NotifyRequest.builder()
           .channel(channel.getChannel())
           .message(text)
           .isNotify(mention)
           .build());
-      return true;
     } catch (Exception e) {
       log.error("advisor Slack 전송 실패(무시): {}", e.getMessage());
       return false;

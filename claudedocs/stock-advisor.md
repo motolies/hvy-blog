@@ -330,7 +330,7 @@ M1~M8 은 브랜치 스택 한 줄이다: `e9dc4f2`(M1) → `07dd2d2`(M2) → `3
   - `MorningAdviceMessage`: 조치·종목명·코드·확신 표. 전환기 저녁(v8)의 AVOID 픽을 KEEP·DROP 한 행만 조치 칸에 `(회피)`. 최종 0픽이면 헤딩에 관망 문구, 조치가 하나도 없으면 표 없음.
   - `LongTermAdviceMessage`: 순위·종목명·코드·장기 점수 표.
   - 고정폭 표 계산기 `SlackWidth` 는 쓰는 곳이 없어져 삭제했다.
-- ⚠ **invalid_blocks 가 조용히 사라지는 위험**: hvy-common `SlackClient.send` 는 응답 `ok` 를 보지 않아 Slack 이 표를 거부해도 `AdvisorNotifier.publish` 는 true 를 돌려주고 `published_at` 이 찍힌다. 배포 전 `AdvisorSlackTableManualTest`(SDK 로 직접 보내 `ok` 를 단언, 샘플 4종)로 실채널 렌더링(데스크톱·모바일)을 사람이 확인한다: `SLACK_BOT_TOKEN=xoxb-… ADVISOR_SLACK_TEST_CHANNEL=#… ./gradlew test --tests "*AdvisorSlackTableManualTest"`. hvy-common 의 ok 검사는 후속(§10).
+- **invalid_blocks 는 발행 실패로 잡힌다**(2026-11-11, hvy-common 0.4.1): `SlackClient` 가 응답 `ok` 를 확인해 전송 결과를 돌려주므로, Slack 이 표를 거부하면 `AdvisorNotifier.publish` 가 false → 잡이 `published_at` 을 찍지 않고 경고(PARTIAL)를 남긴다. 거부 사유는 로그 `Slack 메시지 전송 거부: channel=…, error=invalid_blocks, detail=[…]` 에 있다. 0.4.0 까지는 `ok` 를 보지 않아 거부돼도 발행 성공으로 기록됐다. 렌더링(데스크톱·모바일)은 여전히 사람이 확인한다 — `AdvisorSlackTableManualTest`(SDK 로 직접 보내 `ok` 를 단언, 샘플 4종): `SLACK_BOT_TOKEN=xoxb-… ADVISOR_SLACK_TEST_CHANNEL=#… ./gradlew test --tests "*AdvisorSlackTableManualTest"`.
 - **적용 순서**: `20260927_01_advisor_long_only.sql`(주석만, 순서 무관) → `AdvisorSlackTableManualTest` 로 표 확인 → 배포. IC 재계산 불필요. **전환일(첫 advice-v9 DAILY LIVE) 을 §8 표에 적는다.** 확인: `SELECT a.base_date, a.prompt_version, COUNT(p.ticker) picks, COUNT(*) FILTER (WHERE p.direction='AVOID') avoids FROM tb_advisor_advice a LEFT JOIN tb_advisor_pick p USING (advice_id) WHERE a.advice_kind='DAILY' AND a.variant='LIVE' GROUP BY 1,2 ORDER BY 1 DESC LIMIT 5;`(v9 행 avoids 0). 롤백: `PromptResources` 상수·파일 경로를 v8·h20-v1·morning-v1 으로 되돌려도 가드는 AVOID 를 제거하므로 **코드 전체를 되돌려야** v8 동작이 된다.
 
 ### 1.12 프롬프트 수급 금액 억원 정수 (advice-v10 · advice-h20-v3, 2026-10-16)
@@ -556,7 +556,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 
 ## 10. 미실측·잔여
 
-- `AdvisorSlackTableManualTest`(2026-09-27): table 블록이 Slack 에 받아들여지는지(`ok=true`)·데스크톱/모바일 렌더링. **hvy-common `SlackClient.send` 가 응답 `ok` 를 검사하지 않는 문제는 후속**(invalid_blocks 가 발행 성공으로 기록된다 — hvy-common 릴리스 필요라 이번 범위 밖).
+- `AdvisorSlackTableManualTest`(2026-09-27): table 블록이 Slack 에 받아들여지는지(`ok=true`)·데스크톱/모바일 렌더링. hvy-common `SlackClient.send` 가 응답 `ok` 를 검사하지 않던 문제는 **0.4.1 에서 해소**(2026-11-11) — invalid_blocks 는 이제 발행 실패로 기록된다(§1.11).
 - `AdvisorClaudeManualTest`(2026-11-11, **미실행**): Claude `output_config.format` 이 스키마 5종을 받아들이는지·판단 1건 지연이 300초 타임아웃 안인지·도구 루프 2라운드가 400 없이 도는지(thinking 블록 재전송)·자동 캐싱으로 cache_read 가 잡히는지. `ANTHROPIC_API_KEY`·`ADVISOR_CLAUDE_JUDGE_MODEL` 이 있을 때만 돈다(§14).
 - `KisIndexPriceManualTest`: 지수 현재가 TR ID 실측(틀리면 rt_cd≠0, 장중 점검 INDEX 실패로 기록).
 - `AdvisorOpenAiManualTest`: **Responses `text.format`(json_schema, strict)** 이 strict 스키마(nullable enum 포함, **v2 의 2단계 중첩 trendOutlook**)를 수용하는지·토큰·지연. Chat Completions 로 실측했던 2026-09-13 결과는 API 가 바뀌어 다시 확인해야 한다(§12). 프롬프트 v2 로 `promptChars` 가 v1 보다 약 1,500자 늘어난다(시장 trend 블록 2행 + dataAsOf + window).
@@ -903,7 +903,7 @@ MarketJudgeClient / AdvisorChatClient → ChatClient → FallbackChatModel(역�
 | 그 외 400 · 413 · 422, 출력 절단(`max_tokens`), SDK 가 던지지 않은 로컬 예외(직렬화·전송 어댑터 버그) | **폴백 안 함** — 잡 FAILED | — | — | 기존 실패 알림 |
 
 - 요청 오류·출력 절단·로컬 예외를 폴백하지 않는 이유: 다른 공급자가 대신 답하면 요청 조립 버그·상한 설정 문제가 가려진다. 로컬 예외는 Claude 의 상태와 무관해 일시 장애로 보면 "Claude 장애" 알림까지 잘못 나간다. 타임아웃·연결 실패는 전송 계층이 SDK 예외로 바꿔 던지므로 여기에 들지 않는다.
-- **차단**(`LlmProviderGate`, 인메모리): 차단 중에는 Claude 를 부르지 않고 곧바로 OpenAI 로 간다. 시간이 지나면 다음 호출이 Claude 를 다시 시도하고 성공하면 풀린다. 알림은 **분류별 KST 하루 1회**이고, Notify 빈이 없거나 전송이 예외로 끝나 전달되지 않은 날은 다음 실패 때 다시 보낸다(Slack 호출의 예외와 `ok=false` 응답은 hvy-common `SlackClient` 에서 전송 성공으로 보여 재시도되지 않는다 — §14.4). 재시작하면 상태가 사라져 프로브 1회·알림 1통이 중복될 수 있다(단일 인스턴스 전제).
+- **차단**(`LlmProviderGate`, 인메모리): 차단 중에는 Claude 를 부르지 않고 곧바로 OpenAI 로 간다. 시간이 지나면 다음 호출이 Claude 를 다시 시도하고 성공하면 풀린다. 알림은 **분류별 KST 하루 1회**이고, Slack 이 받지 않은 날(Notify 빈 없음·전송 실패·`ok=false` 거부)은 다음 실패 때 다시 보낸다 — `Notify` 가 전송 결과를 돌려준다(hvy-common 0.4.1). 재시작하면 상태가 사라져 프로브 1회·알림 1통이 중복될 수 있다(단일 인스턴스 전제).
 - **차단 범위**: 소진·키/권한 오류·일시 장애는 계정의 문제라 세 역할(judge·assist·chat)을 함께 차단한다. 예외가 둘이다. ① 모델 없음(404)은 그 모델 ID 를 쓰는 역할만 차단한다 — 채팅 모델 ID 하나가 틀려도 판단은 Claude 로 계속 간다(기본값처럼 세 역할이 같은 모델이면 결과는 같다). ② **채팅의 응답 없음**(타임아웃·연결 실패·응답 해석 실패)은 채팅만 차단한다 — 채팅은 90초에 끊으므로 "90초 안에 답이 없었다" 가 300초까지 기다리는 판단·보조를 막으면 안 된다. 알림도 `범위: 채팅 봇 호출만` 으로 따로 하루 1회 나가며, 잦으면 `chat-timeout-seconds` 를 올릴 신호다. 판단·보조의 타임아웃(300초)과 채팅이 받은 429·5xx 는 계정 단위다.
 - **늦은 성공은 차단을 풀지 않는다**: 성공은 "그 호출이 떠난 뒤 실패가 기록되지 않았을 때" 에만 차단을 지운다. 판단 호출(수 분)이 도는 동안 채팅이 소진을 겪어 60분 차단이 걸렸다면, 먼저 떠난 판단 호출의 성공이 그 차단을 지우지 않는다.
 - **채팅 한 턴은 왕복하지 않는다**: 도구 루프 도중 OpenAI 로 넘어가면 그 턴은 끝까지 OpenAI 가 맡는다. OpenAI 는 Claude 가 부른 도구 호출(`toolu_…` id)과 결과를 이어받고 도구를 다시 실행하지 않는다.
@@ -944,7 +944,7 @@ MarketJudgeClient / AdvisorChatClient → ChatClient → FallbackChatModel(역�
 - 채팅 도구 루프가 여러 라운드면 Claude 의 `reasoning_tokens` 는 0 으로 기록된다(캐시 토큰은 합산된다). 단발 호출(judge·assist)은 thinking 토큰이 기록된다.
 - 비스트리밍이다. Claude 응답이 300초를 넘으면 타임아웃 → 폴백(그 호출의 Claude 토큰은 과금된다). 잦으면 effort·max-tokens 를 낮추거나 스트리밍 전환을 검토한다.
 - 모델 단위 차단은 404(모델 없음)뿐이다. 특정 모델에만 걸린 권한 오류(403)나 모델별 rate limit(429)은 계정 단위로 차단돼 세 역할 모두 OpenAI 로 간다.
-- **차단 알림의 재전송은 반쪽이다**: 게이트는 알림이 전달되지 않으면 다음 실패 때 다시 보내지만, 알 수 있는 실패는 Notify 빈 없음과 전송의 런타임 예외뿐이다. hvy-common `SlackClient` 는 Slack 호출의 예외(HTTP 오류·네트워크)를 로그만 남기고 삼키고(Loki `Slack 메시지 전송 실패`), `ok=false` 응답(`channel_not_found`·`invalid_auth` 등, HTTP 200)은 확인하지 않아 로그도 없다(§1.11 의 invalid_blocks 와 같은 원인). 둘 다 `AdvisorNotifier` 에 성공으로 보여 그날 재전송되지 않는다 — 고치려면 hvy-common 의 `Notify.sendMessage` 가 전송 결과를 알려 줘야 한다(라이브러리 변경·배포 필요, 미착수).
+- 차단 알림의 재전송은 **같은 날 다음 실패가 있을 때** 일어난다. 차단 중에는 Claude 를 부르지 않으므로 다음 실패는 차단이 풀린 뒤의 프로브다 — Slack 이 오래 죽어 있으면 재전송도 그만큼 늦는다(소진 60분·키 오류 30분·일시 장애 5분 간격).
 - 400 은 문구 두 가지와 `error.type=billing_error` 만 소진으로 본다. 그 밖의 형태로 오는 소진성 400 은 요청 오류로 분류돼 폴백하지 않고 잡이 FAILED 가 된다 — 새 문구가 보이면 `ClaudeErrors` 에 추가한다.
 - Anthropic 서버 측 `fallbacks`(거부 시 다른 Claude 모델로)는 쓰지 않는다 — 거부는 OpenAI 폴백이 맡는다.
 - Jackson 2 가 클래스패스에 생겼다. `spring.jpa.properties.hibernate.type.json_format_mapper: jackson3` 고정을 지우면 Hibernate 가 JSON 컬럼(`MasterCode`·`AdvisorRun`·`StockCollectRun`) 매퍼를 Jackson 2 로 바꾼다(`JsonFormatMapperGuardTest` 가 지킨다).

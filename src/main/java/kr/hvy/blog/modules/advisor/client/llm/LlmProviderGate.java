@@ -285,9 +285,8 @@ public class LlmProviderGate {
    * 콜백이 전달하지 못했다고 답하거나 던지면 찍은 날짜를 되돌려 다음 실패 때 다시 시도한다 — 사람이 고쳐야 하는 문제(MISCONFIGURED)가
    * 알림 없이 하루를 넘기지 않게.
    * <p>
-   * <b>한계.</b> 재시도는 콜백이 실패를 <i>알 수 있을 때</i>만 일어난다. 운영 콜백({@code AdvisorNotifier.alert})은 Notify 빈이 없거나
-   * 전송이 런타임 예외를 던지면 false 를 주지만, 그 아래 {@code SlackClient}(hvy-common)는 Slack 호출의 예외(HTTP 오류·네트워크)를
-   * 로그만 남기고 삼키고 {@code ok=false} 응답(channel_not_found·invalid_auth 등)은 확인하지도 않는다 — 둘 다 전송 성공으로 보여 재시도되지 않는다.
+   * 운영 콜백({@code AdvisorNotifier.alert})은 Slack 이 메시지를 받았는지를 돌려준다 — Notify 빈이 없거나, 전송이 실패했거나, Slack 이 거부했으면
+   * (ok=false: 채널 없음·토큰 무효) false 다. 그날 한 번도 전달되지 않았으면 다음 실패 때마다 다시 시도한다.
    *
    * @param retryAt 실제로 적용된 차단의 만료 시각(더 긴 기존 차단이 유지됐으면 그 시각)
    */

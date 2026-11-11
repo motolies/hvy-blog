@@ -300,7 +300,7 @@ class MorningAdviseJobTest {
   }
 
   private static MarketJudgeClient.CallResult<MorningAdviceResponse> callResult(MorningAdviceResponse response) {
-    return new MarketJudgeClient.CallResult<>(response, "{}", null, 0, 0, "judge-model", "resp_1", Map.of());
+    return new MarketJudgeClient.CallResult<>(response, "{}", null, 0, 0, "judge-model", "resp_1", Map.of(), null);
   }
 
   private static PickRow pick(String ticker, int rank, double conviction) {

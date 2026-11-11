@@ -14,7 +14,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntFunction;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.client.llm.LlmProvider;
+import kr.hvy.blog.modules.advisor.client.llm.LlmResponses;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
@@ -35,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -60,6 +64,9 @@ class WeeklyReviewJobTest {
   private final TradingCalendar calendar = mock(TradingCalendar.class);
   private final AtomicInteger judgeCalls = new AtomicInteger();
   private final LocalDate today = LocalDate.of(2026, 9, 13);
+  /** n번째(1부터) 재현성 재실행에 답한 공급자·모델 — 기본은 표시 없음(null → 모델은 힌트 "judge"). 폴백으로 재실행마다 판단 주체가 갈리는 상황을 흉내 낸다 */
+  private IntFunction<LlmProvider> judgeProvider = n -> null;
+  private IntFunction<String> judgeModel = n -> null;
   private WeeklyReviewJob job;
 
   @BeforeEach
@@ -69,7 +76,14 @@ class WeeklyReviewJobTest {
       String picks = n == 2 ? "\"T00\",\"T01\",\"T03\"" : "\"T00\",\"T01\",\"T02\"";
       String reply = "{\"regime\":{\"code\":\"RISK_ON\",\"kospiDir\":\"UP\",\"kosdaqDir\":\"NEUTRAL\",\"pUp\":\"0.70\",\"rationale\":\"r\"},"
           + "\"sectors\":[{\"code\":\"G2510\",\"reason\":\"s\"}],\"picks\":[" + picksJson(picks) + "],\"summary\":\"요약\"}";
-      return new ChatResponse(List.of(new Generation(new AssistantMessage(reply))));
+      ChatResponseMetadata.Builder metadata = ChatResponseMetadata.builder();
+      if (judgeModel.apply(n) != null) {
+        metadata.model(judgeModel.apply(n));
+      }
+      if (judgeProvider.apply(n) != null) {
+        metadata.keyValue(LlmResponses.PROVIDER_METADATA_KEY, judgeProvider.apply(n).name());
+      }
+      return new ChatResponse(List.of(new Generation(new AssistantMessage(reply))), metadata.build());
     };
     ChatModel assistStub = prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage("{\"proposals\":[],\"nullResults\":[],\"retireCandidates\":[]}"))));
     job = new WeeklyReviewJob(properties, scoreJob, icService, weightSets, lessonService, kpi, adviceWriter, promptInputs, new PromptResources(),
@@ -122,6 +136,8 @@ class WeeklyReviewJobTest {
     double jaccard = (Double) execution.metadata("reproJaccard");
     assertThat(jaccard).isCloseTo((0.5 + 1.0 + 0.5) / 3, org.assertj.core.data.Offset.offset(0.01)); // {0,1,2} vs {0,1,3} vs {0,1,2}
     assertThat(execution.warnings()).anyMatch(w -> w.contains("재현성 낮음")).anyMatch(w -> w.contains("IC 음수"));
+    assertThat(execution.metadata("reproModels")).as("재실행에 쓰인 판단 주체(공급자 표시 없음 → 모델만)").isEqualTo(List.of("judge"));
+    assertThat(execution.metadata("reproComparable")).as("판단 주체가 하나고 원 판단 모델을 모르면 기존대로 판정한다").isNull();
     verify(notifier).publish(any());
     assertThat(execution.metadata("promptInputsDeleted")).isEqualTo(3);
     assertThat(execution.steps()).extracting(AdvisorExecution.StepResult::name)
@@ -136,6 +152,97 @@ class WeeklyReviewJobTest {
     verify(notifier).publish(message.capture());
     assertThat(message.getValue().toBlocks().toString()).contains("LIVE vs NOMEM(최근 4주): 쌍 없음").contains("OPEN 노트 10영업일 초과: 0건");
     verify(notes).countStaleOpen(today.minusDays(14));
+  }
+
+  // ----- 공급자 폴백(2026-11-11): 재현성은 재실행끼리 판단 주체가 같을 때만 판정 (Jaccard 는 재실행끼리만 짝지어 계산한다) -----
+
+  /** 원 LIVE 판단의 헤더 모델과 입력 스냅샷 options_json 을 지정한다 */
+  private void stubLiveJudge(String model, String optionsJson) {
+    when(adviceWriter.findLatest(any(), any(), any()))
+        .thenReturn(Optional.of(AdviceHeader.builder().adviceId(842L).runId(77L).baseDate(today.minusDays(2)).model(model).build()));
+    when(promptInputs.find(77L, AdviceVariant.LIVE)).thenReturn(Optional.of(new PromptInputRow(77L, AdviceVariant.LIVE, "advice-v1", "sha",
+        frozenPayload(), optionsJson, null)));
+  }
+
+  private String reportText() {
+    ArgumentCaptor<kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage> message =
+        ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage.class);
+    verify(notifier).publish(message.capture());
+    return message.getValue().toBlocks().toString();
+  }
+
+  @Test
+  @DisplayName("재현성: 재실행끼리 공급자·모델이 갈리면(폴백) Jaccard 가 낮아도 '재현성 낮음' 경고를 내지 않고, 쓰인 판단 주체 목록을 메타와 보고 줄에 남긴다")
+  void reproMixedProvidersSuppressWarning() {
+    // 1회차 Claude, 2·3회차 OpenAI — 2회차 픽이 달라 Jaccard 0.67 (< 0.70)
+    judgeProvider = n -> n == 1 ? LlmProvider.CLAUDE : LlmProvider.OPENAI;
+    judgeModel = n -> n == 1 ? "claude-x" : "gpt-x";
+    stubLiveJudge("claude-x", "{\"model\":\"claude-x\",\"provider\":\"CLAUDE\"}");
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat(judgeCalls.get()).isEqualTo(3);
+    assertThat(execution.llmCalls()).isEqualTo(3);
+    assertThat((Double) execution.metadata("reproJaccard")).as("측정값은 그대로 기록").isCloseTo(2.0 / 3, org.assertj.core.data.Offset.offset(0.01));
+    assertThat(execution.warnings()).noneMatch(w -> w.contains("재현성 낮음"));
+    assertThat(execution.metadata("reproModels")).isEqualTo(List.of("CLAUDE:claude-x", "OPENAI:gpt-x"));
+    assertThat(execution.metadata("reproComparable")).isEqualTo(false);
+    assertThat(reportText()).contains("재실행의 판단 주체가 섞임 — 재현성 판정 보류 (재실행 CLAUDE:claude-x, OPENAI:gpt-x · 원 판단 CLAUDE:claude-x)")
+        .doesNotContain("재현성 낮음");
+    assertThat(execution.steps()).filteredOn(step -> step.name().equals("REPRO")).extracting(AdvisorExecution.StepResult::status).containsExactly("OK");
+  }
+
+  @Test
+  @DisplayName("재현성: 재실행이 모두 한 모델이면 원 LIVE 판단과 모델이 달라도 판정한다(Jaccard 는 재실행끼리의 값) — 경고를 내고 무엇의 재현성인지 보고 줄에 남긴다")
+  void reproHomogeneousRerunsAreJudgedEvenWhenLiveJudgeDiffers() {
+    // Claude 가 차단된 주간처럼 재실행 3회가 전부 OpenAI 로 돌았다. provider 키가 없는 이전 스냅샷이라 원 판단은 헤더 모델로만 가린다
+    judgeProvider = n -> LlmProvider.OPENAI;
+    judgeModel = n -> "gpt-x";
+    stubLiveJudge("claude-x", "{}");
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat(execution.warnings()).as("재실행끼리의 Jaccard 0.67 은 gpt-x 의 재현성으로 유효하다 — 경고만 봐도 누구의 재현성인지 알 수 있다")
+        .anyMatch(w -> w.contains("재현성 낮음") && w.contains("재실행 주체 OPENAI:gpt-x · 원 판단 claude-x"));
+    assertThat(execution.metadata("reproModels")).isEqualTo(List.of("OPENAI:gpt-x"));
+    assertThat(execution.metadata("reproComparable")).as("재실행끼리는 비교 가능").isNull();
+    assertThat(execution.metadata("reproDiffersFromLive")).isEqualTo(true);
+    assertThat(reportText()).contains("참고: 재실행 판단 주체(OPENAI:gpt-x)가 원 판단(claude-x)과 다름").doesNotContain("판정 보류");
+  }
+
+  @Test
+  @DisplayName("재현성: 재실행과 원 LIVE 판단의 공급자·모델이 모두 같으면 기존대로 Jaccard < 0.70 에 '재현성 낮음' 경고를 낸다")
+  void reproSameJudgeStillWarns() {
+    judgeProvider = n -> LlmProvider.CLAUDE;
+    judgeModel = n -> "claude-x";
+    stubLiveJudge("claude-x", "{\"model\":\"claude-x\",\"provider\":\"CLAUDE\"}");
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat(execution.warnings()).anyMatch(w -> w.contains("재현성 낮음") && !w.contains("원 판단"));
+    assertThat(execution.metadata("reproModels")).isEqualTo(List.of("CLAUDE:claude-x"));
+    assertThat(execution.metadata("reproComparable")).isNull();
+    assertThat(execution.metadata("reproDiffersFromLive")).isNull();
+    assertThat(reportText()).doesNotContain("판정 보류").doesNotContain("원 판단(");
+  }
+
+  @Test
+  @DisplayName("판단 주체 비교는 양쪽이 모두 알려진 항목만 본다 — 원 판단의 모델·공급자를 모르면 다르다고 보지 않는다")
+  void judgeComparisonRules() {
+    assertThat(WeeklyReviewJob.differentJudge(null, null, LlmProvider.OPENAI, "gpt-x")).as("원 판단 미상").isFalse();
+    assertThat(WeeklyReviewJob.differentJudge(null, " ", null, "gpt-x")).as("원 판단 모델 공백").isFalse();
+    assertThat(WeeklyReviewJob.differentJudge(LlmProvider.CLAUDE, "same", LlmProvider.OPENAI, "same")).as("공급자가 다름").isTrue();
+    assertThat(WeeklyReviewJob.differentJudge(LlmProvider.CLAUDE, "claude-x", null, "claude-x")).as("재실행 공급자 미상·모델 같음").isFalse();
+    assertThat(WeeklyReviewJob.differentJudge(null, "claude-x", null, "gpt-x")).as("모델이 다름").isTrue();
+    assertThat(WeeklyReviewJob.differentJudge(LlmProvider.OPENAI, "gpt-x", LlmProvider.OPENAI, "gpt-x")).isFalse();
+
+    assertThat(WeeklyReviewJob.judgeLabel(LlmProvider.OPENAI, "gpt-x")).isEqualTo("OPENAI:gpt-x");
+    assertThat(WeeklyReviewJob.judgeLabel(null, "gpt-x")).isEqualTo("gpt-x");
+    assertThat(WeeklyReviewJob.judgeLabel(LlmProvider.CLAUDE, null)).isEqualTo("CLAUDE");
+    assertThat(WeeklyReviewJob.judgeLabel(null, " ")).isEqualTo(WeeklyReviewJob.UNKNOWN_JUDGE);
   }
 
   @Test

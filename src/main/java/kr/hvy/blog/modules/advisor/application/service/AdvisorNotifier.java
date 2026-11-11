@@ -62,9 +62,13 @@ public class AdvisorNotifier {
 
   /**
    * 잡 내부의 임의 경보 (게이트 마감 초과 등). error=true 면 #hvy-error + 멘션, 아니면 #hvy-notify.
+   *
+   * @return 전송을 마쳤는가 — Notify 빈이 없거나 전송이 예외를 던지면 false(예외는 던지지 않는다). 다시 보낼지 정해야 하는 호출부(LlmProviderGate)가 본다.
+   *     true 가 Slack 도착을 보장하지는 않는다: {@code SlackClient}(hvy-common)가 Slack 호출의 예외(HTTP 오류·네트워크)를 로그만 남기고 삼키고,
+   *     {@code ok=false} 응답(channel_not_found 등)은 확인하지 않는다
    */
-  public void alert(String text, boolean error) {
-    sendText(error ? SlackChannel.ERROR : SlackChannel.NOTIFY, text, error);
+  public boolean alert(String text, boolean error) {
+    return sendText(error ? SlackChannel.ERROR : SlackChannel.NOTIFY, text, error);
   }
 
   /**
@@ -84,10 +88,13 @@ public class AdvisorNotifier {
     }
   }
 
-  private void sendText(SlackChannel channel, String text, boolean mention) {
+  /**
+   * 텍스트 알림을 보낸다. 성공 여부를 돌려주되 예외는 던지지 않는다(빈이 없으면 WARN 로그만).
+   */
+  private boolean sendText(SlackChannel channel, String text, boolean mention) {
     if (notify.isEmpty()) {
       log.warn("Slack Notify 빈 없음 — 알림 생략: {}", text.replace('\n', ' '));
-      return;
+      return false;
     }
     try {
       notify.get().sendMessage(NotifyRequest.builder()
@@ -95,8 +102,10 @@ public class AdvisorNotifier {
           .message(text)
           .isNotify(mention)
           .build());
+      return true;
     } catch (Exception e) {
       log.error("advisor Slack 전송 실패(무시): {}", e.getMessage());
+      return false;
     }
   }
 }

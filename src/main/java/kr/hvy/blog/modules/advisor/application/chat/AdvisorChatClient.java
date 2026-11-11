@@ -1,7 +1,5 @@
 package kr.hvy.blog.modules.advisor.application.chat;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -13,8 +11,10 @@ import kr.hvy.blog.modules.advisor.application.chat.tool.MarketToolkit;
 import kr.hvy.blog.modules.advisor.application.chat.tool.StockToolkit;
 import kr.hvy.blog.modules.advisor.application.service.MarketJudgeClient;
 import kr.hvy.blog.modules.advisor.application.service.PromptResources;
+import kr.hvy.blog.modules.advisor.client.llm.LlmProvider;
+import kr.hvy.blog.modules.advisor.client.llm.LlmResponses;
+import kr.hvy.blog.modules.advisor.client.llm.LlmTokenUsage;
 import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesChatModel;
-import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesUsage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
@@ -28,8 +28,12 @@ import org.springframework.stereotype.Component;
  * 채팅 답변자 — 정적 시스템 프롬프트 + 스레드 히스토리 + 질문을 도구 14종과 함께 ChatClient 에 보내고 결과·사용량·도구 호출 목록을 {@link ChatResult} 로 돌려준다.
  * <p>
  * {@code MarketJudgeClient} 를 재사용하지 않는 이유: 그쪽은 strict JSON 스키마 단발 호출 계약이고 여기는 자유 텍스트 + 대화 + 도구 루프다.
- * ChatModel 은 셋 다 Responses API 모델({@code OpenAiResponsesChatModel}, 2026-09-19)이지만 역할별 인스턴스가 다르다 — 채팅 모델은 도구 상한·reasoning.effort 를
- * 기본 옵션으로 갖고(AdvisorAiConfig.CHAT_MODEL), 이 클래스는 {@code .options()} 를 부르지 않으므로 그 기본 옵션이 그대로 요청에 실린다.
+ * ChatClient 는 채팅용 폴백 래퍼(AdvisorAiConfig.CHAT_FALLBACK_MODEL) 위에 있다 — Claude 채팅 모델이 1순위이고 소진·장애·거부일 때 OpenAI 채팅 모델로
+ * 넘어가며, 한 턴이 한 번 넘어가면 그 턴의 도구 루프는 끝까지 OpenAI 가 맡는다(2026-11-11). 모델·도구 상한·effort 는 공급자별 채팅 모델이 갖고 있고,
+ * 이 클래스는 {@code .options()} 를 부르지 않으므로 그 값이 그대로 요청에 실린다.
+ * <p>
+ * 추론·캐시 토큰: OpenAI 응답은 Responses 모델이 메타데이터로 나른 턴 누적값을 쓴다. Claude 응답은 캐시 토큰을 Spring AI 표준 슬롯의 라운드 합산으로 얻고,
+ * 추론 토큰은 단일 라운드일 때만 기록된다(여러 라운드면 0 — native usage 가 합산 시 버려진다).
  * 사용자 메시지는 {@code .user(String)} 으로 넣는다 — 템플릿 렌더러가 {@code {}} 를 변수로 해석하므로 질문에 중괄호가 있어도 터지지 않게(AdvicePromptBuilder 와 같은 이유).
  */
 @Slf4j
@@ -91,12 +95,15 @@ public class AdvisorChatClient implements ChatAnswerer {
     int completion = usage == null || usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens();
     String model = metadata == null || metadata.getModel() == null || metadata.getModel().isBlank() ? resolvedModel() : metadata.getModel();
     // 도구 루프가 여러 라운드면 Spring AI 의 usage 합산이 native usage 를 버리므로, Responses 모델이 메타데이터로 나른 이 턴 누적값을 우선 쓴다
-    Optional<ResponsesUsage> responsesUsage = OpenAiResponsesChatModel.cumulativeUsage(response);
-    int reasoning = responsesUsage.map(ResponsesUsage::reasoningTokens).orElseGet(() -> MarketJudgeClient.reasoningTokens(usage));
-    int cached = responsesUsage.map(ResponsesUsage::cachedTokens).orElseGet(() -> MarketJudgeClient.cachedTokens(usage));
+    Optional<LlmTokenUsage> responsesUsage = OpenAiResponsesChatModel.cumulativeUsage(response);
+    int reasoning = responsesUsage.map(LlmTokenUsage::reasoningTokens).orElseGet(() -> MarketJudgeClient.reasoningTokens(usage));
+    int cached = responsesUsage.map(LlmTokenUsage::cachedTokens).orElseGet(() -> MarketJudgeClient.cachedTokens(usage));
     List<String> calls = scope.calls();
-    log.info("advisor chat LLM: model={}, history={}, tools={}, in={}, out={}, reasoning={}, cached={}, {}ms", model, history.messages().size(), calls,
-        prompt, completion, reasoning, cached, System.currentTimeMillis() - started);
+    // 공급자는 마지막 라운드 기준이다. 턴 도중 폴백하면(STICKY) 앞 라운드의 Claude 사용량도 폴백 공급자 단가로 계산되는 근사다
+    LlmProvider provider = LlmResponses.provider(response);
+    log.info("advisor chat LLM: provider={}, fallback={}, model={}, history={}, tools={}, in={}, out={}, reasoning={}, cached={}, {}ms", provider,
+        LlmResponses.fallbackReason(response), model, history.messages().size(), calls, prompt, completion, reasoning, cached,
+        System.currentTimeMillis() - started);
     return ChatResult.builder()
         .answer(text)
         .model(model)
@@ -107,7 +114,7 @@ public class AdvisorChatClient implements ChatAnswerer {
         .completionTokens(completion)
         .reasoningTokens(reasoning)
         .cachedTokens(cached)
-        .costUsd(cost(prompt, completion))
+        .costUsd(advisorProperties.costUsd(provider, prompt, completion, cached))
         .dataAsOf(scope.earliestAsOf().orElse(null))
         .build();
   }
@@ -122,21 +129,10 @@ public class AdvisorChatClient implements ChatAnswerer {
     return question.text() + "\n\n(참고: 이 스레드의 루트 메시지는 " + history.adviceBaseDate() + " 기준 일일 판단이다)";
   }
 
+  /**
+   * 응답 메타데이터에 모델 ID 가 없을 때 쓰는 값(OpenAI 채팅 모델 설정). 공급자 모델은 둘 다 응답의 모델 ID 를 싣기 때문에 스텁 응답에서만 쓰인다.
+   */
   private String resolvedModel() {
     return properties.getModel() == null || properties.getModel().isBlank() ? advisorProperties.getModel().getAssist() : properties.getModel();
-  }
-
-  /**
-   * advisor.cost 단가(100만 토큰당 USD)로 비용을 계산한다. 단가가 0 이면 0.
-   */
-  BigDecimal cost(int promptTokens, int completionTokens) {
-    AdvisorProperties.Cost cost = advisorProperties.getCost();
-    if (cost == null || (cost.getInputPer1mUsd().signum() == 0 && cost.getOutputPer1mUsd().signum() == 0)) {
-      return BigDecimal.ZERO;
-    }
-    BigDecimal million = BigDecimal.valueOf(1_000_000);
-    return cost.getInputPer1mUsd().multiply(BigDecimal.valueOf(promptTokens))
-        .add(cost.getOutputPer1mUsd().multiply(BigDecimal.valueOf(completionTokens)))
-        .divide(million, 6, RoundingMode.HALF_UP);
   }
 }

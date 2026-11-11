@@ -5,7 +5,8 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
-import kr.hvy.blog.modules.advisor.client.openai.OpenAiBearerAuthInterceptor;
+import kr.hvy.blog.modules.advisor.client.claude.RestClientHttpClient;
+import kr.hvy.blog.modules.advisor.client.llm.ApiKeyHeaderInterceptor;
 import kr.hvy.blog.modules.common.notify.domain.code.SlackChannel;
 import kr.hvy.blog.modules.hotdeal.client.BrowserProperties;
 import kr.hvy.blog.modules.jira.client.JiraProperties;
@@ -48,6 +49,13 @@ public class RestClientConfig extends RestClientConfigurer {
   private static final int OPENAI_MAX_LOG_BODY_BYTES = 1024 * 1024;
   private static final int OPENAI_MAX_TOTAL_CONNECTIONS = 100;
   private static final int OPENAI_MAX_CONNECTIONS_PER_ROUTE = 20;
+  private static final String CLAUDE_API_BASE_URL = "https://api.anthropic.com";
+  /** 연결 수립 타임아웃(초). 응답 타임아웃은 advisor.claude.timeout-seconds(비스트리밍이라 답이 끝날 때까지 기다린다) */
+  private static final int CLAUDE_API_CONNECT_TIMEOUT_SECONDS = 10;
+  /** api_log 에 저장할 Claude Messages 요청/응답 본문 상한. 도구 루프가 라운드마다 전체 대화를 재전송하는 것은 OpenAI 쪽과 같다 */
+  private static final int CLAUDE_API_MAX_LOG_BODY_BYTES = 1024 * 1024;
+  private static final int CLAUDE_API_MAX_TOTAL_CONNECTIONS = 100;
+  private static final int CLAUDE_API_MAX_CONNECTIONS_PER_ROUTE = 20;
   /** 거시 CSV 응답의 api_log 본문 상한 (CBOE 전체 이력 파일이 500KB 라 머리만 남긴다) */
   private static final int MACRO_MAX_LOG_BODY_BYTES = 8 * 1024;
   /** GDELT JSON 응답의 api_log 본문 상한 */
@@ -76,14 +84,53 @@ public class RestClientConfig extends RestClientConfigurer {
    * 공식 SDK 는 쓰지 않으므로 advisor 의 모든 OpenAI 호출이 이 클라이언트를 지난다(2026-09-19).
    * <p>
    * 인증 인터셉터는 <b>커스텀 인터셉터 목록</b>으로 넘긴다 — 헬퍼가 api_log 인터셉터를 먼저, 커스텀을 뒤에 붙이므로 Bearer 키는 api_log 인터셉터가
-   * 저장하는 원본 헤더에 들어가지 않는다({@link OpenAiBearerAuthInterceptor} 참고). defaultHeader 로 넣으면 키가 request_header 에 남는다.
+   * 저장하는 원본 헤더에 들어가지 않는다({@link ApiKeyHeaderInterceptor} 참고). defaultHeader 로 넣으면 키가 request_header 에 남는다.
    * 키는 호출 시점에 {@link AdvisorProperties#openAiApiKey()} 로 읽는다.
    */
   @Bean("openAiRestClient")
   public RestClient openAiRestClient(AdvisorProperties advisorProperties) {
     return restClient(OPENAI_MAX_TOTAL_CONNECTIONS, OPENAI_MAX_CONNECTIONS_PER_ROUTE, OPENAI_CONNECT_TIMEOUT_SECONDS,
         advisorProperties.getModel().getTimeoutSeconds(), OPENAI_BASE_URL,
-        List.of(new OpenAiBearerAuthInterceptor(advisorProperties::openAiApiKey)), OPENAI_MAX_LOG_BODY_BYTES);
+        List.of(ApiKeyHeaderInterceptor.bearer(advisorProperties::openAiApiKey)), OPENAI_MAX_LOG_BODY_BYTES);
+  }
+
+  /**
+   * Claude Messages API(advisor 의 1순위 공급자, 2026-11-11) 전용 RestClient. Anthropic SDK 의 전송 계층({@code RestClientHttpClient})이
+   * 이 클라이언트로 보내므로 호출 1건이 그대로 tb_api_log 1행이 된다(전송 재시도 off·본문 상한 1 MiB).
+   * <p>
+   * 같은 호스트를 쓰는 {@code claudeRestClient} 와는 용도가 다르다 — 그쪽은 구독 OAuth 토큰 ping({@code ClaudeCodeRefreshService}) 전용이고
+   * 호출부가 Authorization 을 직접 싣는다. 이쪽은 Console API 키(종량제)로 인증하며 응답 타임아웃이 길다(advisor.claude.timeout-seconds).
+   * <p>
+   * 인증 인터셉터는 {@code openAiRestClient} 와 같은 이유로 <b>커스텀 인터셉터 목록</b>으로 넘긴다 — api_log 인터셉터 뒤에서 헤더 사본에만
+   * x-api-key 를 넣어 키가 request_header 에 남지 않는다({@link ApiKeyHeaderInterceptor} 참고). 키는 호출 시점에
+   * {@link AdvisorProperties#anthropicApiKey()} 로 읽는다. baseUrl 은 SDK 가 넘기는 절대 URL 이 우선하므로 상대 경로 호출에만 쓰인다.
+   */
+  @Bean("claudeApiRestClient")
+  public RestClient claudeApiRestClient(AdvisorProperties advisorProperties) {
+    return newClaudeApiRestClient(advisorProperties, advisorProperties.getClaude().getTimeoutSeconds());
+  }
+
+  /**
+   * Slack 채팅 봇 전용 Claude RestClient — {@code claudeApiRestClient} 와 응답 타임아웃만 다르다(advisor.claude.chat-timeout-seconds).
+   * <p>
+   * 채팅은 질문을 받을 때 도구 마감(advisor.chat.answer-timeout-seconds)을 고정하고 시작한다. 판단용 타임아웃(300초)을 같이 쓰면 Claude 가
+   * 타임아웃으로 끝났을 때 이미 마감이 지나 있어, 이어받은 OpenAI 폴백의 도구 호출이 전부 마감 오류로 돌아온다 — 폴백이 답을 만들 시간이 남도록
+   * 채팅만 짧게 끊는다. RestClient 는 호출마다 타임아웃을 바꾸는 수단이 없어 빈을 따로 둔다.
+   */
+  @Bean("claudeChatApiRestClient")
+  public RestClient claudeChatApiRestClient(AdvisorProperties advisorProperties) {
+    return newClaudeApiRestClient(advisorProperties, advisorProperties.getClaude().getChatTimeoutSeconds());
+  }
+
+  /**
+   * Claude Messages API RestClient 조립(판단·채팅 공통). 응답 타임아웃만 인자로 받는다.
+   * 이름을 @Bean 메서드와 다르게 둔다 — 같은 이름의 오버로드는 Spring 이 팩터리 메서드 후보로 함께 본다.
+   */
+  private RestClient newClaudeApiRestClient(AdvisorProperties advisorProperties, int timeoutSeconds) {
+    return restClient(CLAUDE_API_MAX_TOTAL_CONNECTIONS, CLAUDE_API_MAX_CONNECTIONS_PER_ROUTE, CLAUDE_API_CONNECT_TIMEOUT_SECONDS,
+        timeoutSeconds, CLAUDE_API_BASE_URL,
+        List.of(ApiKeyHeaderInterceptor.header(RestClientHttpClient.API_KEY_HEADER, advisorProperties::anthropicApiKey)),
+        CLAUDE_API_MAX_LOG_BODY_BYTES);
   }
 
   /**

@@ -1,7 +1,6 @@
 package kr.hvy.blog.modules.advisor.application.service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -10,8 +9,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.client.llm.LlmProvider;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorStatus;
 import kr.hvy.blog.modules.advisor.domain.entity.AdvisorRun;
 import lombok.extern.slf4j.Slf4j;
@@ -56,6 +57,8 @@ public final class AdvisorExecution {
   private final AtomicInteger completionTokens = new AtomicInteger();
   private final AtomicInteger reasoningTokens = new AtomicInteger();
   private final AtomicInteger cachedTokens = new AtomicInteger();
+  /** 호출마다 그 호출의 공급자 단가로 계산해 더한 비용(USD) — 한 run 안에서 공급자가 섞여도(Claude → OpenAI 폴백) 각자의 단가로 잡힌다 */
+  private final AtomicReference<BigDecimal> costUsd = new AtomicReference<>(BigDecimal.ZERO);
   private volatile String model;
   private volatile String promptVersion;
   private volatile String skipReason;
@@ -206,18 +209,23 @@ public final class AdvisorExecution {
   }
 
   /**
-   * LLM 호출 1건의 사용량을 누적한다. reasoning·cached 는 OpenAI native usage 에서 꺼내 준다(없으면 0).
+   * LLM 호출 1건의 사용량을 누적한다. reasoning·cached 는 공급자 native usage 에서 꺼내 준다(없으면 0).
+   * 비용은 토큰 합계에 단가 하나를 곱하지 않고 <b>호출마다</b> 그 호출의 공급자 단가로 계산해 더한다(2026-11-11) — 폴백으로 한 run 에 Claude·OpenAI 가
+   * 섞이면 합계 × 단일 단가는 틀린다.
+   *
+   * @param provider 이 호출에 답한 공급자. 공급자 표시가 없는 응답(테스트 스텁)이면 null — OpenAI 단가로 계산한다(AdvisorProperties.costUsd)
    */
-  public void recordLlmUsage(String model, String promptVersion, Usage usage, int reasoning, int cached) {
+  public void recordLlmUsage(LlmProvider provider, String model, String promptVersion, Usage usage, int reasoning, int cached) {
     this.model = model;
     this.promptVersion = promptVersion;
     llmCalls.incrementAndGet();
-    if (usage != null) {
-      promptTokens.addAndGet(nvl(usage.getPromptTokens()));
-      completionTokens.addAndGet(nvl(usage.getCompletionTokens()));
-    }
+    int prompt = usage == null ? 0 : nvl(usage.getPromptTokens());
+    int completion = usage == null ? 0 : nvl(usage.getCompletionTokens());
+    promptTokens.addAndGet(prompt);
+    completionTokens.addAndGet(completion);
     reasoningTokens.addAndGet(reasoning);
     cachedTokens.addAndGet(cached);
+    costUsd.accumulateAndGet(properties.costUsd(provider, prompt, completion, cached), BigDecimal::add);
   }
 
   private static int nvl(Integer value) {
@@ -253,13 +261,10 @@ public final class AdvisorExecution {
   }
 
   /**
-   * advisor.cost 단가로 계산한 비용(USD). 단가가 0 이면 0.
+   * 이 run 의 LLM 비용(USD) — {@link #recordLlmUsage} 가 호출마다 공급자 단가(advisor.cost · advisor.claude.cost)로 계산해 더한 값. 단가가 0 이면 0.
    */
   public BigDecimal costUsd() {
-    AdvisorProperties.Cost cost = properties.getCost();
-    BigDecimal in = cost.getInputPer1mUsd().multiply(BigDecimal.valueOf(promptTokens.get()));
-    BigDecimal out = cost.getOutputPer1mUsd().multiply(BigDecimal.valueOf(completionTokens.get()));
-    return in.add(out).divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
+    return costUsd.get();
   }
 
   public void putMetadata(String key, Object value) {

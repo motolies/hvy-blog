@@ -434,7 +434,7 @@ class IntradayCheckJobTest {
   }
 
   private static MarketJudgeClient.CallResult<PickNoteResponse> callResult(PickNoteResponse response) {
-    return new MarketJudgeClient.CallResult<>(response, "{}", null, 0, 0, "assist-model", "resp_1", Map.of());
+    return new MarketJudgeClient.CallResult<>(response, "{}", null, 0, 0, "assist-model", "resp_1", Map.of(), null);
   }
 
   private static KisIndexPriceResponse.Output index(String value, String rate, String open) {

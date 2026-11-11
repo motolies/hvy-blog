@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.slack.DailyAdviceMessage;
+import kr.hvy.blog.modules.advisor.client.llm.LlmProvider;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
@@ -53,6 +54,9 @@ import org.springframework.stereotype.Component;
  * <p>
  * 2계층 메모리(note-v1, 2026-09-21): 빠른 층 = recentOutcomes(12:00 노트의 T+5 확정 빈도표, 300 게이트 전에도 주입), 느린 층 = scoreboard·lessons(300 게이트 뒤).
  * LLM_NOMEM 은 세 가지 전부 없는 판단이라 300 전에는 정확히 "노트만 뺀" 1요인 섀도가 된다. 헤더 memory_json 이 어떤 메모리가 실렸는지 남기고 NOMEM 창의 시작점이 된다.
+ * <p>
+ * 공급자 폴백(Claude 1순위 → OpenAI, 2026-11-11): LIVE 와 LLM 섀도는 같은 run 안의 별도 호출이라 그 사이에 폴백이 일어나면 서로 다른 공급자가 답할 수 있다.
+ * 그러면 (LIVE − 섀도) 에 모델 차이가 섞여 1요인 전제가 깨지므로 그 섀도는 저장하지 않는다({@link #SHADOW_PROVIDER_MISMATCH} 메타).
  */
 @Slf4j
 @Component
@@ -63,6 +67,8 @@ public class AdviseJob implements AdvisorJob {
   static final String ADHOC_SKIP = "수시 판단(ADHOC)은 학습·평가 루프 밖";
   /** 주간 20거래일 판단(H20)이 건너뛰는 단계의 사유 — 입력은 추세·섹터·테마·국면만, 섀도는 규칙형 QUANT_TOPN 1개 */
   static final String H20_SKIP = "H20 은 추세·섹터·테마·국면 입력만(뉴스·메모리 없음) — 채점·IC 는 DAILY ADVISE 몫, 섀도는 QUANT_TOPN 만";
+  /** LLM 섀도를 LIVE 와 공급자가 달라 저장하지 않았을 때 남기는 메타 키 접두 — 뒤에 ".{variant}" 가 붙고 값은 {live, shadow, fallbackReason?} */
+  static final String SHADOW_PROVIDER_MISMATCH = "shadowProviderMismatch";
 
   private final AdvisorProperties properties;
   private final AdvisorGateService gate;
@@ -318,7 +324,7 @@ public class AdviseJob implements AdvisorJob {
     final MarketJudgeClient.JudgeResult[] judged = new MarketJudgeClient.JudgeResult[1];
     steps.runOrThrow("JUDGE", () -> judged[0] = judge.judge(systemPrompt(kind), payload, schema));
     MarketJudgeClient.JudgeResult jr = judged[0];
-    execution.recordLlmUsage(jr.model(), promptVersion, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
+    execution.recordLlmUsage(jr.provider(), jr.model(), promptVersion, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
     List<CandidateRow> included = candidates.subList(0, payload.candidatesIncluded());
     // M6: 합성 국면의 사전 등록 정책 표 한도를 가드가 기계 강제한다(LIVE·ADHOC·H20·LLM 섀도 모두 같은 표 — 섀도가 LIVE 와 한 요인만 다르게)
     AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorContext, trendCodes, news, market.policy(), plan.bounds());
@@ -383,7 +389,7 @@ public class AdviseJob implements AdvisorJob {
     });
 
     // ⑨ 섀도 (격리). 요인 분리: NOMEM = 뉴스 그대로·메모리(recentOutcomes·lessons·scoreboard) 없음, NONEWS = 메모리 그대로·뉴스 없음 — LIVE 와 정확히 한 요인만 다르다.
-    // LLM 섀도는 한 번에 1개 원칙이라 DAILY 에만 둔다(H20 은 규칙형 QUANT_TOPN 만)
+    // LLM 섀도는 한 번에 1개 원칙이라 DAILY 에만 둔다(H20 은 규칙형 QUANT_TOPN 만). 섀도가 LIVE 와 다른 공급자로 답하면 저장하지 않는다(saveLlmShadow)
     if (!plan.learningLoop()) {
       steps.skip("SHADOW_NOMEM", plan.skipReason());
       steps.skip("SHADOW_NONEWS", plan.skipReason());
@@ -391,13 +397,13 @@ public class AdviseJob implements AdvisorJob {
     }
     if (memoryInjected && nomemShadowOpen(baseDate)) {
       steps.run("SHADOW_NOMEM", () -> saveLlmShadow(AdviceVariant.LLM_NOMEM, execution, market, tagged, weightSet, sectorContext, decision,
-          null, List.of(), news, "shadowNomemAdviceId", null));
+          null, List.of(), news, "shadowNomemAdviceId", null, jr.provider()));
     } else {
       steps.skip("SHADOW_NOMEM", memoryInjected ? "섀도 기간 종료" : "메모리 미주입");
     }
     if (news != null && nonewsShadowOpen(baseDate)) {
       steps.run("SHADOW_NONEWS", () -> saveLlmShadow(AdviceVariant.LLM_NONEWS, execution, market, tagged, weightSet, sectorContext, decision,
-          promptScoreboard, activeLessons, null, "shadowNonewsAdviceId", outcomes));
+          promptScoreboard, activeLessons, null, "shadowNonewsAdviceId", outcomes, jr.provider()));
     } else {
       steps.skip("SHADOW_NONEWS", news == null ? "뉴스 없음" : "뉴스 섀도 기간 종료");
     }
@@ -518,17 +524,35 @@ public class AdviseJob implements AdvisorJob {
    * LLM 섀도 1회: 같은 시장·후보 입력에서 요인 하나만 바꿔 한 번 더 판단해 variant 로 저장한다 (발행 없음).
    * LLM_NOMEM 은 메모리(실적 블록·교훈·recentOutcomes) 없이·뉴스는 그대로, LLM_NONEWS 는 뉴스 없이·메모리는 그대로 — 각 섀도가 LIVE 와 정확히 한 요인만 달라야
    * (LIVE − 섀도) 가 그 요인의 가치가 된다. 헤더 memory_json 은 이 섀도에 실제로 실린 메모리로 적는다(NOMEM 은 null, NONEWS 는 LIVE 와 같은 값).
+   * <p>
+   * 판단 주체도 그 "한 요인" 밖이어야 한다: 섀도 호출이 LIVE 와 다른 공급자로 답했으면(둘 다 알려져 있고 서로 다름 — 호출 사이의 폴백·차단 해제) 저장하지 않고
+   * warn 로그와 메타만 남긴다. 호출은 이미 일어났으므로 사용량·비용은 기록한다. 어느 한쪽이라도 공급자 표시가 없으면(null) 비교할 수 없어 기존대로 저장한다.
+   *
+   * @param liveProvider 이 run 의 LIVE 판단에 답한 공급자 (공급자 표시가 없으면 null)
    */
   private void saveLlmShadow(AdviceVariant variant, AdvisorExecution execution, MarketFeatures market, ScreeningResult screened, WeightSet weightSet,
       AdviceGuard.SectorContext sectorContext, AdvisorGateService.Decision decision, Map<String, Object> scoreboard, List<LessonRow> lessons,
-      NewsBlock news, String metadataKey, Map<String, Object> recentOutcomes) {
+      NewsBlock news, String metadataKey, Map<String, Object> recentOutcomes, LlmProvider liveProvider) {
     if (adviceWriter.find(screened.baseDate(), AdviceKind.DAILY, variant).isPresent()) {
       return;
     }
     PromptPayload payload = promptBuilder.build(market, screened, scoreboard, lessons, weightSet.enabledWeights(), decision.quality(), news, recentOutcomes);
     String schema = AdviceSchemaFactory.schemaJson(payload.candidateTickers(), payload.sectorCodes(), payload.newsIds());
     MarketJudgeClient.JudgeResult jr = judge.judge(prompts.adviceSystem(), payload, schema);
-    execution.recordLlmUsage(jr.model(), PromptResources.ADVICE_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
+    execution.recordLlmUsage(jr.provider(), jr.model(), PromptResources.ADVICE_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
+    if (liveProvider != null && jr.provider() != null && liveProvider != jr.provider()) {
+      Object fallbackReason = jr.options() == null ? null : jr.options().get("fallbackReason");
+      Map<String, Object> mismatch = new LinkedHashMap<>();
+      mismatch.put("live", liveProvider.name());
+      mismatch.put("shadow", jr.provider().name());
+      if (fallbackReason != null) {
+        mismatch.put("fallbackReason", fallbackReason);
+      }
+      execution.putMetadata(SHADOW_PROVIDER_MISMATCH + "." + variant.getCode(), mismatch);
+      log.warn("LLM 섀도 저장 생략 — LIVE 와 공급자가 달라 1요인 비교가 안 된다: variant={}, live={}, shadow={}, fallbackReason={}, baseDate={}, runId={}",
+          variant, liveProvider, jr.provider(), fallbackReason, screened.baseDate(), execution.runId());
+      return;
+    }
     List<CandidateRow> included = screened.candidates().subList(0, payload.candidatesIncluded());
     Map<String, MarketTrendCode> trendCodes = market.trendCodes();
     AdviceGuard.Result guarded = guard.validate(jr.response(), included, sectorContext, trendCodes, news, market.policy());

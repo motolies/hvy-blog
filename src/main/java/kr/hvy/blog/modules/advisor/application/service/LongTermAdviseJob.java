@@ -138,7 +138,7 @@ public class LongTermAdviseJob {
     });
     MarketJudgeClient.CallResult<LongTermNarrativeResponse> jr = called.get();
     if (jr != null) {
-      execution.recordLlmUsage(jr.model(), PromptResources.LONGTERM_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
+      execution.recordLlmUsage(jr.provider(), jr.model(), PromptResources.LONGTERM_VERSION, jr.usage(), jr.reasoningTokens(), jr.cachedTokens());
     } else {
       execution.warn("장기 서술 실패 — 서술 없이 규칙 픽으로 발행합니다: " + failure.get());
     }

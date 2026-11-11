@@ -30,6 +30,11 @@ spring:
         # JDBC 시간 바인딩을 UTC로 고정 — JVM 기본 타임존 변동에 대한 안전벨트 (timestamptz 전환 후에도 무해)
         jdbc:
           time_zone: UTC
+        # JSON 컬럼(@JdbcTypeCode(SqlTypes.JSON): MasterCode·AdvisorRun·StockCollectRun) 직렬화기를 Jackson 3 으로 고정 (2026-11-11).
+        # Hibernate 는 클래스패스에 Jackson 2 databind 가 있으면 그것을 Jackson 3 보다 먼저 고른다 — Anthropic SDK(anthropic-java-core)가
+        # Jackson 2 를 끌어오므로 고정하지 않으면 매퍼가 조용히 바뀐다(JsonFormatMapperGuardTest 가 지킨다)
+        type:
+          json_format_mapper: jackson3
       hypersistence:
         utils:
           enable_types_contributor: false
@@ -69,6 +74,9 @@ spring:
           completion: false
     openai:
       api-key: ${OPENAI_API_KEY:}
+    # Claude(advisor 1순위 공급자, 2026-11-11). Spring AI Anthropic 모듈은 없고 키 자리만 빌려 쓴다 — AdvisorProperties.anthropicApiKey() 가 호출 시점에 읽는다
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
 
 mcp:
   enabled: ${MCP_ENABLED:false}
@@ -358,7 +366,7 @@ advisor:
     nonews-weeks: 8               # 뉴스가 실린 첫 판단부터 뉴스 없는 LLM 호출(LLM_NONEWS) 병행 기간 — 뉴스 가치 = LIVE − NONEWS
   model:
     judge: ${ADVISOR_JUDGE_MODEL:gpt-5.6-sol}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
-    judge-max-completion-tokens: ${ADVISOR_JUDGE_MAX_TOKEN:20000}   # Responses max_output_tokens(추론 토큰 포함). 잘리면 잡 FAILED("max_output_tokens 에서 잘렸습니다")
+    judge-max-completion-tokens: ${ADVISOR_JUDGE_MAX_TOKEN:20000}   # Responses max_output_tokens(추론 토큰 포함). 잘리면 잡 FAILED("출력 토큰 상한에서 잘렸습니다")
     # judge-temperature: 0.0                  # 추론 모델은 temperature 를 받지 않으므로 기본 미설정
     assist: ${ADVISOR_ASSIST_MODEL:gpt-5.6-terra}          # 채점 요약·교훈용 저가 모델 ID
     assist-max-completion-tokens: ${ADVISOR_ASSIST_MAX_TOKEN:10000}  # Responses max_output_tokens
@@ -366,6 +374,31 @@ advisor:
   cost:
     input-per-1m-usd: 0           # 0 이면 비용 미계산. 모델 단가로 채우면 run.cost_usd 에 기록
     output-per-1m-usd: 0
+  # Claude 가 1순위 공급자다(2026-11-11). 소진(402·지출 한도)·장애(재시도 후 429·5xx·529, 타임아웃, 401·403·404)·거부(refusal)일 때만
+  # advisor.model.*(OpenAI)로 폴백한다 — 요청 오류(400)·출력 절단은 폴백하지 않고 실패. 공식 SDK 타입을 쓰되 전송은 claudeApiRestClient 라
+  # 호출 1건이 tb_api_log 1행이고 x-api-key 는 기록되지 않는다. ANTHROPIC_API_KEY 가 비면 Claude 를 건너뛰고 OpenAI 로만 부른다
+  claude:
+    enabled: ${ADVISOR_CLAUDE_ENABLED:true}                       # false = OpenAI 만 (롤백 스위치)
+    judge: ${ADVISOR_CLAUDE_JUDGE_MODEL:claude-opus-5-5}          # 판단용 모델 ID
+    judge-max-tokens: ${ADVISOR_CLAUDE_JUDGE_MAX_TOKEN:16000}     # max_tokens(thinking 포함). 비스트리밍이라 16000 이하
+    judge-effort: ${ADVISOR_CLAUDE_JUDGE_EFFORT:high}             # output_config.effort (low/medium/high/xhigh/max). 공백이면 미전송 = 서버 기본
+    assist: ${ADVISOR_CLAUDE_ASSIST_MODEL:claude-opus-5-5}        # 교훈·회고·재현성용 모델 ID
+    assist-max-tokens: ${ADVISOR_CLAUDE_ASSIST_MAX_TOKEN:8000}
+    assist-effort: ${ADVISOR_CLAUDE_ASSIST_EFFORT:medium}
+    chat: ${ADVISOR_CLAUDE_CHAT_MODEL:claude-opus-5-5}            # Slack 채팅 봇 모델 ID. 비면 assist
+    chat-max-tokens: ${ADVISOR_CLAUDE_CHAT_MAX_TOKEN:8000}
+    chat-effort: ${ADVISOR_CLAUDE_CHAT_EFFORT:medium}
+    max-retries: 2                # 일시 장애(429·408·409·5xx·529)만 재시도. Retry-After 30초 초과·타임아웃·연결 실패는 바로 폴백
+    timeout-seconds: 300          # claudeApiRestClient 응답 타임아웃
+    chat-timeout-seconds: 90      # Slack 채팅 봇 전용 응답 타임아웃(claudeChatApiRestClient). advisor.chat.answer-timeout-seconds 보다 충분히 짧게 — 타임아웃 뒤 OpenAI 폴백이 도구를 부를 시간
+    cooldown:                     # 실패 뒤 Claude 를 건너뛰는 시간(분) — 지나면 다음 호출이 다시 시도
+      exhausted-minutes: 60       # 크레딧·지출 한도 소진
+      unavailable-minutes: 5      # 재시도 후에도 남은 일시 장애
+      misconfigured-minutes: 30   # 키·권한·모델 ID 오류
+    cost:                         # 100만 토큰당 USD. 0 이면 비용 미계산
+      input-per-1m-usd: 0
+      output-per-1m-usd: 0
+      cache-read-per-1m-usd: 0    # 0 이면 입력 단가로 계산
   note:                           # 12:00 픽 노트(오답노트, note-v1 2026-09-21). INTRADAY 가 픽별 편차를 분류·회고해 tb_advisor_pick_note 에 남기고 T+5 채점이 CONFIRMED/REFUTED 로 확정
     enabled: ${ADVISOR_NOTE_ENABLED:true}   # false 면 회고 LLM 호출(REFLECT)만 건너뛴다 — 정량·분류 노트는 그대로 저장
     z-threshold: 1.0              # |z| 미만이면 FLAT(회고 생략). z = 지수 대비 초과 / (vol20d × √(3/6.5)) — vol20d 는 후보 feature_json 키

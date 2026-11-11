@@ -7,12 +7,17 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorJson;
+import kr.hvy.blog.modules.advisor.client.llm.LlmChatOptions;
+import kr.hvy.blog.modules.advisor.client.llm.LlmJsonSchema;
+import kr.hvy.blog.modules.advisor.client.llm.LlmProvider;
+import kr.hvy.blog.modules.advisor.client.llm.LlmResponses;
+import kr.hvy.blog.modules.advisor.client.llm.LlmTokenUsage;
 import kr.hvy.blog.modules.advisor.client.openai.dto.FunctionCallOutput;
 import kr.hvy.blog.modules.advisor.client.openai.dto.FunctionTool;
 import kr.hvy.blog.modules.advisor.client.openai.dto.InputMessage;
 import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesRequest;
 import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesResponse;
-import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesUsage;
+import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesTextFormat;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -47,30 +52,20 @@ import tools.jackson.databind.node.ObjectNode;
  * <p>
  * 옵션은 {@link ResponsesChatOptions}. Spring AI 2.0.1 ChatClient 는 <b>이 모델의 기본 옵션</b>을 base 로 요청 customizer 를 병합하므로, 역할(judge/assist/chat)별로
  * 모델 인스턴스를 따로 두는 것이 옵션 배선의 정본이다(AdvisorAiConfig).
+ * <p>
+ * <b>공급자 중립 계약</b>(2026-11-11, Claude 1순위 → OpenAI 폴백): 이 모델은 폴백 래퍼 아래에서도 돈다. 그때 요청 옵션은 공급자 중립 {@link LlmChatOptions} 로
+ * 도착하므로 구조화 출력 스키마·도구·도구 컨텍스트만 받고 model·출력 상한은 이 모델의 기본 옵션을 쓴다({@link #resolveOptions}). 응답에는
+ * {@link LlmResponses} 의 의무대로 공급자 표시({@link LlmProvider#OPENAI})를 ChatResponseMetadata 와 AssistantMessage 메타데이터 양쪽에 싣는다.
  */
 @Slf4j
 public class OpenAiResponsesChatModel implements ChatModel {
 
   /** AssistantMessage 메타데이터 키: 이 라운드의 Responses output 원문(JsonNode 목록) — 다음 라운드 input 에 되돌려 보낸다 */
   public static final String OUTPUT_METADATA_KEY = "openai.responses.output";
-  /** AssistantMessage 메타데이터 키: 이 라운드의 추론·캐시 토큰({@link ResponsesUsage}) */
+  /** AssistantMessage 메타데이터 키: 이 라운드의 추론·캐시 토큰({@link LlmTokenUsage}) */
   public static final String ROUND_USAGE_METADATA_KEY = "openai.responses.usage";
-  /** AssistantMessage 메타데이터 키: 이 턴(질문 1건)의 누적 추론·캐시 토큰({@link ResponsesUsage}) */
+  /** AssistantMessage 메타데이터 키: 이 턴(질문 1건)의 누적 추론·캐시 토큰({@link LlmTokenUsage}) */
   public static final String CUMULATIVE_USAGE_METADATA_KEY = "openai.responses.usage.cumulative";
-  /** ChatResponseMetadata 키: status=incomplete 의 사유(max_output_tokens·content_filter …) */
-  public static final String INCOMPLETE_REASON_METADATA_KEY = "openai.responses.incompleteReason";
-
-  /** finishReason: 모델이 도구를 불렀다(어드바이저가 실행 뒤 다음 라운드) */
-  public static final String FINISH_TOOL_CALLS = "TOOL_CALLS";
-  /** finishReason: 정상 완료 */
-  public static final String FINISH_STOP = "STOP";
-  /** finishReason: max_output_tokens 에서 잘림(있는 텍스트만 실림) */
-  public static final String FINISH_LENGTH = "LENGTH";
-  /** finishReason: 그 외 사유의 미완(content_filter 등) — 사유는 {@link #INCOMPLETE_REASON_METADATA_KEY} */
-  public static final String FINISH_INCOMPLETE = "INCOMPLETE";
-  /** finishReason: 구조화 출력에서 모델이 거부 — 텍스트는 거부 문구 */
-  public static final String FINISH_REFUSAL = "REFUSAL";
-
   static final String INCLUDE_ENCRYPTED_REASONING = "reasoning.encrypted_content";
   static final String TOOL_CHOICE_NONE = "none";
   static final String SCHEMA_KEY = "$schema";
@@ -105,7 +100,15 @@ public class OpenAiResponsesChatModel implements ChatModel {
   }
 
   /**
-   * 요청 옵션. ChatClient 경로는 이 모델의 기본 옵션을 mutate·병합한 {@link ResponsesChatOptions} 를 주므로 그대로 쓰고, 다른 타입(스텁·직접 Prompt)이면 기본 옵션 위에 병합한다.
+   * 요청 옵션을 정한다.
+   * <ol>
+   *   <li>{@link ResponsesChatOptions} — ChatClient 가 이 모델 바로 위에 있을 때. 이 모델의 기본 옵션을 mutate·병합한 결과라 그대로 쓴다</li>
+   *   <li>그 밖의 {@link LlmChatOptions}(하위 타입 포함 — 다른 공급자의 전용 옵션이 생겨도 같은 규칙) — 폴백 래퍼 경유. 래퍼의 기본 옵션이 공급자 중립이라
+   *       요청도 그 타입으로 온다. 이 모델의 기본 옵션 위에
+   *       {@code jsonSchema}·{@code toolCallbacks}·{@code toolContext} <b>세 값만</b> 얹고 model·maxTokens·temperature 등은 읽지 않는다 — 읽으면 다른 공급자의
+   *       모델 ID(Claude)가 OpenAI 요청에 실릴 수 있다. 도구는 ChatClient 가 이 모델 위에 직접 있을 때와 같게 요청 것으로 바꾸고 컨텍스트는 합친다</li>
+   *   <li>그 외 타입(스텁·직접 만든 Prompt) — 기본 옵션 위에 통째로 병합한다</li>
+   * </ol>
    */
   ResponsesChatOptions resolveOptions(Prompt prompt) {
     ChatOptions options = prompt.getOptions();
@@ -114,6 +117,19 @@ public class OpenAiResponsesChatModel implements ChatModel {
     }
     if (options instanceof ResponsesChatOptions responses) {
       return responses;
+    }
+    if (options instanceof LlmChatOptions neutral) {
+      ResponsesChatOptions.Builder builder = defaultOptions.mutate();
+      if (neutral.getJsonSchema() != null) {
+        builder.jsonSchema(neutral.getJsonSchema());
+      }
+      if (neutral.getToolCallbacks() != null && !neutral.getToolCallbacks().isEmpty()) {
+        builder.toolCallbacks(neutral.getToolCallbacks());
+      }
+      if (neutral.getToolContext() != null && !neutral.getToolContext().isEmpty()) {
+        builder.toolContext(neutral.getToolContext());
+      }
+      return builder.build();
     }
     return defaultOptions.mutate().combineWith(options.mutate()).build();
   }
@@ -162,10 +178,17 @@ public class OpenAiResponsesChatModel implements ChatModel {
         .reasoning(effort == null ? null : new ResponsesRequest.Reasoning(effort.toLowerCase(Locale.ROOT)))
         .maxOutputTokens(options.getMaxTokens())
         .temperature(options.getTemperature())
-        .text(options.getTextFormat() == null ? null : ResponsesRequest.jsonSchema(options.getTextFormat()))
+        .text(options.getJsonSchema() == null ? null : ResponsesRequest.jsonSchema(textFormat(options.getJsonSchema())))
         .store(Boolean.FALSE)
         .include(hasTools ? List.of(INCLUDE_ENCRYPTED_REASONING) : null)
         .build();
+  }
+
+  /**
+   * 공급자 중립 스키마 → Responses 와이어 형식({@code text.format} json_schema, strict). strict 의 전제(전 속성 required·additionalProperties=false)는 호출측 스키마 팩토리가 보장한다.
+   */
+  static ResponsesTextFormat textFormat(LlmJsonSchema schema) {
+    return ResponsesTextFormat.strictJsonSchema(schema.name(), schema.schema());
   }
 
   /**
@@ -234,6 +257,7 @@ public class OpenAiResponsesChatModel implements ChatModel {
   /**
    * Responses 응답 → ChatResponse. 텍스트는 message 항목의 output_text 결합, function_call 은 toolCalls(id = call_id), 원문·사용량은 메타데이터.
    * output_text 없이 refusal 파트만 있으면 텍스트는 거부 문구·finishReason 은 REFUSAL, incomplete 는 사유가 max_output_tokens 면 LENGTH 아니면 INCOMPLETE.
+   * 공급자 표시는 응답 메타데이터(호출부 기록용)와 AssistantMessage 메타데이터(도구 루프 히스토리에서 "이 턴을 누가 만들었나" 판별용) 양쪽에 싣는다.
    */
   ChatResponse toChatResponse(ResponsesResponse response, List<Message> instructions) {
     if (response.isFailed()) {
@@ -270,8 +294,8 @@ public class OpenAiResponsesChatModel implements ChatModel {
     }
 
     ResponsesResponse.Usage usage = response.usage();
-    ResponsesUsage round = usage == null ? ResponsesUsage.ZERO : new ResponsesUsage(usage.reasoningTokens(), usage.cachedTokens());
-    ResponsesUsage cumulative = priorUsage(instructions).plus(round);
+    LlmTokenUsage round = usage == null ? LlmTokenUsage.ZERO : new LlmTokenUsage(usage.reasoningTokens(), usage.cachedTokens());
+    LlmTokenUsage cumulative = priorUsage(instructions).plus(round);
 
     Map<String, Object> properties = new LinkedHashMap<>();
     if (response.id() != null) {
@@ -280,6 +304,7 @@ public class OpenAiResponsesChatModel implements ChatModel {
     if (response.model() != null) {
       properties.put("model", response.model());
     }
+    properties.put(LlmResponses.PROVIDER_METADATA_KEY, LlmProvider.OPENAI.name());
     properties.put(OUTPUT_METADATA_KEY, response.output());
     properties.put(ROUND_USAGE_METADATA_KEY, round);
     properties.put(CUMULATIVE_USAGE_METADATA_KEY, cumulative);
@@ -299,9 +324,10 @@ public class OpenAiResponsesChatModel implements ChatModel {
     ChatResponseMetadata.Builder metadata = ChatResponseMetadata.builder()
         .id(StringUtils.defaultString(response.id()))
         .model(StringUtils.defaultString(response.model()))
-        .usage(springUsage);
+        .usage(springUsage)
+        .keyValue(LlmResponses.PROVIDER_METADATA_KEY, LlmProvider.OPENAI.name());
     if (response.isIncomplete()) {
-      metadata.keyValue(INCOMPLETE_REASON_METADATA_KEY, StringUtils.defaultString(response.incompleteReason()));
+      metadata.keyValue(LlmResponses.INCOMPLETE_REASON_METADATA_KEY, StringUtils.defaultString(response.incompleteReason()));
     }
     return new ChatResponse(List.of(generation), metadata.build());
   }
@@ -315,24 +341,24 @@ public class OpenAiResponsesChatModel implements ChatModel {
 
   private static String finishReason(ResponsesResponse response, List<AssistantMessage.ToolCall> toolCalls, boolean refused) {
     if (!toolCalls.isEmpty()) {
-      return FINISH_TOOL_CALLS;
+      return LlmResponses.FINISH_TOOL_CALLS;
     }
     if (refused) {
-      return FINISH_REFUSAL;
+      return LlmResponses.FINISH_REFUSAL;
     }
     if (response.isIncomplete()) {
-      return ResponsesResponse.INCOMPLETE_MAX_OUTPUT_TOKENS.equals(response.incompleteReason()) ? FINISH_LENGTH : FINISH_INCOMPLETE;
+      return ResponsesResponse.INCOMPLETE_MAX_OUTPUT_TOKENS.equals(response.incompleteReason()) ? LlmResponses.FINISH_LENGTH : LlmResponses.FINISH_INCOMPLETE;
     }
-    return FINISH_STOP;
+    return LlmResponses.FINISH_STOP;
   }
 
   /**
    * 프롬프트에 든 이 턴의 이전 라운드 AssistantMessage 들의 라운드 사용량 합. Slack 히스토리 메시지는 메타데이터가 없어 세지 않는다.
    */
-  static ResponsesUsage priorUsage(List<Message> instructions) {
-    ResponsesUsage total = ResponsesUsage.ZERO;
+  static LlmTokenUsage priorUsage(List<Message> instructions) {
+    LlmTokenUsage total = LlmTokenUsage.ZERO;
     for (Message message : instructions) {
-      if (message instanceof AssistantMessage && message.getMetadata().get(ROUND_USAGE_METADATA_KEY) instanceof ResponsesUsage roundUsage) {
+      if (message instanceof AssistantMessage && message.getMetadata().get(ROUND_USAGE_METADATA_KEY) instanceof LlmTokenUsage roundUsage) {
         total = total.plus(roundUsage);
       }
     }
@@ -343,32 +369,11 @@ public class OpenAiResponsesChatModel implements ChatModel {
    * 최종 ChatResponse 에서 이 턴 누적 추론·캐시 토큰을 읽는다. Spring AI 의 라운드 합산은 native usage 를 버리므로 메타데이터로 나른다.
    * Responses 모델이 만든 응답이 아니면 empty.
    */
-  public static Optional<ResponsesUsage> cumulativeUsage(ChatResponse response) {
+  public static Optional<LlmTokenUsage> cumulativeUsage(ChatResponse response) {
     if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
       return Optional.empty();
     }
     Object value = response.getResult().getOutput().getMetadata().get(CUMULATIVE_USAGE_METADATA_KEY);
-    return value instanceof ResponsesUsage usage ? Optional.of(usage) : Optional.empty();
-  }
-
-  /**
-   * 응답의 finishReason(FINISH_* 상수). 다른 패키지(MarketJudgeClient)가 JSON 파싱 전에 LENGTH/INCOMPLETE/REFUSAL 을 가려내는 데 쓴다. 없으면 null.
-   */
-  public static String finishReason(ChatResponse response) {
-    if (response == null || response.getResult() == null || response.getResult().getMetadata() == null) {
-      return null;
-    }
-    return response.getResult().getMetadata().getFinishReason();
-  }
-
-  /**
-   * status=incomplete 의 사유. 미완이 아니거나 이 모델의 응답이 아니면 null.
-   */
-  public static String incompleteReason(ChatResponse response) {
-    if (response == null || response.getMetadata() == null || !response.getMetadata().containsKey(INCOMPLETE_REASON_METADATA_KEY)) {
-      return null;
-    }
-    Object reason = response.getMetadata().get(INCOMPLETE_REASON_METADATA_KEY);
-    return reason == null ? null : reason.toString();
+    return value instanceof LlmTokenUsage usage ? Optional.of(usage) : Optional.empty();
   }
 }

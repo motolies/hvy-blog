@@ -10,13 +10,16 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.application.service.AdvisorJson;
+import kr.hvy.blog.modules.advisor.client.llm.LlmChatOptions;
+import kr.hvy.blog.modules.advisor.client.llm.LlmJsonSchema;
+import kr.hvy.blog.modules.advisor.client.llm.LlmProvider;
+import kr.hvy.blog.modules.advisor.client.llm.LlmResponses;
 import kr.hvy.blog.modules.advisor.client.openai.dto.FunctionCallOutput;
 import kr.hvy.blog.modules.advisor.client.openai.dto.FunctionTool;
 import kr.hvy.blog.modules.advisor.client.openai.dto.InputMessage;
 import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesRequest;
 import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesResponse;
-import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesTextFormat;
-import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesUsage;
+import kr.hvy.blog.modules.advisor.client.llm.LlmTokenUsage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -65,7 +68,7 @@ class OpenAiResponsesChatModelTest {
                   "content":[{"type":"refusal","refusal":"I'm sorry, I cannot assist with that request."}]}],
        "usage":{"input_tokens":81,"output_tokens":11,"total_tokens":92}}
       """;
-  static final ResponsesTextFormat FORMAT = ResponsesTextFormat.strictJsonSchema("AdviceResponse",
+  static final LlmJsonSchema SCHEMA = new LlmJsonSchema("AdviceResponse",
       AdvisorJson.MAPPER.readTree("{\"type\":\"object\",\"properties\":{\"picks\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"enum\":[\"005930\"]}}},"
           + "\"required\":[\"picks\"],\"additionalProperties\":false}"));
 
@@ -156,10 +159,79 @@ class OpenAiResponsesChatModelTest {
     }
 
     @Test
-    @DisplayName("구조화 출력 옵션은 text.format(json_schema·name·strict·schema) 로 나간다")
+    @DisplayName("LlmChatOptions(폴백 래퍼 경유)면 jsonSchema·도구·도구 컨텍스트 세 값만 받고 model·max_output_tokens·temperature 는 이 모델 기본값을 쓴다 — 다른 공급자의 모델 ID 가 새지 않는다")
+    void 중립옵션_세값만() {
+      when(client.create(any())).thenReturn(body(MESSAGE_BODY));
+      ResponsesChatOptions roleDefaults = ResponsesChatOptions.builder().model("gpt-default").maxTokens(300).reasoningEffort("low").toolChoice("auto")
+          .parallelToolCalls(false).build();
+      OpenAiResponsesChatModel roleModel = new OpenAiResponsesChatModel(client, roleDefaults, 2);
+      // 래퍼가 넘기는 중립 옵션에 일부러 다른 공급자의 값(model·maxTokens·temperature)을 넣는다 — 읽히면 안 된다
+      LlmChatOptions neutral = LlmChatOptions.builder()
+          .model("claude-other-provider").maxTokens(99_999).temperature(0.9)
+          .jsonSchema(SCHEMA).toolCallbacks(List.of(ToolCallbacks.from(new FakeTools()))).toolContext(Map.of("userId", "U1"))
+          .build();
+      Prompt prompt = new Prompt(List.of(new SystemMessage("s"), new UserMessage("q")), neutral);
+
+      ResponsesChatOptions resolved = roleModel.resolveOptions(prompt);
+
+      assertThat(resolved.getModel()).isEqualTo("gpt-default");
+      assertThat(resolved.getMaxTokens()).isEqualTo(300);
+      assertThat(resolved.getTemperature()).isNull();
+      assertThat(resolved.getReasoningEffort()).isEqualTo("low");
+      assertThat(resolved.getJsonSchema()).isSameAs(SCHEMA);
+      assertThat(resolved.getToolCallbacks()).extracting(c -> c.getToolDefinition().name()).containsExactly("echo");
+      assertThat(resolved.getToolContext()).containsEntry("userId", "U1");
+
+      roleModel.call(prompt);
+
+      ResponsesRequest request = captureRequest();
+      assertThat(request.model()).isEqualTo("gpt-default");
+      assertThat(request.maxOutputTokens()).isEqualTo(300);
+      assertThat(request.temperature()).isNull();
+      assertThat(request.reasoning().effort()).isEqualTo("low");
+      assertThat(request.text().format().name()).isEqualTo("AdviceResponse");
+      assertThat(request.text().format().strict()).isTrue();
+      assertThat(request.text().format().schema()).isSameAs(SCHEMA.schema());
+      assertThat(request.tools()).extracting(FunctionTool::name).containsExactly("echo");
+      assertThat(request.toolChoice()).isEqualTo("auto");
+      assertThat(request.parallelToolCalls()).isFalse();
+      assertThat(request.include()).containsExactly("reasoning.encrypted_content");
+    }
+
+    @Test
+    @DisplayName("LlmChatOptions 의 하위 타입(다른 공급자의 전용 옵션)이 와도 같은 규칙이다 — 그 옵션의 model·maxTokens 가 이 모델 요청으로 새지 않는다")
+    void 중립옵션_하위타입도_세값만() {
+      // ResponsesChatOptions 가 아닌 하위 타입 — 예: 다른 공급자가 자기 전용 옵션을 만들었을 때
+      LlmChatOptions otherProviderOptions = new LlmChatOptions(List.of(), Map.of("userId", "U1"), "claude-other-provider", null, 99_999, null, null,
+          0.9, null, null, SCHEMA) {
+      };
+
+      ResponsesChatOptions resolved = model.resolveOptions(new Prompt(List.of(new UserMessage("q")), otherProviderOptions));
+
+      assertThat(resolved.getModel()).as("정확한 클래스 비교였다면 통째 병합 경로로 가 'claude-other-provider' 가 실린다").isEqualTo("gpt-default");
+      assertThat(resolved.getMaxTokens()).isEqualTo(defaults.getMaxTokens());
+      assertThat(resolved.getTemperature()).isEqualTo(defaults.getTemperature());
+      assertThat(resolved.getJsonSchema()).isSameAs(SCHEMA);
+      assertThat(resolved.getToolContext()).containsEntry("userId", "U1");
+    }
+
+    @Test
+    @DisplayName("빈 LlmChatOptions(스키마·도구 없음)는 모델 기본 옵션 그대로다 — 기본 옵션의 도구·컨텍스트를 지우지 않는다")
+    void 중립옵션_빈값() {
+      ResponsesChatOptions withTools = defaults.mutate().toolCallbacks(List.of(ToolCallbacks.from(new FakeTools()))).toolContext(Map.of("k", "v")).build();
+      OpenAiResponsesChatModel toolModel = new OpenAiResponsesChatModel(client, withTools, 0);
+
+      ResponsesChatOptions resolved = toolModel.resolveOptions(new Prompt(List.of(new UserMessage("q")), LlmChatOptions.builder().model("claude-x").build()));
+
+      assertThat(resolved).isEqualTo(withTools);
+      assertThat(resolved.getModel()).isEqualTo("gpt-default");
+    }
+
+    @Test
+    @DisplayName("구조화 출력 옵션(jsonSchema)은 text.format(json_schema·name·strict·schema) 로 나간다")
     void 텍스트포맷() {
       when(client.create(any())).thenReturn(body(MESSAGE_BODY));
-      ResponsesChatOptions options = defaults.mutate().textFormat(FORMAT).build();
+      ResponsesChatOptions options = defaults.mutate().jsonSchema(SCHEMA).build();
 
       model.call(new Prompt(List.of(new SystemMessage("s"), new UserMessage("{}")), options));
 
@@ -167,7 +239,7 @@ class OpenAiResponsesChatModelTest {
       assertThat(request.text().format().type()).isEqualTo("json_schema");
       assertThat(request.text().format().name()).isEqualTo("AdviceResponse");
       assertThat(request.text().format().strict()).isTrue();
-      assertThat(request.text().format().schema()).isSameAs(FORMAT.schema());
+      assertThat(request.text().format().schema()).isSameAs(SCHEMA.schema());
       String json = AdvisorJson.MAPPER.writeValueAsString(request);
       assertThat(json).contains("\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"AdviceResponse\",\"strict\":true,\"schema\":{\"type\":\"object\"");
       assertThat(json).doesNotContain("\"include\"").doesNotContain("\"tools\"");
@@ -279,17 +351,33 @@ class OpenAiResponsesChatModelTest {
       assertThat(output.hasToolCalls()).isTrue();
       assertThat(output.getToolCalls()).containsExactly(new AssistantMessage.ToolCall("call_1", "function", "echo", "{\"value\":\"a\"}"));
       assertThat(response.hasToolCalls()).isTrue();
-      assertThat(response.getResult().getMetadata().getFinishReason()).isEqualTo(OpenAiResponsesChatModel.FINISH_TOOL_CALLS);
+      assertThat(response.getResult().getMetadata().getFinishReason()).isEqualTo(LlmResponses.FINISH_TOOL_CALLS);
       assertThat((List<?>) output.getMetadata().get(OpenAiResponsesChatModel.OUTPUT_METADATA_KEY)).hasSize(2);
-      assertThat(output.getMetadata().get(OpenAiResponsesChatModel.ROUND_USAGE_METADATA_KEY)).isEqualTo(new ResponsesUsage(20, 8));
-      assertThat(output.getMetadata().get(OpenAiResponsesChatModel.CUMULATIVE_USAGE_METADATA_KEY)).isEqualTo(new ResponsesUsage(20, 8));
+      assertThat(output.getMetadata().get(OpenAiResponsesChatModel.ROUND_USAGE_METADATA_KEY)).isEqualTo(new LlmTokenUsage(20, 8));
+      assertThat(output.getMetadata().get(OpenAiResponsesChatModel.CUMULATIVE_USAGE_METADATA_KEY)).isEqualTo(new LlmTokenUsage(20, 8));
       assertThat(response.getMetadata().getId()).isEqualTo("resp_1");
       assertThat(response.getMetadata().getModel()).isEqualTo("gpt-test-2026");
       assertThat(response.getMetadata().getUsage().getPromptTokens()).isEqualTo(100);
       assertThat(response.getMetadata().getUsage().getCompletionTokens()).isEqualTo(30);
       assertThat(response.getMetadata().getUsage().getTotalTokens()).isEqualTo(130);
       assertThat(response.getMetadata().getUsage().getCacheReadInputTokens()).isEqualTo(8L);
-      assertThat(response.getMetadata().getUsage().getNativeUsage()).isEqualTo(new ResponsesUsage(20, 8));
+      assertThat(response.getMetadata().getUsage().getNativeUsage()).isEqualTo(new LlmTokenUsage(20, 8));
+    }
+
+    @Test
+    @DisplayName("공급자 표시(llm.provider=OPENAI)를 ChatResponseMetadata 와 AssistantMessage 메타데이터 양쪽에 싣는다 — 도구 호출·텍스트·거부 응답 모두")
+    void 공급자표시_양쪽() {
+      when(client.create(any())).thenReturn(body(FUNCTION_CALL_BODY)).thenReturn(body(MESSAGE_BODY)).thenReturn(body(REFUSAL_BODY));
+
+      for (int i = 0; i < 3; i++) {
+        ChatResponse response = model.call(new Prompt(List.of(new UserMessage("q")), defaults));
+
+        assertThat(response.getMetadata().<String>get(LlmResponses.PROVIDER_METADATA_KEY)).as("상수명 문자열로 싣는다").isEqualTo("OPENAI");
+        assertThat(response.getResult().getOutput().getMetadata()).containsEntry(LlmResponses.PROVIDER_METADATA_KEY, "OPENAI");
+        assertThat(LlmResponses.provider(response)).isEqualTo(LlmProvider.OPENAI);
+        assertThat(LlmResponses.provider(response.getResult().getOutput())).isEqualTo(LlmProvider.OPENAI);
+        assertThat(LlmResponses.fallbackReason(response)).as("폴백 사유는 래퍼가 싣는다 — 모델은 싣지 않는다").isNull();
+      }
     }
 
     @Test
@@ -298,7 +386,7 @@ class OpenAiResponsesChatModelTest {
       when(client.create(any())).thenReturn(body(MESSAGE_BODY));
       AssistantMessage previousRound = AssistantMessage.builder()
           .content("")
-          .properties(Map.of(OpenAiResponsesChatModel.ROUND_USAGE_METADATA_KEY, new ResponsesUsage(20, 8)))
+          .properties(Map.of(OpenAiResponsesChatModel.ROUND_USAGE_METADATA_KEY, new LlmTokenUsage(20, 8)))
           .build();
       AssistantMessage slackHistory = new AssistantMessage("메타데이터 없는 히스토리");
 
@@ -306,9 +394,9 @@ class OpenAiResponsesChatModelTest {
 
       assertThat(response.getResult().getOutput().getText()).isEqualTo("첫 줄\n둘째 줄");
       assertThat(response.hasToolCalls()).isFalse();
-      assertThat(response.getResult().getMetadata().getFinishReason()).isEqualTo(OpenAiResponsesChatModel.FINISH_STOP);
-      assertThat(OpenAiResponsesChatModel.incompleteReason(response)).isNull();
-      assertThat(OpenAiResponsesChatModel.cumulativeUsage(response)).contains(new ResponsesUsage(25, 58));
+      assertThat(response.getResult().getMetadata().getFinishReason()).isEqualTo(LlmResponses.FINISH_STOP);
+      assertThat(LlmResponses.incompleteReason(response)).isNull();
+      assertThat(OpenAiResponsesChatModel.cumulativeUsage(response)).contains(new LlmTokenUsage(25, 58));
     }
 
     @Test
@@ -320,8 +408,10 @@ class OpenAiResponsesChatModelTest {
       ChatResponse response = model.call(new Prompt(List.of(new UserMessage("q")), defaults));
 
       assertThat(response.getResult().getOutput().getText()).isEqualTo("첫 줄\n둘째 줄");
-      assertThat(OpenAiResponsesChatModel.finishReason(response)).isEqualTo(OpenAiResponsesChatModel.FINISH_LENGTH);
-      assertThat(OpenAiResponsesChatModel.incompleteReason(response)).isEqualTo("max_output_tokens");
+      // 호출부(MarketJudgeClient)가 읽는 공급자 중립 계약
+      assertThat(LlmResponses.finishReason(response)).isEqualTo(LlmResponses.FINISH_LENGTH);
+      assertThat(LlmResponses.incompleteReason(response)).isEqualTo("max_output_tokens");
+      assertThat(response.getMetadata().<String>get("llm.incompleteReason")).isEqualTo("max_output_tokens");
     }
 
     @Test
@@ -332,8 +422,8 @@ class OpenAiResponsesChatModelTest {
 
       ChatResponse response = model.call(new Prompt(List.of(new UserMessage("q")), defaults));
 
-      assertThat(OpenAiResponsesChatModel.finishReason(response)).isEqualTo(OpenAiResponsesChatModel.FINISH_INCOMPLETE);
-      assertThat(OpenAiResponsesChatModel.incompleteReason(response)).isEqualTo("content_filter");
+      assertThat(LlmResponses.finishReason(response)).isEqualTo(LlmResponses.FINISH_INCOMPLETE);
+      assertThat(LlmResponses.incompleteReason(response)).isEqualTo("content_filter");
     }
 
     @Test
@@ -341,11 +431,11 @@ class OpenAiResponsesChatModelTest {
     void 거부응답() {
       when(client.create(any())).thenReturn(body(REFUSAL_BODY));
 
-      ChatResponse response = model.call(new Prompt(List.of(new UserMessage("q")), defaults.mutate().textFormat(FORMAT).build()));
+      ChatResponse response = model.call(new Prompt(List.of(new UserMessage("q")), defaults.mutate().jsonSchema(SCHEMA).build()));
 
       assertThat(response.getResult().getOutput().getText()).isEqualTo("I'm sorry, I cannot assist with that request.");
       assertThat(response.hasToolCalls()).isFalse();
-      assertThat(OpenAiResponsesChatModel.finishReason(response)).isEqualTo(OpenAiResponsesChatModel.FINISH_REFUSAL);
+      assertThat(LlmResponses.finishReason(response)).isEqualTo(LlmResponses.FINISH_REFUSAL);
       assertThat(response.getMetadata().getUsage().getPromptTokens()).isEqualTo(81);
     }
 
@@ -365,8 +455,9 @@ class OpenAiResponsesChatModelTest {
       ChatResponse foreign = new ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(new AssistantMessage("x"))));
       assertThat(OpenAiResponsesChatModel.cumulativeUsage(foreign)).isEmpty();
       assertThat(OpenAiResponsesChatModel.cumulativeUsage(null)).isEmpty();
-      assertThat(OpenAiResponsesChatModel.incompleteReason(foreign)).isNull();
-      assertThat(OpenAiResponsesChatModel.finishReason(null)).isNull();
+      assertThat(LlmResponses.incompleteReason(foreign)).isNull();
+      assertThat(LlmResponses.finishReason(null)).isNull();
     }
+
   }
 }

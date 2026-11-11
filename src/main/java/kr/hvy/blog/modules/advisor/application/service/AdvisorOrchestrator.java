@@ -93,7 +93,8 @@ public class AdvisorOrchestrator {
         throw new AdvisorRequestException("실행 가능한 잡이 아닙니다: " + jobType);
       }
       if (!properties.isConfigured()) {
-        throw new AdvisorRequestException("advisor 설정이 비어 있습니다 (OPENAI_API_KEY, ADVISOR_JUDGE_MODEL, ADVISOR_ASSIST_MODEL)");
+        throw new AdvisorRequestException("advisor LLM 공급자가 구성되지 않았습니다 — Claude(ANTHROPIC_API_KEY, ADVISOR_CLAUDE_JUDGE_MODEL, ADVISOR_CLAUDE_ASSIST_MODEL) "
+            + "또는 OpenAI(OPENAI_API_KEY, ADVISOR_JUDGE_MODEL, ADVISOR_ASSIST_MODEL) 중 하나가 필요합니다");
       }
       if (effectiveDate.isAfter(MarketClock.today())) {
         throw new AdvisorRequestException("미래 날짜는 판단할 수 없습니다: " + effectiveDate);

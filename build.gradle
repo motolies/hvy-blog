@@ -86,6 +86,15 @@ dependencies {
     implementation 'org.springframework.ai:spring-ai-client-chat'
     implementation 'org.springframework.ai:spring-ai-starter-mcp-server-webmvc'
 
+    // Anthropic 공식 Java SDK — advisor 의 Claude(1순위 공급자) 호출용(2026-11-11). 요청·응답 타입과 예외만 쓰고 HTTP 전송은
+    // modules/advisor/client/claude 의 RestClientHttpClient 가 claudeApiRestClient(→ tb_api_log)로 보내므로 OkHttp 모듈(anthropic-java)은 넣지 않는다.
+    // SDK 는 Jackson 2 를 끌어온다(이 앱의 JSON 은 Jackson 3) — Hibernate 가 JSON 컬럼 매퍼를 Jackson 2 로 바꾸지 않도록
+    // application.yml 의 hibernate.type.json_format_mapper=jackson3 고정과 한 쌍이다. swagger-annotations 는 기존 jakarta 변형과 클래스가 겹쳐 뺀다.
+    // victools(jsonschema-generator)는 Spring AI 가 5.x 를 쓰고 SDK 는 4.x 로 컴파일돼 SDK 의 "클래스 기반 스키마" 헬퍼(outputConfig(Class)·addTool(Class))는 쓰지 않는다
+    implementation('com.anthropic:anthropic-java-core:3.8.0') {
+        exclude group: 'io.swagger.core.v3', module: 'swagger-annotations'
+    }
+
     // Slack Socket Mode 수신(advisor 채팅 봇, 2026-09-13) — bolt 코어(1.50.0)는 hvy-common 이 api 로 이미 제공하므로 어댑터만 더한다.
     // bolt-socket-mode 의 pom 은 javax.websocket-api·Tyrus·Java-WebSocket 을 전부 provided 로 두므로 WebSocket 구현은 여기서 하나만 고른다:
     // Java-WebSocket(SocketModeClient.Backend.JavaWebSocket) 은 javax/jakarta websocket API 를 참조하지 않아 Boot 4(jakarta) 와 충돌이 없다.

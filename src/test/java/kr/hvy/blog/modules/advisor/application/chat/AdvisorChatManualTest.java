@@ -26,7 +26,7 @@ import kr.hvy.blog.modules.advisor.application.service.ThemeStrengthService;
 import kr.hvy.blog.modules.advisor.application.service.MarketTrendService;
 import kr.hvy.blog.modules.advisor.application.service.PromptResources;
 import kr.hvy.blog.modules.advisor.application.service.TradingCalendar;
-import kr.hvy.blog.modules.advisor.client.openai.OpenAiBearerAuthInterceptor;
+import kr.hvy.blog.modules.advisor.client.llm.ApiKeyHeaderInterceptor;
 import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesChatModel;
 import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesClient;
 import kr.hvy.blog.modules.advisor.client.openai.ResponsesChatOptions;
@@ -123,7 +123,7 @@ class AdvisorChatManualTest {
 
     // 운영 AdvisorAiConfig.chatResponsesChatModel + chatChatClient 와 같은 조립 — RestClient 만 api_log 인터셉터 없이 인증 인터셉터만 단다(옵션은 모델에만)
     RestClient restClient = RestClient.builder().baseUrl("https://api.openai.com")
-        .requestInterceptor(new OpenAiBearerAuthInterceptor(() -> apiKey)).build();
+        .requestInterceptor(ApiKeyHeaderInterceptor.bearer(() -> apiKey)).build();
     ResponsesChatOptions defaults = ResponsesChatOptions.builder().model(model).maxTokens(chat.getMaxCompletionTokens()).build();
     OpenAiResponsesChatModel chatModel = new OpenAiResponsesChatModel(new OpenAiResponsesClient(restClient, 1), defaults, chat.getMaxTotalToolCalls());
     ToolCallingManager manager = ToolCallingManager.builder().maxCallsPerTool(chat.getMaxCallsPerTool()).maxTotalToolCalls(chat.getMaxTotalToolCalls())

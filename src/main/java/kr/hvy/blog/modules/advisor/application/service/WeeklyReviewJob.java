@@ -13,6 +13,7 @@ import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
 import kr.hvy.blog.modules.advisor.application.slack.WeeklyReviewMessage;
 import kr.hvy.blog.modules.advisor.client.llm.AdviceResponse;
 import kr.hvy.blog.modules.advisor.client.llm.LessonProposalResponse;
+import kr.hvy.blog.modules.advisor.client.llm.LlmProvider;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
@@ -26,6 +27,7 @@ import kr.hvy.blog.modules.advisor.repository.jdbc.PickNoteRepository;
 import kr.hvy.blog.modules.advisor.repository.jdbc.PromptInputWriter;
 import kr.hvy.blog.modules.advisor.repository.jdbc.WeightSetRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -37,7 +39,7 @@ import org.springframework.stereotype.Component;
  *   <li>채점·확정 재채점·IC 증분</li>
  *   <li>가중치 세트 갱신 (n_eff 게이트) → 활성화</li>
  *   <li>교훈: 사후 성과 갱신·폐기 → 셀 집계 → 보조 모델 제안 → 규칙 검증 저장 (누적 픽 게이트 뒤)</li>
- *   <li>재현성: 직전 LIVE 입력을 동결한 채 N회 재실행 → 픽 집합 Jaccard</li>
+ *   <li>재현성: 직전 LIVE 입력을 동결한 채 N회 재실행 → 픽 집합 Jaccard (재실행끼리 판단 주체가 같을 때만 판정)</li>
  *   <li>메모리 점검(note-v1): 최근 4주 LIVE vs LLM_NOMEM 픽 Jaccard·|Δconviction|(사전 등록 판정의 재료, 운영 문서 §8) + 확정 지연 노트 수(finalize 정지 경보)</li>
  *   <li>주간 보고 발행, 프롬프트 스냅샷 보존 정리</li>
  * </ol>
@@ -55,6 +57,8 @@ public class WeeklyReviewJob implements AdvisorJob {
   static final int STALE_NOTE_TRADING_DAYS = 10;
   /** 대조 창 안 헤더 조회 상한(변형당) */
   static final int MEMORY_COMPARE_LIMIT = 60;
+  /** 판단 주체(공급자·모델)를 알 수 없을 때의 라벨 */
+  static final String UNKNOWN_JUDGE = "미상";
 
   private final AdvisorProperties properties;
   private final ScoreJob scoreJob;
@@ -136,7 +140,7 @@ public class WeeklyReviewJob implements AdvisorJob {
         String schema = LessonSchemaFactory.schemaJson(sectorCodes());
         MarketJudgeClient.CallResult<LessonProposalResponse> r = assist.call(prompts.lessonSystem(), AdvisorJson.write(payload), schema,
             LessonProposalResponse.class);
-        execution.recordLlmUsage(r.model(), PromptResources.LESSON_VERSION, r.usage(), r.reasoningTokens(), r.cachedTokens());
+        execution.recordLlmUsage(r.provider(), r.model(), PromptResources.LESSON_VERSION, r.usage(), r.reasoningTokens(), r.cachedTokens());
         LessonService.Applied applied = lessonService.apply(r.value(), execution.runId(), r.model(), now);
         lessonLines.add(String.format("셀 %d개 검토 · 제안 %d · 활성 +%d · 후보 +%d · 거부 %d · 폐기 %d", cells.size(),
             r.value().proposals() == null ? 0 : r.value().proposals().size(), applied.activated().size(), applied.candidates().size(),
@@ -272,6 +276,15 @@ public class WeeklyReviewJob implements AdvisorJob {
 
   /**
    * 직전 LIVE 입력을 동결한 채 N회 재실행해 픽 집합 Jaccard·방향 일치·확신 편차를 잰다. Jaccard < 0.7 이면 경고.
+   * <p>
+   * 재현성은 "같은 입력·같은 판단 주체" 의 표본 잡음이다. Jaccard 는 <b>재실행끼리만</b> 짝지어 계산한다(원 LIVE 판단의 픽은 들어가지 않는다).
+   * <ul>
+   *   <li>공급자 폴백(Claude 1순위 → OpenAI, 2026-11-11)으로 재실행끼리 공급자·모델이 갈렸으면 Jaccard 는 모델 간 차이가 섞인 값이다 —
+   *       "재현성 낮음" 경고를 내지 않고 판정을 보류한다(메타 reproComparable=false)</li>
+   *   <li>재실행이 모두 같은 주체로 돌았으면 그 주체의 재현성으로 유효하므로 판정한다. 원 LIVE 판단과 주체가 달라도 마찬가지다 — 그때는 무엇의
+   *       재현성인지 보고 줄과 메타(reproDiffersFromLive)에 남긴다</li>
+   * </ul>
+   * 쓰인 판단 주체 목록(reproModels)과 측정값(reproJaccard)은 어느 경우에나 기록한다.
    */
   private void reproducibility(AdvisorExecution execution, int runs, List<String> lines, List<String> warnings) {
     Optional<AdviceHeader> latest = adviceWriter.findLatest(AdviceKind.DAILY, AdviceVariant.LIVE, execution.baseDate());
@@ -313,9 +326,16 @@ public class WeeklyReviewJob implements AdvisorJob {
     String schema = AdviceSchemaFactory.schemaJson(tickers, new ArrayList<>(sectors), newsIds);
     List<Set<String>> pickSets = new ArrayList<>();
     List<String> regimes = new ArrayList<>();
+    // 원 LIVE 판단의 판단 주체: 모델은 헤더(tb_advisor_advice.model), 공급자는 입력 스냅샷 options_json.provider(이 키가 생기기 전 행은 null)
+    String liveModel = latest.get().model();
+    LlmProvider liveProvider = LlmProvider.from(AdvisorJson.readMap(input.get().optionsJson()).get("provider"));
+    List<String> runJudges = new ArrayList<>();
+    boolean differsFromLive = false;
     for (int i = 0; i < runs; i++) {
       MarketJudgeClient.CallResult<AdviceResponse> r = judge.call(prompts.adviceSystem(), input.get().userPayload(), schema, AdviceResponse.class);
-      execution.recordLlmUsage(r.model(), PromptResources.ADVICE_VERSION, r.usage(), r.reasoningTokens(), r.cachedTokens());
+      execution.recordLlmUsage(r.provider(), r.model(), PromptResources.ADVICE_VERSION, r.usage(), r.reasoningTokens(), r.cachedTokens());
+      runJudges.add(judgeLabel(r.provider(), r.model()));
+      differsFromLive |= differentJudge(liveProvider, liveModel, r.provider(), r.model());
       Set<String> picks = new HashSet<>();
       if (r.value().picks() != null) {
         r.value().picks().forEach(p -> picks.add(p.ticker()));
@@ -335,9 +355,45 @@ public class WeeklyReviewJob implements AdvisorJob {
     long distinctRegimes = regimes.stream().distinct().count();
     execution.putMetadata("reproJaccard", Math.round(jaccard * 1000) / 1000.0);
     lines.add(String.format("동결 입력 %d회: 픽 집합 Jaccard %.2f · KOSPI 방향 %s", runs, jaccard, distinctRegimes == 1 ? "일치" : "불일치(" + distinctRegimes + "종)"));
-    if (jaccard < 0.7) {
-      warnings.add(String.format("재현성 낮음 (Jaccard %.2f < 0.70) — LLM 랭킹 관여 축소 검토", jaccard));
+    List<String> judges = runJudges.stream().distinct().toList();
+    execution.putMetadata("reproModels", judges);
+    String liveJudge = judgeLabel(liveProvider, liveModel);
+    if (judges.size() > 1) {
+      execution.putMetadata("reproComparable", false);
+      lines.add(String.format("재실행의 판단 주체가 섞임 — 재현성 판정 보류 (재실행 %s · 원 판단 %s)", String.join(", ", judges), liveJudge));
+      log.warn("재현성 판정 보류 — 재실행의 판단 주체가 섞임: 재실행={}, 원 판단={}, jaccard={}, runId={}", judges, liveJudge, jaccard, execution.runId());
+      return;
     }
+    if (differsFromLive) {
+      // Jaccard 는 재실행끼리의 값이라 원 판단과 주체가 달라도 유효하다 — 판정은 하되 무엇의 재현성인지 남긴다
+      execution.putMetadata("reproDiffersFromLive", true);
+      lines.add(String.format("참고: 재실행 판단 주체(%s)가 원 판단(%s)과 다름 — 위 수치는 재실행 주체의 재현성", String.join(", ", judges), liveJudge));
+    }
+    if (jaccard < 0.7) {
+      // 경고는 보고 본문과 따로 PARTIAL 알림에도 실린다 — 원 판단과 주체가 다르면 누구의 재현성인지 경고 문구에도 적는다
+      warnings.add(String.format("재현성 낮음 (Jaccard %.2f < 0.70%s) — LLM 랭킹 관여 축소 검토", jaccard,
+          differsFromLive ? ", 재실행 주체 " + String.join(", ", judges) + " · 원 판단 " + liveJudge : ""));
+    }
+  }
+
+  /**
+   * 판단 주체 라벨 — "공급자:모델". 공급자 표시가 없는 응답(이전 행·테스트 스텁)은 모델만, 둘 다 없으면 {@link #UNKNOWN_JUDGE}.
+   */
+  static String judgeLabel(LlmProvider provider, String model) {
+    if (provider == null) {
+      return StringUtils.defaultIfBlank(model, UNKNOWN_JUDGE);
+    }
+    return StringUtils.isBlank(model) ? provider.name() : provider.name() + ":" + model;
+  }
+
+  /**
+   * 재실행이 원 LIVE 판단과 다른 판단 주체로 돌았는가. 양쪽 값이 모두 알려진 항목(공급자·모델)만 비교한다 — 원 판단의 값을 모르면(null·공백) 다르다고 보지 않는다.
+   */
+  static boolean differentJudge(LlmProvider liveProvider, String liveModel, LlmProvider provider, String model) {
+    if (liveProvider != null && provider != null && liveProvider != provider) {
+      return true;
+    }
+    return StringUtils.isNotBlank(liveModel) && StringUtils.isNotBlank(model) && !liveModel.equals(model);
   }
 
   /**

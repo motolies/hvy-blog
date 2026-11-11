@@ -14,7 +14,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntFunction;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
+import kr.hvy.blog.modules.advisor.client.llm.LlmProvider;
+import kr.hvy.blog.modules.advisor.client.llm.LlmResponses;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceVariant;
 import kr.hvy.blog.modules.advisor.domain.code.AdvisorJobType;
@@ -86,15 +89,25 @@ class AdviseJobTest {
        "summary":"요약"}
       """;
   private String llmReply = REPLY;
+  /** n번째(1부터) LLM 호출에 답한 공급자 — 기본은 공급자 표시 없음(null). 폴백 래퍼가 호출마다 다른 공급자로 답하는 상황을 흉내 낸다 */
+  private IntFunction<LlmProvider> providerOfCall = n -> null;
+  /** OpenAI 가 답한 호출에 실을 폴백 사유(래퍼가 싣는 llm.fallbackReason) */
+  private String fallbackReason;
 
   private AdviseJob job;
 
   @BeforeEach
   void setUp() {
     ChatModel stub = prompt -> {
-      llmCalls.incrementAndGet();
-      return new ChatResponse(List.of(new Generation(new AssistantMessage(llmReply))),
-          ChatResponseMetadata.builder().id("resp").model("judge-x").usage(new DefaultUsage(6000, 1900)).build());
+      LlmProvider provider = providerOfCall.apply(llmCalls.incrementAndGet());
+      ChatResponseMetadata.Builder metadata = ChatResponseMetadata.builder().id("resp").model("judge-x").usage(new DefaultUsage(6000, 1900));
+      if (provider != null) {
+        metadata.keyValue(LlmResponses.PROVIDER_METADATA_KEY, provider.name());
+      }
+      if (provider == LlmProvider.OPENAI && fallbackReason != null) {
+        metadata.keyValue(LlmResponses.FALLBACK_REASON_METADATA_KEY, fallbackReason);
+      }
+      return new ChatResponse(List.of(new Generation(new AssistantMessage(llmReply))), metadata.build());
     };
     job = new AdviseJob(properties, gate, icService, marketFeatures, screening, weightSets, new AdvicePromptBuilder(properties), new PromptResources(),
         new MarketJudgeClient(ChatClient.create(stub), "judge-x"), adviceWriter, promptInputs, lessons, notifier, hookProvider, newsProvider,
@@ -309,6 +322,83 @@ class AdviseJobTest {
     verify(notifier, never()).alert(any(), org.mockito.ArgumentMatchers.anyBoolean());   // 수시 판단은 마감 경보를 울리지 않는다
     assertThat(llmCalls.get()).isZero();
     verify(adviceWriter, never()).insertHeader(any());
+  }
+
+  // ----- 공급자 폴백(2026-11-11): LLM 섀도는 LIVE 와 같은 공급자일 때만 저장 -----
+
+  /** 뉴스 블록(시장 1 + 종목 1) — NONEWS 섀도를 켜는 입력 */
+  private static kr.hvy.blog.modules.advisor.domain.model.NewsBlock newsBlock() {
+    return new kr.hvy.blog.modules.advisor.domain.model.NewsBlock(
+        java.time.Instant.parse("2026-09-11T10:30:00Z"), 36,
+        List.of(new kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline("N1", "09-11 16:20", "외국인 이틀째 순매수", List.of())),
+        java.util.Map.of("T00", List.of(new kr.hvy.blog.modules.advisor.domain.model.NewsBlock.Headline("N2", "09-11 08:40", "종목0 신제품 발표", List.of("T00")))));
+  }
+
+  @Test
+  @DisplayName("섀도 호출이 LIVE 와 다른 공급자로 답하면 그 섀도는 저장하지 않고(사용량·비용은 기록) 메타에 남긴다 — 같은 공급자로 답한 다른 섀도는 그대로 저장한다")
+  void shadowSkippedWhenProviderDiffersFromLive() {
+    when(recentOutcomes.block(base)).thenReturn(Optional.of(outcomesBlock()));
+    properties.getNews().setEnabled(true);
+    when(newsFeatures.news(eq(base), any())).thenReturn(Optional.of(newsBlock()));
+    properties.getCost().setInputPer1mUsd(new java.math.BigDecimal("1"));
+    properties.getClaude().getCost().setInputPer1mUsd(new java.math.BigDecimal("4"));
+    // ① LIVE = Claude, ② LLM_NOMEM = OpenAI(그 사이 Claude 장애로 폴백), ③ LLM_NONEWS = Claude(복귀)
+    providerOfCall = n -> n == 2 ? LlmProvider.OPENAI : LlmProvider.CLAUDE;
+    fallbackReason = "UNAVAILABLE: 529 overloaded";
+
+    AdvisorExecution execution = execution();
+    job.execute(execution);
+
+    assertThat(execution.decideStatus()).as("폴백은 실패가 아니다").isEqualTo(AdvisorStatus.SUCCESS);
+    assertThat(llmCalls.get()).as("LIVE + NOMEM + NONEWS — 섀도 호출 자체는 일어난다").isEqualTo(3);
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter, org.mockito.Mockito.times(3)).insertHeader(headers.capture());
+    assertThat(headers.getAllValues()).extracting(AdviceHeader::variant).as("LLM_NOMEM 헤더 없음")
+        .containsExactly(AdviceVariant.QUANT_TOPN, AdviceVariant.LIVE, AdviceVariant.LLM_NONEWS);
+    ArgumentCaptor<kr.hvy.blog.modules.advisor.domain.model.PromptInputRow> inputs = ArgumentCaptor.forClass(kr.hvy.blog.modules.advisor.domain.model.PromptInputRow.class);
+    verify(promptInputs, org.mockito.Mockito.times(2)).upsert(inputs.capture());
+    assertThat(inputs.getAllValues()).extracting(kr.hvy.blog.modules.advisor.domain.model.PromptInputRow::variant)
+        .containsExactly(AdviceVariant.LIVE, AdviceVariant.LLM_NONEWS);
+    assertThat(inputs.getAllValues().get(0).optionsJson()).as("LIVE 입력 스냅샷에 판단 주체가 남는다").contains("\"provider\":\"CLAUDE\"");
+
+    assertThat(execution.metadata("shadowNomemAdviceId")).isNull();
+    assertThat(execution.metadata("shadowNonewsAdviceId")).isEqualTo(844L);
+    assertThat(execution.metadata(AdviseJob.SHADOW_PROVIDER_MISMATCH + ".LLM_NOMEM"))
+        .isEqualTo(Map.of("live", "CLAUDE", "shadow", "OPENAI", "fallbackReason", "UNAVAILABLE: 529 overloaded"));
+    assertThat(execution.metadata(AdviseJob.SHADOW_PROVIDER_MISMATCH + ".LLM_NONEWS")).isNull();
+    assertThat(execution.steps()).filteredOn(step -> step.name().equals("SHADOW_NOMEM")).extracting(AdvisorExecution.StepResult::status).containsExactly("OK");
+
+    // 저장하지 않은 섀도 호출도 사용량·비용에 든다: Claude 2회 × (4 × 6000 / 1M) + OpenAI 1회 × (1 × 6000 / 1M) = 0.054
+    assertThat(execution.llmCalls()).isEqualTo(3);
+    assertThat(execution.promptTokens()).isEqualTo(18_000);
+    assertThat(execution.costUsd()).isEqualByComparingTo("0.054");
+  }
+
+  @Test
+  @DisplayName("LIVE 와 섀도가 같은 공급자면 섀도를 저장한다. 한쪽이라도 공급자 표시가 없으면(null) 비교할 수 없어 기존대로 저장한다")
+  void shadowSavedWhenSameOrUnknownProvider() {
+    when(recentOutcomes.block(base)).thenReturn(Optional.of(outcomesBlock()));
+    providerOfCall = n -> LlmProvider.CLAUDE;
+
+    AdvisorExecution same = execution();
+    job.execute(same);
+
+    assertThat(same.metadata("shadowNomemAdviceId")).isEqualTo(844L);
+    assertThat(same.metadata(AdviseJob.SHADOW_PROVIDER_MISMATCH + ".LLM_NOMEM")).isNull();
+
+    // LIVE 는 Claude, 섀도 응답에는 공급자 표시가 없다 → 불일치로 보지 않는다
+    when(adviceWriter.insertHeader(any())).thenReturn(852L, 853L, 854L);
+    providerOfCall = n -> n == 3 ? LlmProvider.CLAUDE : null;   // 이 테스트의 3번째 호출 = 두 번째 run 의 LIVE
+    AdvisorExecution unknown = execution();
+    job.execute(unknown);
+
+    assertThat(llmCalls.get()).isEqualTo(4);
+    assertThat(unknown.metadata("shadowNomemAdviceId")).isEqualTo(854L);
+    assertThat(unknown.metadata(AdviseJob.SHADOW_PROVIDER_MISMATCH + ".LLM_NOMEM")).isNull();
+    ArgumentCaptor<AdviceHeader> headers = ArgumentCaptor.forClass(AdviceHeader.class);
+    verify(adviceWriter, org.mockito.Mockito.times(6)).insertHeader(headers.capture());
+    assertThat(headers.getAllValues()).extracting(AdviceHeader::variant).containsExactly(
+        AdviceVariant.QUANT_TOPN, AdviceVariant.LIVE, AdviceVariant.LLM_NOMEM, AdviceVariant.QUANT_TOPN, AdviceVariant.LIVE, AdviceVariant.LLM_NOMEM);
   }
 
   private AdvisorExecution adhocExecution() {

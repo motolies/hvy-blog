@@ -6,7 +6,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import kr.hvy.blog.modules.advisor.application.AdvisorProperties;
-import kr.hvy.blog.modules.advisor.client.openai.OpenAiBearerAuthInterceptor;
+import kr.hvy.blog.modules.advisor.client.llm.ApiKeyHeaderInterceptor;
 import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesChatModel;
 import kr.hvy.blog.modules.advisor.client.openai.OpenAiResponsesClient;
 import kr.hvy.blog.modules.advisor.client.openai.ResponsesChatOptions;
@@ -38,7 +38,7 @@ class AdvisorOpenAiManualTest {
     HttpComponentsClientHttpRequestFactory factory = new HttpComponentsClientHttpRequestFactory();
     factory.setReadTimeout(Duration.ofSeconds(180)); // 기본 팩토리는 무한 대기 — 20k 토큰 judge 가 매달릴 수 있다(연결 타임아웃은 Spring 7 에서 HttpClient 쪽 설정)
     RestClient restClient = RestClient.builder().baseUrl("https://api.openai.com").requestFactory(factory)
-        .requestInterceptor(new OpenAiBearerAuthInterceptor(() -> apiKey)).build();
+        .requestInterceptor(ApiKeyHeaderInterceptor.bearer(() -> apiKey)).build();
     OpenAiResponsesChatModel chatModel = new OpenAiResponsesChatModel(new OpenAiResponsesClient(restClient, 1),
         ResponsesChatOptions.builder().model(model).maxTokens(8000).build(), 0);
     ChatClient chatClient = ChatClient.builder(chatModel).build();

@@ -2,6 +2,7 @@ package kr.hvy.blog.modules.advisor.application;
 
 import jakarta.annotation.PostConstruct;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.Set;
+import kr.hvy.blog.modules.advisor.client.llm.LlmProvider;
 import kr.hvy.blog.modules.advisor.domain.code.AdviceKind;
 import kr.hvy.blog.modules.advisor.domain.code.PickUniverse;
 import kr.hvy.blog.modules.stock.domain.code.MarketType;
@@ -29,6 +31,8 @@ import org.springframework.stereotype.Component;
  * <p>
  * OpenAI 키는 Spring AI 규약대로 {@code spring.ai.openai.api-key}(env OPENAI_API_KEY) 에 두고, 이 클래스는 {@link Environment} 로
  * 존재 여부만 본다. 값이 없어도 앱은 기동되며 잡 실행 시 {@link #isConfigured()} 로 조기에 거부한다(KisProperties 와 같은 역할).
+ * Claude(1순위 공급자, 2026-11-11) 키도 같은 방식으로 {@code spring.ai.anthropic.api-key}(env ANTHROPIC_API_KEY) 에 두고 {@link #anthropicApiKey()} 로 읽는다 —
+ * 필드로 두면 @Data 의 toString 에 키가 실린다. Claude 모델 ID·effort·재시도·차단 시간은 {@code advisor.claude.*}({@link Claude}).
  * 피드백 기능(보정 표·교훈·가중치 갱신)은 코드로는 전부 갖추되 표본 수 게이트(lesson.min-picks, ic.min-n-eff)로 잠근다 — 4주 관측으로
  * 가중치를 바꾸는 것은 노이즈 추종이라는 2026-09-13 설계 검토 결론.
  */
@@ -39,6 +43,7 @@ import org.springframework.stereotype.Component;
 public class AdvisorProperties {
 
   static final String OPENAI_API_KEY_PROPERTY = "spring.ai.openai.api-key";
+  static final String ANTHROPIC_API_KEY_PROPERTY = "spring.ai.anthropic.api-key";
 
   private final Environment environment;
 
@@ -104,6 +109,7 @@ public class AdvisorProperties {
   private Shadow shadow = new Shadow();
   private Model model = new Model();
   private Cost cost = new Cost();
+  private Claude claude = new Claude();
   private Note note = new Note();
   private Regime regime = new Regime();
   private Theme theme = new Theme();
@@ -114,12 +120,25 @@ public class AdvisorProperties {
   private int retentionDays = 180;
 
   /**
-   * OpenAI 키와 모델 ID 2종이 모두 있어야 실행 가능하다.
+   * 잡을 실행할 수 있는가 — 공급자 둘 중 <b>하나라도</b> 판단·보조 모델을 부를 수 있으면 된다(2026-11-11). 둘 다 구성되면 Claude 가 1순위이고
+   * OpenAI 가 폴백, 한쪽만 구성되면 그쪽으로만 부른다(폴백 없음).
    */
   public boolean isConfigured() {
-    return StringUtils.isNotBlank(openAiApiKey())
-        && StringUtils.isNotBlank(model.getJudge())
-        && StringUtils.isNotBlank(model.getAssist());
+    return claudeConfigured() || openAiConfigured();
+  }
+
+  /**
+   * Claude 로 판단·보조 호출이 가능한가 — 스위치·키와 judge/assist 모델 ID.
+   */
+  public boolean claudeConfigured() {
+    return claudeReady(claude.getJudge()) && claudeReady(claude.getAssist());
+  }
+
+  /**
+   * OpenAI 로 판단·보조 호출이 가능한가 — 키와 judge/assist 모델 ID.
+   */
+  public boolean openAiConfigured() {
+    return openAiReady(model.getJudge()) && openAiReady(model.getAssist());
   }
 
   /**
@@ -127,6 +146,52 @@ public class AdvisorProperties {
    */
   public String openAiApiKey() {
     return StringUtils.defaultString(environment.getProperty(OPENAI_API_KEY_PROPERTY));
+  }
+
+  /**
+   * Spring AI 규약 키(spring.ai.anthropic.api-key)에 실린 Anthropic API 키. 없으면 빈 문자열. 호출 시점마다 읽는다(키가 비어도 기동은 된다).
+   */
+  public String anthropicApiKey() {
+    return StringUtils.defaultString(environment.getProperty(ANTHROPIC_API_KEY_PROPERTY));
+  }
+
+  /**
+   * 이 모델 ID 로 Claude 를 부를 수 있는가 — 스위치(advisor.claude.enabled)·키·모델 ID 가 모두 있어야 한다. 폴백 래퍼가 호출마다 묻는다.
+   */
+  public boolean claudeReady(String modelId) {
+    return claude.isEnabled() && StringUtils.isNotBlank(anthropicApiKey()) && StringUtils.isNotBlank(modelId);
+  }
+
+  /**
+   * 이 모델 ID 로 OpenAI 를 부를 수 있는가 — 키·모델 ID 가 모두 있어야 한다.
+   */
+  public boolean openAiReady(String modelId) {
+    return StringUtils.isNotBlank(openAiApiKey()) && StringUtils.isNotBlank(modelId);
+  }
+
+  /**
+   * 공급자 단가(100만 토큰당 USD)로 계산한 호출 비용. 단가가 0 이면 0. provider 가 null 이면(공급자 표시가 없는 응답) OpenAI 단가다 — 기존 동작.
+   * <p>
+   * OpenAI 는 입력·출력 단가 한 쌍으로 계산한다(캐시 할인 미반영, 기존 식). Claude 는 캐시 읽기 토큰을 따로 매긴다 — 채팅 도구 루프는 라운드마다
+   * 앞부분 전체를 캐시에서 읽어 입력 단가로만 계산하면 크게 과대 계상된다. cache-read 단가가 0(미설정)이면 입력 단가로 친다. 캐시 쓰기 가산은 반영하지 않는 근사다.
+   *
+   * @param promptTokens 입력 토큰 합(캐시 읽기 포함)
+   * @param cachedTokens 그중 캐시에서 읽은 토큰
+   */
+  public BigDecimal costUsd(LlmProvider provider, long promptTokens, long completionTokens, long cachedTokens) {
+    BigDecimal million = BigDecimal.valueOf(1_000_000);
+    if (provider != LlmProvider.CLAUDE) {
+      return cost.getInputPer1mUsd().multiply(BigDecimal.valueOf(promptTokens))
+          .add(cost.getOutputPer1mUsd().multiply(BigDecimal.valueOf(completionTokens)))
+          .divide(million, 6, RoundingMode.HALF_UP);
+    }
+    ClaudeCost price = claude.getCost();
+    long cached = Math.clamp(cachedTokens, 0L, Math.max(0L, promptTokens));
+    BigDecimal cacheRead = price.getCacheReadPer1mUsd().signum() == 0 ? price.getInputPer1mUsd() : price.getCacheReadPer1mUsd();
+    return price.getInputPer1mUsd().multiply(BigDecimal.valueOf(promptTokens - cached))
+        .add(cacheRead.multiply(BigDecimal.valueOf(cached)))
+        .add(price.getOutputPer1mUsd().multiply(BigDecimal.valueOf(completionTokens)))
+        .divide(million, 6, RoundingMode.HALF_UP);
   }
 
   /**
@@ -148,12 +213,26 @@ public class AdvisorProperties {
           trend.getScoreHorizonDays(), diagnosticHorizons);
     }
     if (isConfigured()) {
-      log.info("advisor 설정 확인: judge={}, assist={}, horizon={}일(IC {}·학습 {}), markets={}, pickUniverse={}, candidates={}, picks={}~{}, trend=[{}..{}] confirm {}일",
-          model.getJudge(), model.getAssist(), horizonDays, icHorizons(), learnHorizons(), markets, pickUniverse, candidateLimit, pickMin, pickMax, trend.getBearThreshold(),
+      log.info("advisor 설정 확인: claude={}(judge={}, assist={}), openai={}(judge={}, assist={}), horizon={}일(IC {}·학습 {}), markets={}, pickUniverse={}, candidates={}, picks={}~{}, trend=[{}..{}] confirm {}일",
+          providerStatus(claudeConfigured(), "1순위"), claude.getJudge(), claude.getAssist(),
+          providerStatus(openAiConfigured(), claudeConfigured() ? "폴백" : "단독"), model.getJudge(), model.getAssist(),
+          horizonDays, icHorizons(), learnHorizons(), markets, pickUniverse, candidateLimit, pickMin, pickMax, trend.getBearThreshold(),
           trend.getBullThreshold(), trend.getConfirmDays());
+      if (!claudeConfigured() || !openAiConfigured()) {
+        log.warn("advisor LLM 공급자가 하나만 구성돼 있습니다({}) — 그 공급자가 실패하면 폴백 없이 판단을 건너뜁니다",
+            claudeConfigured() ? "Claude" : "OpenAI");
+      }
     } else {
-      log.warn("advisor 가 켜져 있으나 OpenAI 키(OPENAI_API_KEY) 또는 모델 ID(ADVISOR_JUDGE_MODEL/ADVISOR_ASSIST_MODEL)가 비어 있어 잡 실행 시 거부됩니다");
+      log.warn("advisor 가 켜져 있으나 LLM 공급자가 구성되지 않아 잡 실행 시 거부됩니다 — Claude(ANTHROPIC_API_KEY, ADVISOR_CLAUDE_JUDGE_MODEL/ADVISOR_CLAUDE_ASSIST_MODEL) "
+          + "또는 OpenAI(OPENAI_API_KEY, ADVISOR_JUDGE_MODEL/ADVISOR_ASSIST_MODEL) 중 하나는 있어야 합니다");
     }
+  }
+
+  /**
+   * 기동 로그용 공급자 상태 문구.
+   */
+  private static String providerStatus(boolean configured, String role) {
+    return configured ? role : "미구성";
   }
 
   /**
@@ -652,6 +731,90 @@ public class AdvisorProperties {
 
     /** 출력 100만 토큰당 USD (추론 토큰 포함) */
     private BigDecimal outputPer1mUsd = BigDecimal.ZERO;
+  }
+
+  /**
+   * Claude(1순위 공급자) 설정 — {@code advisor.claude.*} (2026-11-11). 호출은 Claude 를 먼저 쓰고, 소진·장애·거부일 때 OpenAI({@link Model})로 폴백한다.
+   * 모델 ID 는 yml 에서만 온다. max-tokens 는 thinking 토큰을 포함하며 비스트리밍 호출이라 16000 이하로 둔다.
+   * effort 는 {@code output_config.effort}(low/medium/high/xhigh/max) — Opus 5.5 는 서버 기본이 medium 이라 역할별로 명시한다. 공백이면 미전송.
+   */
+  @Data
+  public static class Claude {
+
+    /** false 면 Claude 를 쓰지 않고 OpenAI 로만 부른다(롤백 스위치, env ADVISOR_CLAUDE_ENABLED) */
+    private boolean enabled = true;
+
+    /** 판단용 모델 ID (env ADVISOR_CLAUDE_JUDGE_MODEL) */
+    private String judge;
+
+    /** 판단 모델 max_tokens(thinking 포함). 잘리면 MarketJudgeClient 가 LENGTH 로 예외 — 폴백하지 않는다 */
+    private int judgeMaxTokens = 16_000;
+
+    private String judgeEffort = "high";
+
+    /** 보조용(교훈·회고·재현성) 모델 ID (env ADVISOR_CLAUDE_ASSIST_MODEL) */
+    private String assist;
+
+    private int assistMaxTokens = 8_000;
+
+    private String assistEffort = "medium";
+
+    /** Slack 채팅 봇 모델 ID (env ADVISOR_CLAUDE_CHAT_MODEL). 비면 assist 모델 */
+    private String chat;
+
+    private int chatMaxTokens = 8_000;
+
+    private String chatEffort = "medium";
+
+    /** ClaudeMessagesClient 재시도 횟수 — 일시 장애(429·408·409·5xx·529)만. 타임아웃·연결 실패는 재시도 없이 바로 폴백한다 */
+    private int maxRetries = 2;
+
+    /** 호출 1건 응답 타임아웃(초, claudeApiRestClient). "Claude 타임아웃 + OpenAI 재시도 최악" 이 잡의 ShedLock 창 안에 들어와야 한다 */
+    private int timeoutSeconds = 300;
+
+    /**
+     * Slack 채팅 봇의 호출 1건 응답 타임아웃(초, claudeChatApiRestClient). 채팅의 도구 마감(advisor.chat.answer-timeout-seconds)보다 충분히 짧아야
+     * Claude 가 타임아웃으로 끝난 뒤 이어받는 OpenAI 폴백에 도구를 부를 시간이 남는다
+     */
+    private int chatTimeoutSeconds = 90;
+
+    private ClaudeCooldown cooldown = new ClaudeCooldown();
+
+    private ClaudeCost cost = new ClaudeCost();
+
+    /** 채팅 모델 ID — chat 이 비면 assist */
+    public String chatOrAssist() {
+      return StringUtils.defaultIfBlank(chat, assist);
+    }
+  }
+
+  /**
+   * Claude 호출 실패 뒤 Claude 를 건너뛰는 시간(분) — 실패 분류(LlmFailureKind)별. 그동안은 곧바로 OpenAI 로 부르고, 지나면 다음 호출이 Claude 를 다시 시도한다.
+   */
+  @Data
+  public static class ClaudeCooldown {
+
+    /** 크레딧·지출 한도 소진 */
+    private int exhaustedMinutes = 60;
+
+    /** 재시도 후에도 남은 일시 장애 */
+    private int unavailableMinutes = 5;
+
+    /** 키·권한·모델 ID 오류 */
+    private int misconfiguredMinutes = 30;
+  }
+
+  /** Claude 단가(100만 토큰당 USD). 전부 0 이면 비용 미계산 */
+  @Data
+  public static class ClaudeCost {
+
+    private BigDecimal inputPer1mUsd = BigDecimal.ZERO;
+
+    /** 출력(thinking 포함) */
+    private BigDecimal outputPer1mUsd = BigDecimal.ZERO;
+
+    /** 캐시 읽기. 0 이면 입력 단가로 계산한다 */
+    private BigDecimal cacheReadPer1mUsd = BigDecimal.ZERO;
   }
 
   /**

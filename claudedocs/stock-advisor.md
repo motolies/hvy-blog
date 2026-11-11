@@ -370,9 +370,18 @@ MCP 2차 점검(17건)에서 남은 결함을 고쳤다. 판정·조치 전체�
 | `advisor.enabled` | `${ADVISOR_ENABLED:false}` | false 면 ChatClient·잡·컨트롤러 전부 미등록 |
 | `spring.ai.openai.api-key` | `${OPENAI_API_KEY:}` | 키. Spring AI 자동구성은 없다(OpenAI 스타터·SDK 미포함, §12) — `AdvisorProperties` 가 이 키를 Environment 로 읽고 `AdvisorAiConfig` 가 Responses 모델 3개를 직접 조립 |
 | `advisor.model.judge` / `assist` | `${ADVISOR_JUDGE_MODEL:}` / `${ADVISOR_ASSIST_MODEL:}` | 판단용 / 보조용 모델 ID. **코드에 박지 않는다**. 추론 모델이면 temperature 미설정 |
-| `advisor.model.judge-max-completion-tokens` / `assist-max-completion-tokens` | 8000 / 2000 (yml 20000 / 10000) | Responses `max_output_tokens`(추론 토큰 포함, 비용 손잡이). 잘리면 잡 FAILED `"max_output_tokens 에서 잘렸습니다"` — 상한을 올린다 |
+| `advisor.model.judge-max-completion-tokens` / `assist-max-completion-tokens` | 8000 / 2000 (yml 20000 / 10000) | Responses `max_output_tokens`(추론 토큰 포함, 비용 손잡이). 잘리면 잡 FAILED `"출력 토큰 상한에서 잘렸습니다(공급자 OPENAI)"` — 상한을 올린다 |
 | `advisor.model.max-retries` / `timeout-seconds` | 3 / 120 | `OpenAiResponsesClient` 재시도(429·408·409·5xx·네트워크, Retry-After ≤30s) / `openAiRestClient` 응답 타임아웃. 세 모델 공통 |
-| `advisor.cost.*` | 0 | 100만 토큰당 USD. 채우면 run.cost_usd 계산 |
+| `advisor.cost.*` | 0 | 100만 토큰당 USD(OpenAI 단가). 채우면 run.cost_usd 계산 — 호출마다 그 호출의 공급자 단가로 누적한다(§14) |
+| `spring.ai.anthropic.api-key` | `${ANTHROPIC_API_KEY:}` | Claude(1순위 공급자) Console API 키. 비면 Claude 를 건너뛰고 OpenAI 로만 부른다. Spring AI Anthropic 모듈은 없고 키 자리만 쓴다(§14) |
+| `advisor.claude.enabled` | `${ADVISOR_CLAUDE_ENABLED:true}` | false = OpenAI 만(롤백 스위치) |
+| `advisor.claude.judge` / `assist` / `chat` | `${ADVISOR_CLAUDE_JUDGE_MODEL:claude-opus-5-5}` 등 | 역할별 Claude 모델 ID. chat 이 비면 assist |
+| `advisor.claude.*-max-tokens` | 16000 / 8000 / 8000 | Claude `max_tokens`(thinking 포함). 비스트리밍이라 16000 이하. 잘리면 잡 FAILED(폴백 안 함) |
+| `advisor.claude.*-effort` | high / medium / medium | `output_config.effort`. 공백이면 미전송 = 서버 기본 |
+| `advisor.claude.max-retries` / `timeout-seconds` | 2 / 300 | `ClaudeMessagesClient` 재시도(429·408·409·5xx·529 만, Retry-After ≤30s) / `claudeApiRestClient` 응답 타임아웃. 타임아웃·연결 실패는 재시도 없이 폴백 |
+| `advisor.claude.chat-timeout-seconds` | 90 | **채팅 봇 전용** Claude 응답 타임아웃(`claudeChatApiRestClient`). `advisor.chat.answer-timeout-seconds`(180)보다 충분히 짧아야 한다 — 이 값 + 60 이 그 값을 넘거나 0(무한 대기)이면 기동 로그에 WARN. 채팅의 Claude 재시도는 `max-retries` 와 1 중 작은 값(§14.1) |
+| `advisor.claude.cooldown.*-minutes` | 60 / 5 / 30 | 실패 뒤 Claude 를 건너뛰는 시간(소진 / 일시 장애 / 키·모델 오류) |
+| `advisor.claude.cost.*` | 0 | Claude 단가(입력·출력·캐시 읽기). cache-read 가 0 이면 입력 단가로 계산 |
 | `advisor.prompt.version` | `advice-v11` | 프롬프트 버전(표기용 — 코드는 읽지 않고 실제 로드·기록은 `PromptResources.ADVICE_VERSION`·파일명 `prompts/advisor/advice-system-v11.md`). 파일을 고치면 둘을 같이 올린다. 종류별 프롬프트는 따로 있다: MORNING `advice-morning-v3`, H20 `advice-h20-v4`, H60·H180 `advice-longterm-v2`, 채팅 `chat-system-v2` |
 | `advisor.advise.non-consistent-conviction-cap` / `overheated-sigma` | 0.70 / 2.0 | advice-v6 가드 클램프: `secCons=0`(소속 업종 지수가 1주·1개월·3개월 중 하나라도 시장 미달) 또는 `overheated` 섹터 LONG 픽의 확신 상한(CONVICTIONS 값 중 하나) / 섹터 과열 = 업종 지수 5일 수익률 > 배수 × σ_5d(KOSPI). stats `capNonConsistent`·`capOverheated` 로 준수율 관찰(§1.6) |
 | `advisor.note.enabled` | `${ADVISOR_NOTE_ENABLED:true}` | false 면 12:00 회고 LLM 호출(REFLECT)만 건너뛴다 — 정량·분류 노트는 그대로 저장(무료·결정론) |
@@ -425,7 +434,7 @@ MCP 2차 점검(17건)에서 남은 결함을 고쳤다. 판정·조치 전체�
 ## 3. 배포 절차 (처음 1회)
 
 1. Slack 워크스페이스에 `#hvy-advisor` 채널 생성(없으면 발행 실패가 로그로만 남는다).
-2. env: `OPENAI_API_KEY`, `ADVISOR_JUDGE_MODEL`, `ADVISOR_ASSIST_MODEL`, `ADVISOR_ENABLED=true`. 모델 ID 는 OpenAI 모델 목록에서 확정.
+2. env: `OPENAI_API_KEY`, `ADVISOR_JUDGE_MODEL`, `ADVISOR_ASSIST_MODEL`, `ADVISOR_ENABLED=true`. 모델 ID 는 OpenAI 모델 목록에서 확정. Claude 를 1순위로 쓰려면 `ANTHROPIC_API_KEY` 를 더한다(§14 — 둘 중 하나만 있어도 잡은 돈다).
 3. psql: `db/advisor-schema.sql` → `db/advisor-seed.sql` (재실행 안전; v3 의 `tb_advisor_morning_check` 는 `CREATE TABLE IF NOT EXISTS` 라 재적용으로 생긴다). **advice-v2 를 기존 설치에 올릴 때**는 같은 파일 하단의 마이그레이션 블록(`ALTER TABLE tb_advisor_advice ADD COLUMN IF NOT EXISTS trend_kospi …`, `tb_advisor_call_score.predicted/actual_dir VARCHAR(20)`, `event_date`)이 함께 실행되는지 확인한다 — `predicted` 확대를 빠뜨리면 `BEYOND_20D`(10자) 저장이 조용히 실패한다. stock 쪽은 `cat db/stock-derived-rebuild.sql db/stock-derived.sql | psql -1` 로 breadth MV 를 만든다.
    추세 임계 점검(10년 라벨 분포, 목표 강세≈40 / 보합≈35 / 약세≈25%):
    ```sql
@@ -548,6 +557,7 @@ SELECT pg_cancel_backend(<pid>);   -- 끊긴 단계는 FAILED 로 격리되고 �
 ## 10. 미실측·잔여
 
 - `AdvisorSlackTableManualTest`(2026-09-27): table 블록이 Slack 에 받아들여지는지(`ok=true`)·데스크톱/모바일 렌더링. **hvy-common `SlackClient.send` 가 응답 `ok` 를 검사하지 않는 문제는 후속**(invalid_blocks 가 발행 성공으로 기록된다 — hvy-common 릴리스 필요라 이번 범위 밖).
+- `AdvisorClaudeManualTest`(2026-11-11, **미실행**): Claude `output_config.format` 이 스키마 5종을 받아들이는지·판단 1건 지연이 300초 타임아웃 안인지·도구 루프 2라운드가 400 없이 도는지(thinking 블록 재전송)·자동 캐싱으로 cache_read 가 잡히는지. `ANTHROPIC_API_KEY`·`ADVISOR_CLAUDE_JUDGE_MODEL` 이 있을 때만 돈다(§14).
 - `KisIndexPriceManualTest`: 지수 현재가 TR ID 실측(틀리면 rt_cd≠0, 장중 점검 INDEX 실패로 기록).
 - `AdvisorOpenAiManualTest`: **Responses `text.format`(json_schema, strict)** 이 strict 스키마(nullable enum 포함, **v2 의 2단계 중첩 trendOutlook**)를 수용하는지·토큰·지연. Chat Completions 로 실측했던 2026-09-13 결과는 API 가 바뀌어 다시 확인해야 한다(§12). 프롬프트 v2 로 `promptChars` 가 v1 보다 약 1,500자 늘어난다(시장 trend 블록 2행 + dataAsOf + window).
 - 추세 임계 실측: §3 의 분포 SQL 을 psql 로 돌려 yml `advisor.trend.*` 를 조정한다. breadth 성분은 MV 가 생긴 뒤에야 과거 분포를 볼 수 있다.
@@ -756,7 +766,7 @@ Socket Mode(bolt-socket-mode + Java-WebSocket, 공개 URL·서명 검증 없음)
 
 **LLM 호출 경로(2026-09-19, Responses API).** GPT-5.4 이상은 Chat Completions 에서 도구 호출 시 `reasoning_effort=none` 만 허용해(`400: Function tools with reasoning_effort are not supported … use /v1/responses`) 도구 14종을 붙이는 채팅만 죽었다(judge/assist 는 도구가 없어 무관). Spring AI 2.0.1 에는 Responses 용 ChatModel 이 없어 `modules/advisor/client/openai/OpenAiResponsesChatModel`(커스텀 `ChatModel`, `call`+`getOptions` 만 구현, **도구는 실행하지 않음** — 루프는 그대로 `ToolCallingAdvisor`) 을 `chatChatClient` 에 끼웠다. `ChatClient`·`ToolCallingManager` 상한·`.tools(툴킷 4종)`·`ToolContext`·`AdvisorChatClient` 는 무변경. 같은 날 judge/assist 도 이 모델로 옮겨 SDK 를 걷어냈다(§12).
 - 무상태 세션: `store=false` + (도구가 있을 때만) `include=[reasoning.encrypted_content]`, 응답 `output` 원문(reasoning 암호화 블롭·function_call)을 `AssistantMessage` 메타데이터(`openai.responses.output`)에 실어 다음 라운드 `input` 에 `status` 만 빼고 되돌려 보낸다. `ToolResponseMessage` → `function_call_output(call_id)`.
-- HTTP 는 `openAiRestClient`(`RestClientConfig`, `RestClientConfigurer.restClient` 헬퍼) → **호출 1건 = `tb_api_log` 1행**(요청·응답 전문, traceId, 소요, 본문 1 MiB 상한, 60일 보존). 질문 1건에 1+도구 호출 수 행(≤13). 재시도(429·408·409·5xx·네트워크, Retry-After ≤30s, 지수 백오프, `advisor.model.max-retries`)는 `OpenAiResponsesClient` 가 직접 하므로 재시도도 각각 1행. `Authorization` 은 `OpenAiBearerAuthInterceptor` 가 로그 인터셉터 **뒤에서 헤더 사본에만** 넣어 `request_header` 에 키가 남지 않는다(인터셉터 순서 계약, `OpenAiBearerAuthInterceptorTest`). 로컬 `default` 프로필은 `ApiLogService` 가 없어 콘솔 전문 출력만.
+- HTTP 는 `openAiRestClient`(`RestClientConfig`, `RestClientConfigurer.restClient` 헬퍼) → **호출 1건 = `tb_api_log` 1행**(요청·응답 전문, traceId, 소요, 본문 1 MiB 상한, 60일 보존). 질문 1건에 1+도구 호출 수 행(≤13). 재시도(429·408·409·5xx·네트워크, Retry-After ≤30s, 지수 백오프, `advisor.model.max-retries`)는 `OpenAiResponsesClient` 가 직접 하므로 재시도도 각각 1행. `Authorization` 은 `ApiKeyHeaderInterceptor.bearer` 가 로그 인터셉터 **뒤에서 헤더 사본에만** 넣어 `request_header` 에 키가 남지 않는다(인터셉터 순서 계약, `ApiKeyHeaderInterceptorTest`). 로컬 `default` 프로필은 `ApiLogService` 가 없어 콘솔 전문 출력만.
 - 도구 스키마는 Spring AI 생성 `inputSchema` 에서 루트 `$schema` 만 제거, `strict=false`(optional 파라미터가 `required` 에 없어 strict 규칙과 안 맞음). 도구 결과가 `max-total-tool-calls` 이상 쌓이면 `tool_choice=none` 으로 답을 강제(상한 초과 뒤 무한 루프 방지). `status=incomplete(max_output_tokens)` 는 WARN + 있는 텍스트만(finishReason `LENGTH`, 다른 사유는 `INCOMPLETE`), `refusal` 파트만 오면 거부 문구가 답으로(`REFUSAL`), `failed` 는 예외 → Slack 실패 한 줄. 추론 토큰은 Spring AI 의 라운드 합산이 native usage 를 버리므로 메타데이터 누적값(`openai.responses.usage.cumulative`)으로 `tb_advisor_chat.reasoning_tokens` 에 넣는다(캐시 토큰은 `cacheReadInputTokens` 슬롯으로 합산).
 - 후속: 도구 strict 스키마(모든 속성 required + nullable)·hvy-common `ApiLogInterceptor` 헤더 마스킹은 별도.
 
@@ -844,12 +854,12 @@ FROM tb_api_log WHERE request_uri LIKE '%/v1/responses%' ORDER BY created_at DES
 
 ## 12. OpenAI 호출 경로 통합 — Responses API 전부, SDK 없음 (2026-09-19)
 
-judge/assist 도 채팅 봇과 같은 `OpenAiResponsesChatModel` 로 옮겼다. advisor 의 OpenAI 호출은 이제 **전부 `POST /v1/responses` + `openAiRestClient`** 라 `tb_api_log` 에 남고(`SELECT … FROM tb_api_log WHERE url LIKE '%/v1/responses%'`), `spring-ai-starter-model-openai`·`spring-ai-openai`·공식 SDK(`openai-java-core`)·그 전이(Jackson 2 databind·kotlin-reflect·Boot restclient/webclient 스타터·Spring AI 자동구성)는 의존성에서 빠졌다. build.gradle 은 `spring-ai-client-chat` 만 남는다(ChatClient·ToolCallingAdvisor·`@Tool`). `okhttp`/`kotlin-stdlib` 은 Slack SDK 전이로 남는다.
+judge/assist 도 채팅 봇과 같은 `OpenAiResponsesChatModel` 로 옮겼다. advisor 의 OpenAI 호출은 이제 **전부 `POST /v1/responses` + `openAiRestClient`** 라 `tb_api_log` 에 남고(`SELECT … FROM tb_api_log WHERE url LIKE '%/v1/responses%'`), `spring-ai-starter-model-openai`·`spring-ai-openai`·공식 SDK(`openai-java-core`)·그 전이(Jackson 2 databind·kotlin-reflect·Boot restclient/webclient 스타터·Spring AI 자동구성)는 의존성에서 빠졌다. build.gradle 은 `spring-ai-client-chat` 만 남는다(ChatClient·ToolCallingAdvisor·`@Tool`). `okhttp`/`kotlin-stdlib` 은 Slack SDK 전이로 남는다. (2026-11-11: Claude 용 `anthropic-java-core` 가 Jackson 2 databind·kotlin-reflect 를 다시 들여온다 — 이 앱의 JSON 은 여전히 Jackson 3 이고 Hibernate 매퍼를 `jackson3` 으로 고정했다, §14.)
 
-- **구조화 출력**: `ResponsesChatOptions.textFormat` → 요청 `text.format = {type: json_schema, name: 응답 레코드 클래스명(AdviceResponse·LessonProposalResponse), strict: true, schema}`. 이름 규칙(`^[a-zA-Z0-9_-]{1,64}$`)·객체 스키마는 `ResponsesTextFormat` 생성 시 검증. 스키마 자체(`AdviceSchemaFactory`·`LessonSchemaFactory`, 모든 속성 required + additionalProperties=false + 후보 enum 주입)는 무변경.
+- **구조화 출력**: 공급자 중립 `LlmChatOptions.jsonSchema`(2026-11-11 — 이전 `ResponsesChatOptions.textFormat`) → 요청 `text.format = {type: json_schema, name: 응답 레코드 클래스명(AdviceResponse·LessonProposalResponse), strict: true, schema}`. 이름 규칙(`^[a-zA-Z0-9_-]{1,64}$`)·객체 스키마는 `ResponsesTextFormat` 생성 시 검증. 스키마 자체(`AdviceSchemaFactory`·`LessonSchemaFactory`, 모든 속성 required + additionalProperties=false + 후보 enum 주입)는 무변경.
 - **옵션 타입**: Spring AI `OpenAiChatOptions` 대신 자체 `ResponsesChatOptions`(코어 `DefaultToolCallingChatOptions` 상속 + reasoning.effort·tool_choice·parallel_tool_calls·text.format). `maxTokens` 가 `max_output_tokens`(yml 키 `*-max-completion-tokens` 는 env 호환을 위해 이름 유지). 도구가 없으면 `tools`·`tool_choice`·`parallel_tool_calls`·`include` 를 보내지 않는다(judge 의 큰 추론 블롭이 api_log 본문을 부풀리지 않게).
 - **ChatModel 3빈(judge/assist/chat) + HTTP 클라이언트 1빈** — `AdvisorAiConfig.JUDGE_MODEL/ASSIST_MODEL/CHAT_MODEL`. 이유: Spring AI 2.0.1 ChatClient 는 요청 옵션을 "**ChatModel 기본 옵션** + 요청 customizer" 로 만들고, `ChatClient.Builder.defaultOptions(...)` 는 그 customizer 일 뿐이라 요청의 `.options(...)` 가 **통째로 교체**한다. 이전 구조(ChatModel 1개 공유 + ChatClient defaultOptions 로 judge/assist 분리)에서는 `MarketJudgeClient` 가 responseFormat 을 `.options()` 로 넘길 때 assist 의 model·상한이 버려져 **교훈 제안(WEEKLY_REVIEW, assist 빈)도 judge 모델·judge 상한으로 나갔다**(증상: `tb_advisor_run.model` 이 judge). 기본 옵션을 역할별 모델에 두면 어떤 customizer 를 얹어도 base 가 산다. 회귀 방어: `ResponsesChatOptionsTest`(병합 계약)·`MarketJudgeClientTest`(가짜 HTTP 위 진짜 모델로 요청 캡처)·`AdvisorContextBootTest.WithApiKey`(컨텍스트에서 judge/assist 빈을 실제 호출해 model·max_output_tokens 대조).
-- **완료 신호**: `MarketJudgeClient` 는 JSON 파싱 전에 finishReason 을 본다 — `LENGTH`(max_output_tokens 절단) → "상한 확인" 예외, `INCOMPLETE`(content_filter 등, 사유는 응답 메타 `openai.responses.incompleteReason`) → 사유 포함 예외, `REFUSAL` → 거부 문구 포함 예외. 전부 잡 FAILED(부분 추천 금지). 채팅 경로는 같은 신호를 텍스트로 사용자에게 보인다.
+- **완료 신호**: `MarketJudgeClient` 는 JSON 파싱 전에 finishReason 을 본다 — `LENGTH`(max_output_tokens 절단) → "상한 확인" 예외, `INCOMPLETE`(content_filter 등, 사유는 응답 메타 `llm.incompleteReason` — 2026-11-11 이전 `openai.responses.incompleteReason`) → 사유 포함 예외, `REFUSAL` → 거부 문구 포함 예외. 전부 잡 FAILED(부분 추천 금지). 채팅 경로는 같은 신호를 텍스트로 사용자에게 보인다.
 - **배포 후 확인**: 첫 ADVISE 뒤 `tb_api_log` 에 `/v1/responses` 행(judge 1건, 뉴스 on 이면 섀도 포함 2~3건), `tb_advisor_advice.model` = judge 모델. 첫 WEEKLY_REVIEW 뒤 `tb_advisor_run.model` 이 **assist 모델**로 찍히는지(REPRO 가 켜져 있으면 마지막 호출인 judge 로 덮이므로 `tb_advisor_prompt_input.options_json.model` 로 본다). `AdvisorOpenAiManualTest` 로 strict 중첩 스키마 수용 실측(§10).
 
 ## 13. 관리자 화면 (blog-nextjs `/admin/quant/advisor`, 2026-09-20)
@@ -864,3 +874,78 @@ judge/assist 도 채팅 봇과 같은 `OpenAiResponsesChatModel` 로 옮겼다. 
   - `GET /api/advisor/admin/runs?jobType=&status=&from=&to=&limit=` — `status`(`AdvisorStatus`)·기간(`startedAt` 기준 KST 날짜 양끝 포함) 선택 필터. stock 과 동형(`Specification`, null 조건은 Predicate 미생성).
   - **note-v1(2026-09-21, additive)**: `GET /api/advisor/admin/notes?from=&to=&status=&limit=` — 12:00 픽 노트(기준일 양끝 포함, `PickNoteStatus` OPEN|CONFIRMED|REFUTED, 최신 점검 순). `GET /advices/{id}` 응답에 `notes`(그 판단의 노트 전부, 점검 시각·티커 순)와 헤더 `memoryJson`(프롬프트에 실린 메모리 요약, 없으면 null) 이 추가됐다. 화면(노트 탭)은 후속.
 - 검증: `AdvisorAdminGateIntegrationTest`(advisor.enabled=true + Redis Testcontainers, 게이트는 목으로 두고 HTTP 계약·펼침·runs 필터를 본다 — H2 에 advisor JDBC 테이블이 없어 실제 판정은 `AdvisorGateServiceTest` 가 담당).
+
+## 14. Claude 1순위 + OpenAI 폴백 (2026-11-11)
+
+LLM 호출(judge·assist·채팅 봇)은 **Claude(Messages API)를 먼저** 쓰고, Claude 를 쓸 수 없을 때 **OpenAI(Responses API)로 폴백**한다. 호출부(`MarketJudgeClient`·`AdvisorChatClient`)는 공급자를 모른다 — ChatClient 가 역할별 `FallbackChatModel` 위에 있다(`AdvisorAiConfig.JUDGE/ASSIST/CHAT_FALLBACK_MODEL`).
+
+```
+MarketJudgeClient / AdvisorChatClient → ChatClient → FallbackChatModel(역할별)
+    ├ 1순위 ClaudeMessagesChatModel → ClaudeMessagesClient(재시도·분류) → Anthropic SDK → RestClientHttpClient → claudeApiRestClient → tb_api_log
+    ├ 폴백  OpenAiResponsesChatModel → OpenAiResponsesClient → openAiRestClient → tb_api_log
+    └ LlmProviderGate(Claude 차단 상태, 세 역할 공유 — 소진·키·장애는 계정 단위, 모델 없음 404 는 모델 단위)
+```
+
+- **공식 SDK + 자체 전송**: 요청·응답 타입과 예외는 `anthropic-java-core` 를 쓰고 HTTP 만 `RestClientHttpClient` 가 `claudeApiRestClient` 로 보낸다(OkHttp 모듈 없음). 그래서 Claude 도 **호출 1건 = `tb_api_log` 1행**이고 재시도도 각각 1행이다. `x-api-key` 는 `ApiKeyHeaderInterceptor`(OpenAI Bearer 와 같은 구현)가 로그 인터셉터 뒤에서 헤더 사본에만 넣어 `request_header` 에 남지 않는다(OpenAI 와 같은 방식). SDK 재시도는 끄고(`maxRetries(0)`) `ClaudeMessagesClient` 가 한다.
+- **`claudeRestClient` 와는 별개다**: 그쪽은 구독 OAuth 토큰 ping(`ClaudeCodeRefreshService`) 전용이고 이 경로와 인증·과금이 다르다. 이 경로는 Console API 키(종량제)다.
+- **채팅은 Claude 클라이언트가 따로다**: judge·assist 는 `claudeMessagesClient`(`claudeApiRestClient`, 300초·재시도 2회), 채팅 봇은 `chatClaudeMessagesClient`(`claudeChatApiRestClient`, 90초·재시도 1회 이하). 채팅은 질문을 받을 때 도구 마감(180초)을 고정하므로, 판단용 타임아웃을 같이 쓰면 Claude 가 타임아웃으로 끝났을 때 마감이 이미 지나 OpenAI 폴백의 도구 호출이 전부 마감 오류가 된다.
+
+### 14.1 언제 폴백하는가
+
+| Claude 의 실패 | 분류 | 재시도 | 차단(기본) | 알림 |
+|---|---|---|---|---|
+| `error.type=billing_error`(상태 무관) · 402 · 400 `You have reached your specified … usage limits` · 429 + `details.error_code=enforced_spend_limit_reached` | EXHAUSTED(소진) | 없음 | 60분 | #hvy-notify |
+| 401 · 403(키·권한) | MISCONFIGURED | 없음 | 30분 | **#hvy-error + 멘션** |
+| 404(모델 ID 없음) | MISCONFIGURED | 없음 | 30분 — **그 모델만** | **#hvy-error + 멘션**(모델 ID 표기, 모델별 하루 1회) |
+| 그 외 429 · 408 · 409 · 5xx · 529 | UNAVAILABLE | `max-retries` 회(Retry-After > 30초·30초 넘게 걸린 실패는 즉시 포기) | 5분 | #hvy-notify |
+| 타임아웃 · 연결 실패 · 응답 해석 실패 | UNAVAILABLE | 없음 | 5분 | #hvy-notify |
+| 거부(`stop_reason: refusal`) | — | — | 없음 | 없음(warn 로그) |
+| 그 외 400 · 413 · 422, 출력 절단(`max_tokens`), SDK 가 던지지 않은 로컬 예외(직렬화·전송 어댑터 버그) | **폴백 안 함** — 잡 FAILED | — | — | 기존 실패 알림 |
+
+- 요청 오류·출력 절단·로컬 예외를 폴백하지 않는 이유: 다른 공급자가 대신 답하면 요청 조립 버그·상한 설정 문제가 가려진다. 로컬 예외는 Claude 의 상태와 무관해 일시 장애로 보면 "Claude 장애" 알림까지 잘못 나간다. 타임아웃·연결 실패는 전송 계층이 SDK 예외로 바꿔 던지므로 여기에 들지 않는다.
+- **차단**(`LlmProviderGate`, 인메모리): 차단 중에는 Claude 를 부르지 않고 곧바로 OpenAI 로 간다. 시간이 지나면 다음 호출이 Claude 를 다시 시도하고 성공하면 풀린다. 알림은 **분류별 KST 하루 1회**이고, Notify 빈이 없거나 전송이 예외로 끝나 전달되지 않은 날은 다음 실패 때 다시 보낸다(Slack 호출의 예외와 `ok=false` 응답은 hvy-common `SlackClient` 에서 전송 성공으로 보여 재시도되지 않는다 — §14.4). 재시작하면 상태가 사라져 프로브 1회·알림 1통이 중복될 수 있다(단일 인스턴스 전제).
+- **차단 범위**: 소진·키/권한 오류·일시 장애는 계정의 문제라 세 역할(judge·assist·chat)을 함께 차단한다. 예외가 둘이다. ① 모델 없음(404)은 그 모델 ID 를 쓰는 역할만 차단한다 — 채팅 모델 ID 하나가 틀려도 판단은 Claude 로 계속 간다(기본값처럼 세 역할이 같은 모델이면 결과는 같다). ② **채팅의 응답 없음**(타임아웃·연결 실패·응답 해석 실패)은 채팅만 차단한다 — 채팅은 90초에 끊으므로 "90초 안에 답이 없었다" 가 300초까지 기다리는 판단·보조를 막으면 안 된다. 알림도 `범위: 채팅 봇 호출만` 으로 따로 하루 1회 나가며, 잦으면 `chat-timeout-seconds` 를 올릴 신호다. 판단·보조의 타임아웃(300초)과 채팅이 받은 429·5xx 는 계정 단위다.
+- **늦은 성공은 차단을 풀지 않는다**: 성공은 "그 호출이 떠난 뒤 실패가 기록되지 않았을 때" 에만 차단을 지운다. 판단 호출(수 분)이 도는 동안 채팅이 소진을 겪어 60분 차단이 걸렸다면, 먼저 떠난 판단 호출의 성공이 그 차단을 지우지 않는다.
+- **채팅 한 턴은 왕복하지 않는다**: 도구 루프 도중 OpenAI 로 넘어가면 그 턴은 끝까지 OpenAI 가 맡는다. OpenAI 는 Claude 가 부른 도구 호출(`toolu_…` id)과 결과를 이어받고 도구를 다시 실행하지 않는다.
+- **준비 여부는 호출마다 읽는다**: `ANTHROPIC_API_KEY` 가 비었거나 `advisor.claude.enabled=false` 면 OpenAI 로만, OpenAI 키가 비면 Claude 로만 부른다(그때는 폴백 없음). 둘 다 없으면 잡 트리거가 거부된다.
+- **최악 소요**: Claude 1회 호출 최악 약 7분(짧은 실패의 재시도 2회 + 마지막 시도의 타임아웃 300초) + OpenAI 재시도 소진 약 9.5분 = 약 16.5분. 그래서 INTRADAY 락 창을 20분, MORNING-ADVISE 를 25분으로 올렸다.
+- **채팅의 최악 소요**: Claude 라운드 1회가 보통 최악 90초(타임아웃은 재시도하지 않는다), 드물게 150초(30초 이하의 5xx + Retry-After 30초 + 타임아웃 90초). 90초 경로는 도구 마감 180초까지 90초가 남고, 150초 경로는 30초뿐이라 이어받은 OpenAI 가 도구를 한두 번 부를 여유밖에 없다. `chat-timeout-seconds + 60` 이 `answer-timeout-seconds` 를 넘거나 0 이면 기동 로그에 WARN 이 남는다. 마감은 라운드가 아니라 질문 단위라 여러 라운드를 돈 뒤의 타임아웃은 여전히 마감을 넘길 수 있다(OpenAI 만 쓰던 때와 같은 한계).
+
+### 14.2 기록 — 누가 답했는가
+
+- `tb_advisor_advice.model`·`tb_advisor_run.model`·`tb_advisor_chat.model`: 응답의 모델 ID(`claude-…` / `gpt-…`).
+- `tb_advisor_prompt_input.options_json`: `provider`(`CLAUDE`/`OPENAI`), 폴백이면 `fallbackReason`(`EXHAUSTED`·`UNAVAILABLE`·`MISCONFIGURED`·`REFUSAL`·`BLOCKED:<분류>`). 채팅은 로그 `advisor chat LLM: provider=…, fallback=…`.
+- 비용: 호출마다 그 호출의 공급자 단가로 누적한다(`advisor.cost.*` = OpenAI, `advisor.claude.cost.*` = Claude). 채팅 한 턴에 공급자가 섞이면 마지막 공급자 단가로 계산하는 근사다.
+- **거부로 넘어간 호출의 토큰**: 거부는 HTTP 200 이라 Claude 도 과금한다. 그 응답은 버리지만 usage 는 OpenAI 응답의 usage 에 더해 기록한다 — 판단·보조는 입력·출력·추론·캐시 모두, 채팅은 입력·출력만(채팅의 추론·캐시 토큰은 OpenAI 라운드 누적값을 읽으므로 거부된 Claude 분이 빠진다). 한 행에 두 공급자의 토큰이 합쳐지고 비용은 OpenAI 단가로 계산되는 근사다 — `fallbackReason=REFUSAL` 인 행이 그렇다. 예외로 넘어간 호출(소진·장애)은 Claude 응답이 없어 더할 것이 없다.
+- **측정 보호**: LLM 섀도(LLM_NOMEM·LLM_NONEWS)가 LIVE 와 다른 공급자로 답하면 저장하지 않는다(메타 `shadowProviderMismatch.*`) — "한 요인만 다르다" 전제. 주간 재현성(REPRO)의 Jaccard 는 재실행끼리만 짝지어 계산하므로, **재실행끼리** `공급자:모델` 이 갈렸을 때만 "재현성 낮음" 경고를 보류한다(메타 `reproModels`·`reproComparable=false`). 재실행이 모두 같은 주체면 원 LIVE 판단과 주체가 달라도 판정하고, 보고에 "참고: 재실행 판단 주체가 원 판단과 다름" 줄과 메타 `reproDiffersFromLive=true` 를 남기며 "재현성 낮음" 경고 문구에도 두 주체를 적는다.
+
+### 14.3 배포 절차
+
+1. Claude Console 에서 API 키 발급, 크레딧·지출 한도 확인.
+2. 운영 env(`docker-compose/blog/back/prod.env`)에 `ANTHROPIC_API_KEY`. 모델·effort 를 바꾸려면 `ADVISOR_CLAUDE_JUDGE_MODEL`·`ADVISOR_CLAUDE_ASSIST_MODEL`·`ADVISOR_CLAUDE_CHAT_MODEL`·`ADVISOR_CLAUDE_*_EFFORT`. DDL 없음.
+3. (권장) 배포 전 로컬에서 `AdvisorClaudeManualTest` 로 스키마 수용·지연·도구 루프를 실측한다 — 판단 1건이 150초를 넘으면 effort 를 낮추거나 `timeout-seconds` 를 올린다.
+4. 컨테이너 재생성 → 기동 로그 `advisor 설정 확인: claude=1순위(…), openai=폴백(…)`.
+5. 첫 판단 뒤 확인:
+   ```sql
+   -- Claude 호출 행(구독 ping 은 ?beta=true 가 붙는다). key_leaked 는 항상 false 여야 한다
+   SELECT created_at, response_status, process_time, length(response_body) res, trace_id,
+          position('x-api-key' in lower(request_header)) > 0 AS key_leaked
+   FROM tb_api_log WHERE request_uri LIKE '%/v1/messages' ORDER BY created_at DESC LIMIT 20;
+   -- 누가 답했는가
+   SELECT base_date, advice_kind, variant, model FROM tb_advisor_advice ORDER BY advice_id DESC LIMIT 10;
+   SELECT created_at, options_json->>'provider' provider, options_json->>'fallbackReason' fallback, options_json->>'model' model
+   FROM tb_advisor_prompt_input ORDER BY created_at DESC LIMIT 10;
+   ```
+6. **롤백**: `ADVISOR_CLAUDE_ENABLED=false` 로 재생성(코드 배포 없이 OpenAI 로만).
+
+### 14.4 알려진 한계
+
+- **판단 주체가 바뀐다**: 프롬프트(`advice-v11` 등)는 GPT 기준으로 다듬어졌다. 켠 날부터 LIVE 판단이 Claude 산출이라 성과 시계열에 단절이 생긴다 — KPI·교훈을 볼 때 `model` 로 구간을 나눈다.
+- 채팅 도구 루프가 여러 라운드면 Claude 의 `reasoning_tokens` 는 0 으로 기록된다(캐시 토큰은 합산된다). 단발 호출(judge·assist)은 thinking 토큰이 기록된다.
+- 비스트리밍이다. Claude 응답이 300초를 넘으면 타임아웃 → 폴백(그 호출의 Claude 토큰은 과금된다). 잦으면 effort·max-tokens 를 낮추거나 스트리밍 전환을 검토한다.
+- 모델 단위 차단은 404(모델 없음)뿐이다. 특정 모델에만 걸린 권한 오류(403)나 모델별 rate limit(429)은 계정 단위로 차단돼 세 역할 모두 OpenAI 로 간다.
+- **차단 알림의 재전송은 반쪽이다**: 게이트는 알림이 전달되지 않으면 다음 실패 때 다시 보내지만, 알 수 있는 실패는 Notify 빈 없음과 전송의 런타임 예외뿐이다. hvy-common `SlackClient` 는 Slack 호출의 예외(HTTP 오류·네트워크)를 로그만 남기고 삼키고(Loki `Slack 메시지 전송 실패`), `ok=false` 응답(`channel_not_found`·`invalid_auth` 등, HTTP 200)은 확인하지 않아 로그도 없다(§1.11 의 invalid_blocks 와 같은 원인). 둘 다 `AdvisorNotifier` 에 성공으로 보여 그날 재전송되지 않는다 — 고치려면 hvy-common 의 `Notify.sendMessage` 가 전송 결과를 알려 줘야 한다(라이브러리 변경·배포 필요, 미착수).
+- 400 은 문구 두 가지와 `error.type=billing_error` 만 소진으로 본다. 그 밖의 형태로 오는 소진성 400 은 요청 오류로 분류돼 폴백하지 않고 잡이 FAILED 가 된다 — 새 문구가 보이면 `ClaudeErrors` 에 추가한다.
+- Anthropic 서버 측 `fallbacks`(거부 시 다른 Claude 모델로)는 쓰지 않는다 — 거부는 OpenAI 폴백이 맡는다.
+- Jackson 2 가 클래스패스에 생겼다. `spring.jpa.properties.hibernate.type.json_format_mapper: jackson3` 고정을 지우면 Hibernate 가 JSON 컬럼(`MasterCode`·`AdvisorRun`·`StockCollectRun`) 매퍼를 Jackson 2 로 바꾼다(`JsonFormatMapperGuardTest` 가 지킨다).
+

@@ -26,6 +26,10 @@ spring:
   sql:
     init:
       platform: h2
+  ai:
+    anthropic:
+      # 테스트는 실제 Claude 를 부르지 않는다 — 개발자 셸에 ANTHROPIC_API_KEY 가 있어도 빈 값으로 덮는다(Claude 경로 테스트만 인라인 프로퍼티로 키를 준다)
+      api-key: ""
 
 # jwt
 jwt.secret: ${JWT_SECRET:jwt_secret_key!!@@longlongKey1234}

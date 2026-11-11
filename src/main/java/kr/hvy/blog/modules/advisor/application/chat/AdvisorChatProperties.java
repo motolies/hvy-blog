@@ -31,6 +31,9 @@ public class AdvisorChatProperties {
   static final String SLACK_BOT_TOKEN_PROPERTY = "slack.token";
 
   private final Environment environment;
+  /** 채팅용 Claude 클라이언트가 타임아웃 전에 쓸 수 있는 재시도 소요의 상한(초) — 재시도되는 시도 30초 이하 + Retry-After 30초 이하(ClaudeMessagesClient) */
+  static final int CLAUDE_RETRY_OVERHEAD_SECONDS = 60;
+
   private final AdvisorProperties advisor;
 
   /** 채팅 봇 on/off. advisor.enabled 가 false 면 이 값과 무관하게 빈이 등록되지 않는다 */
@@ -149,6 +152,23 @@ public class AdvisorChatProperties {
   }
 
   /**
+   * Claude 채팅 타임아웃이 도구 마감에 비해 길면 WARN 을 남긴다(Claude 를 쓰는 환경에서만). 기준은 재시도 1회 경로의 최악 소요다 —
+   * 재시도되는 시도(30초 이하) + Retry-After(30초 이하) + 타임아웃. 이 합이 마감을 넘으면 Claude 가 실패로 끝났을 때 이어받는 OpenAI 폴백의
+   * 도구 호출이 전부 마감 오류가 된다. 0 은 타임아웃 없음(무한 대기)이라 마찬가지로 알린다(음수는 RestClient 빈 생성이 실패해 기동되지 않는다).
+   */
+  private void warnIfClaudeChatTimeoutTooLong() {
+    if (!advisor.getClaude().isEnabled()) {
+      return;
+    }
+    int claudeChatTimeout = advisor.getClaude().getChatTimeoutSeconds();
+    if (claudeChatTimeout <= 0 || claudeChatTimeout + CLAUDE_RETRY_OVERHEAD_SECONDS > answerTimeoutSeconds) {
+      log.warn("advisor.claude.chat-timeout-seconds({}초)가 advisor.chat.answer-timeout-seconds({}초)에 비해 깁니다 — 재시도 경로의 최악 소요"
+              + "(타임아웃 + {}초)가 도구 마감을 넘어, Claude 가 실패로 끝나면 OpenAI 폴백의 도구 호출이 마감 오류가 됩니다(0 은 무한 대기)",
+          claudeChatTimeout, answerTimeoutSeconds, CLAUDE_RETRY_OVERHEAD_SECONDS);
+    }
+  }
+
+  /**
    * 허용 사용자 목록 정규화(trim·빈 항목 제거) 후 상태를 남긴다. 어떤 경우에도 예외를 던지지 않는다.
    */
   @PostConstruct
@@ -173,6 +193,7 @@ public class AdvisorChatProperties {
       log.warn("advisor chat 설정 누락 {} — 기동은 계속하되 Socket Mode 연결을 열지 않습니다", missing);
       return;
     }
+    warnIfClaudeChatTimeoutTooLong();
     log.info("advisor chat 활성: channel={}, allowedUsers={}명, model={}, reasoning={}, maxOutput={}, budget={}tok/일, tools≤{}회, history≤{}건/{}자",
         channelId, allowedUserIds.size(), StringUtils.defaultIfBlank(model, advisor.getModel().getAssist() + "(assist)"),
         StringUtils.defaultIfBlank(reasoningEffortOrNull(), "(서버 기본)"), maxCompletionTokens,

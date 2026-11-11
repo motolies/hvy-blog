@@ -357,7 +357,7 @@ public class IntradayCheckJob implements AdvisorJob {
     String schema = NoteSchemaFactory.schemaJson(tickers, sectors);
     Map<String, Object> payload = reflectPayload(advice, targets, quotes, excessBasis, now);
     MarketJudgeClient.CallResult<PickNoteResponse> r = assist.call(prompts.noteSystem(), AdvisorJson.write(payload), schema, PickNoteResponse.class);
-    execution.recordLlmUsage(r.model(), PromptResources.NOTE_VERSION, r.usage(), r.reasoningTokens(), r.cachedTokens());
+    execution.recordLlmUsage(r.provider(), r.model(), PromptResources.NOTE_VERSION, r.usage(), r.reasoningTokens(), r.cachedTokens());
     Map<String, Reflection> result = new LinkedHashMap<>();
     if (r.value() != null && r.value().notes() != null) {
       for (PickNoteResponse.Note n : r.value().notes()) {

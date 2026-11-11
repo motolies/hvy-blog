@@ -17,7 +17,7 @@ import kr.hvy.blog.modules.advisor.application.service.AdvisorJson;
 import kr.hvy.blog.modules.advisor.client.openai.dto.FunctionCallOutput;
 import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesRequest;
 import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesResponse;
-import kr.hvy.blog.modules.advisor.client.openai.dto.ResponsesUsage;
+import kr.hvy.blog.modules.advisor.client.llm.LlmTokenUsage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -130,7 +130,7 @@ class OpenAiResponsesChatClientLoopTest {
     assertThat(usage.getPromptTokens()).isEqualTo(250);
     assertThat(usage.getCompletionTokens()).isEqualTo(40);
     assertThat(usage.getCacheReadInputTokens()).as("Spring AI 가 합산해 주는 캐시 토큰").isEqualTo(50L);
-    assertThat(OpenAiResponsesChatModel.cumulativeUsage(response)).contains(new ResponsesUsage(25, 50));
+    assertThat(OpenAiResponsesChatModel.cumulativeUsage(response)).contains(new LlmTokenUsage(25, 50));
   }
 
   @Test

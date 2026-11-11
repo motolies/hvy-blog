@@ -366,10 +366,10 @@ advisor:
     nonews-weeks: 8               # 뉴스가 실린 첫 판단부터 뉴스 없는 LLM 호출(LLM_NONEWS) 병행 기간 — 뉴스 가치 = LIVE − NONEWS
   model:
     judge: ${ADVISOR_JUDGE_MODEL:gpt-5.6-sol}            # 판단용 상위 모델 ID (배포 시 OpenAI 모델 목록에서 확정)
-    judge-max-completion-tokens: ${ADVISOR_JUDGE_MAX_TOKEN:20000}   # Responses max_output_tokens(추론 토큰 포함). 잘리면 잡 FAILED("출력 토큰 상한에서 잘렸습니다")
+    judge-max-completion-tokens: ${ADVISOR_JUDGE_MAX_TOKEN:30000}   # Responses max_output_tokens(추론 토큰 포함). 잘리면 잡 FAILED("출력 토큰 상한에서 잘렸습니다")
     # judge-temperature: 0.0                  # 추론 모델은 temperature 를 받지 않으므로 기본 미설정
-    assist: ${ADVISOR_ASSIST_MODEL:gpt-5.6-terra}          # 채점 요약·교훈용 저가 모델 ID
-    assist-max-completion-tokens: ${ADVISOR_ASSIST_MAX_TOKEN:10000}  # Responses max_output_tokens
+    assist: ${ADVISOR_ASSIST_MODEL:gpt-5.6-sol}          # 채점 요약·교훈용 저가 모델 ID
+    assist-max-completion-tokens: ${ADVISOR_ASSIST_MAX_TOKEN:30000}  # Responses max_output_tokens
     # max-retries: 3 / timeout-seconds: 120   # OpenAiResponsesClient 재시도(429·408·409·5xx·네트워크) / openAiRestClient 응답 타임아웃
   cost:
     input-per-1m-usd: 0           # 0 이면 비용 미계산. 모델 단가로 채우면 run.cost_usd 에 기록
@@ -380,14 +380,14 @@ advisor:
   claude:
     enabled: ${ADVISOR_CLAUDE_ENABLED:true}                       # false = OpenAI 만 (롤백 스위치)
     judge: ${ADVISOR_CLAUDE_JUDGE_MODEL:claude-opus-5-5}          # 판단용 모델 ID
-    judge-max-tokens: ${ADVISOR_CLAUDE_JUDGE_MAX_TOKEN:16000}     # max_tokens(thinking 포함). 비스트리밍이라 16000 이하
+    judge-max-tokens: ${ADVISOR_CLAUDE_JUDGE_MAX_TOKEN:50000}     # max_tokens(thinking 포함). 비스트리밍이라 16000 이하
     judge-effort: ${ADVISOR_CLAUDE_JUDGE_EFFORT:high}             # output_config.effort (low/medium/high/xhigh/max). 공백이면 미전송 = 서버 기본
     assist: ${ADVISOR_CLAUDE_ASSIST_MODEL:claude-opus-5-5}        # 교훈·회고·재현성용 모델 ID
-    assist-max-tokens: ${ADVISOR_CLAUDE_ASSIST_MAX_TOKEN:8000}
-    assist-effort: ${ADVISOR_CLAUDE_ASSIST_EFFORT:medium}
+    assist-max-tokens: ${ADVISOR_CLAUDE_ASSIST_MAX_TOKEN:50000}
+    assist-effort: ${ADVISOR_CLAUDE_ASSIST_EFFORT:high}
     chat: ${ADVISOR_CLAUDE_CHAT_MODEL:claude-opus-5-5}            # Slack 채팅 봇 모델 ID. 비면 assist
-    chat-max-tokens: ${ADVISOR_CLAUDE_CHAT_MAX_TOKEN:8000}
-    chat-effort: ${ADVISOR_CLAUDE_CHAT_EFFORT:medium}
+    chat-max-tokens: ${ADVISOR_CLAUDE_CHAT_MAX_TOKEN:50000}
+    chat-effort: ${ADVISOR_CLAUDE_CHAT_EFFORT:high}
     max-retries: 2                # 일시 장애(429·408·409·5xx·529)만 재시도. Retry-After 30초 초과·타임아웃·연결 실패는 바로 폴백
     timeout-seconds: 300          # claudeApiRestClient 응답 타임아웃
     chat-timeout-seconds: 90      # Slack 채팅 봇 전용 응답 타임아웃(claudeChatApiRestClient). advisor.chat.answer-timeout-seconds 보다 충분히 짧게 — 타임아웃 뒤 OpenAI 폴백이 도구를 부를 시간
@@ -477,7 +477,7 @@ advisor:
     tool-row-limit: 50
     tool-timeout-seconds: 5                            # 도구 SQL statement_timeout
     answer-timeout-seconds: 180                        # 질문 1건 소프트 마감
-    daily-token-budget: 300000                         # 입력+출력, KST 자정 기준. 0 이면 무제한 (P3)
+    daily-token-budget: 3000000                        # 입력+출력, KST 자정 기준. 0 이면 무제한 (P3)
     per-user-cooldown-seconds: 20                      # (P3)
     max-blocks: 20                                     # 답글 Block Kit 블록 상한
     disconnect-alert-cooldown-minutes: 30              # WebSocket close/error 경보(#hvy-notify) 최소 간격
